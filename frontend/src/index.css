@@ -1,0 +1,141 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------
+   🌍 Base (global styles)
+---------------------------- */
+@layer base {
+  html {
+    @apply scroll-smooth;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-700 antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1 {
+    @apply text-4xl md:text-5xl font-semibold tracking-tight text-slate-900;
+  }
+
+  h2 {
+    @apply text-2xl font-semibold text-slate-900;
+  }
+
+  h3 {
+    @apply text-lg font-semibold text-slate-800;
+  }
+
+  p {
+    @apply leading-relaxed;
+  }
+
+  code {
+    @apply font-mono text-sm bg-slate-100 px-2 py-1 rounded;
+  }
+}
+
+/* ---------------------------
+   🧱 Layout system
+---------------------------- */
+@layer components {
+  .container-main {
+    @apply max-w-6xl mx-auto px-6 py-8;
+  }
+
+  .card {
+    @apply bg-white border border-slate-200 rounded-2xl shadow-sm p-6;
+  }
+
+  .card-hover {
+    @apply transition hover:shadow-md hover:-translate-y-[1px];
+  }
+
+  .section-title {
+    @apply text-xl font-semibold text-slate-900 mb-4;
+  }
+}
+
+/* ---------------------------
+   🔘 Buttons
+---------------------------- */
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-medium transition;
+  }
+
+  .btn-primary {
+    @apply btn bg-violet-600 text-white hover:bg-violet-700 shadow-sm;
+  }
+
+  .btn-secondary {
+    @apply btn bg-white border border-slate-300 hover:bg-slate-100;
+  }
+
+  .btn-danger {
+    @apply btn bg-red-500 text-white hover:bg-red-600;
+  }
+}
+
+/* ---------------------------
+   🧾 Form styling (important for your app)
+---------------------------- */
+@layer components {
+  .input {
+    @apply w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm 
+           focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent;
+  }
+
+  .label {
+    @apply text-sm font-medium text-slate-700 mb-1 block;
+  }
+
+  .textarea {
+    @apply input min-h-[100px];
+  }
+}
+
+/* ---------------------------
+   📊 Table styling (for medico-legal UI)
+---------------------------- */
+@layer components {
+  .table {
+    @apply w-full border-collapse text-sm;
+  }
+
+  .table th {
+    @apply text-left font-semibold text-slate-600 border-b border-slate-200 pb-2;
+  }
+
+  .table td {
+    @apply py-3 border-b border-slate-100;
+  }
+
+  .table tr:hover {
+    @apply bg-slate-50;
+  }
+}
+
+/* ---------------------------
+   🌙 Dark mode support
+---------------------------- */
+@layer base {
+  @media (prefers-color-scheme: dark) {
+    body {
+      @apply bg-slate-900 text-slate-300;
+    }
+
+    .card {
+      @apply bg-slate-800 border-slate-700;
+    }
+
+    h1, h2, h3 {
+      @apply text-white;
+    }
+
+    .input {
+      @apply bg-slate-800 border-slate-600 text-white;
+    }
+  }
+}

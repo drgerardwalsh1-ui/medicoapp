@@ -1,0 +1,50 @@
+{
+  "hash": "1eef1db6",
+  "configHash": "96c49181",
+  "lockfileHash": "c76db45a",
+  "browserHash": "3004a48c",
+  "optimized": {
+    "@tauri-apps/api/core": {
+      "src": "../../node_modules/@tauri-apps/api/core.js",
+      "file": "@tauri-apps_api_core.js",
+      "fileHash": "d71e2e6a",
+      "needsInterop": false
+    },
+    "docx": {
+      "src": "../../node_modules/docx/dist/index.mjs",
+      "file": "docx.js",
+      "fileHash": "e8e2d421",
+      "needsInterop": false
+    },
+    "file-saver": {
+      "src": "../../node_modules/file-saver/dist/FileSaver.min.js",
+      "file": "file-saver.js",
+      "fileHash": "80b83428",
+      "needsInterop": true
+    },
+    "react-dom/client": {
+      "src": "../../node_modules/react-dom/client.js",
+      "file": "react-dom_client.js",
+      "fileHash": "205a4f5a",
+      "needsInterop": true
+    },
+    "react": {
+      "src": "../../node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "3f18c502",
+      "needsInterop": true
+    },
+    "react/jsx-dev-runtime": {
+      "src": "../../node_modules/react/jsx-dev-runtime.js",
+      "file": "react_jsx-dev-runtime.js",
+      "fileHash": "1b9f9585",
+      "needsInterop": true
+    }
+  },
+  "chunks": {
+    "chunk-CFx7f7Oh": {
+      "file": "chunk-CFx7f7Oh.js",
+      "isDynamicEntry": false
+    }
+  }
+}

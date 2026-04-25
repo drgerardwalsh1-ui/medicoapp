@@ -1,0 +1,25 @@
+# Node
+node_modules/
+dist/
+build/
+
+# Rust / Tauri
+target/
+**/*.rs.bk
+
+# SQLite (VERY IMPORTANT for your app)
+*.db
+*.db-shm
+*.db-wal
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+
+# Env
+.env
+
+# Logs
+*.log
