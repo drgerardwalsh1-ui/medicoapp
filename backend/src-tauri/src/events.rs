@@ -28,6 +28,7 @@ pub enum EventType {
     ClientCreated,
     DemographicsUpdated,
     DocumentUploaded,
+    ClientRestoredFromVersion,
 }
 
 impl EventType {
@@ -36,6 +37,7 @@ impl EventType {
             EventType::ClientCreated => "client_created",
             EventType::DemographicsUpdated => "demographics_updated",
             EventType::DocumentUploaded => "document_uploaded",
+            EventType::ClientRestoredFromVersion => "client_restored_from_version",
         }
     }
 }
@@ -55,6 +57,16 @@ pub struct DemographicsUpdatedP {
     pub demographics: serde_json::Value,
 }
 
+/// Snapshot replay payload (Step 6 — Version History). Records that a
+/// historical snapshot at `from_version` was promoted forward as a brand
+/// new event. Past events are never modified — this is purely additive.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientRestoredFromVersionP {
+    pub from_version: u64,
+    pub name: String,
+    pub demographics: serde_json::Value,
+}
+
 /// Document upload payload — Step 3a.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocumentUploadedP {
@@ -71,6 +83,7 @@ pub enum EventPayload {
     ClientCreated(ClientCreatedP),
     DemographicsUpdated(DemographicsUpdatedP),
     DocumentUploaded(DocumentUploadedP),
+    ClientRestoredFromVersion(ClientRestoredFromVersionP),
 }
 
 impl EventPayload {
@@ -79,6 +92,7 @@ impl EventPayload {
             EventPayload::ClientCreated(_) => EventType::ClientCreated,
             EventPayload::DemographicsUpdated(_) => EventType::DemographicsUpdated,
             EventPayload::DocumentUploaded(_) => EventType::DocumentUploaded,
+            EventPayload::ClientRestoredFromVersion(_) => EventType::ClientRestoredFromVersion,
         }
     }
 }

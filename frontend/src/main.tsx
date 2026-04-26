@@ -1,171 +1,236 @@
-import "./index.css"
-import { useState, useEffect } from "react";
+import "./index.css";
+import { useState, useEffect, useRef } from "react";
 import ReactDOM from "react-dom/client";
 import Home from "./pages/Home";
 import ClientHome from "./pages/ClientHome";
 import App from "./App";
-import { BASE_TEST_CLIENTS } from "./data/testClients";
+import CalendarView from "./calendar/CalendarView";
 import { TauriAPI, isTauri, type ClientViewModel } from "./api/tauriApi";
+import AppLayout from "./components/AppLayout";
+import type { TopBarProps } from "./components/TopBar";
+import {
+  buildClientName,
+  mergeBlob,
+  type Appointment,
+} from "./types/client";
 
-type Client = any;
+type Client = Record<string, unknown>;
+type View = "home" | "client" | "app" | "create" | "calendar" | "finance";
 
-// Convert a backend `ClientViewModel` (whose `demographics` holds the full
-// nested blob `{demographics, referrer, appointment}`) into the in-memory
-// client shape that Home + ClientHome already consume. This is the single
-// adapter — every other read in Live mode goes through it.
+// Adapt a ClientViewModel from the projection into the in-memory client shape.
 function viewToClient(v: ClientViewModel): Client {
-  const blob: any = v.demographics ?? {};
-  const demographics =
-    (blob && typeof blob === "object" && (blob as any).demographics) || {};
-  const referrer =
-    (blob && typeof blob === "object" && (blob as any).referrer) || {};
-  const appointment =
-    (blob && typeof blob === "object" && (blob as any).appointment) || {};
+  const blob = mergeBlob(v.demographics);
   return {
     id: v.id,
     name:
       v.name ||
-      `${(demographics.forename || "").toString().trim()} ${(demographics.surname || "").toString().trim()}`.trim() ||
+      buildClientName(blob.demographics) ||
       "Unnamed Client",
-    demographics,
-    referrer,
-    appointment,
+    ...blob,
     documents: v.documents ?? [],
     report: {},
   };
 }
 
 function Root() {
-  const [mode, setMode] = useState<"test" | "live">("test");
-  const [clients, setClients] = useState<Client[]>(
-    JSON.parse(JSON.stringify(BASE_TEST_CLIENTS))
-  );
-
+  const [clients, setClients] = useState<Client[]>([]);
   const [activeClient, setActiveClient] = useState<Client | null>(null);
-  const [view, setView] = useState<"home" | "client" | "app" | "create">("home");
+  const [view, setView] = useState<View>("home");
 
-  // Source of truth per mode:
-  //   test → BASE_TEST_CLIENTS (in-memory fixtures)
-  //   live → projection.db via TauriAPI.listClients (SQLite)
-  //          (localStorage retained only as a browser-mode fallback)
+  // Bridge from the global TopBar Save button to ClientHome's handleSave.
+  const saveHandlerRef = useRef<(() => void) | null>(null);
+  const registerSaveHandler = (fn: (() => void) | null) => {
+    saveHandlerRef.current = fn;
+  };
+
+  // Bridge from TopBar Version History button.
+  const vhHandlerRef = useRef<(() => void) | null>(null);
+  const registerVersionHistoryHandler = (fn: (() => void) | null) => {
+    vhHandlerRef.current = fn;
+  };
+
   async function refreshFromProjection() {
     try {
       const views = await TauriAPI.listClients();
       setClients(views.map(viewToClient));
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.warn("[main] listClients failed, keeping current state:", err);
     }
   }
 
+  // Initial load and reload when returning to Home.
   useEffect(() => {
-    if (mode === "test") {
-      setClients(JSON.parse(JSON.stringify(BASE_TEST_CLIENTS)));
-      return;
-    }
-    if (isTauri) {
-      refreshFromProjection();
-    } else {
-      const saved = localStorage.getItem("clients");
-      setClients(saved ? JSON.parse(saved) : []);
-    }
-  }, [mode]);
-
-  useEffect(() => {
-    // localStorage is now only a no-Tauri convenience cache. In Live mode
-    // under Tauri the projection is canonical.
-    if (mode === "live" && !isTauri) {
-      localStorage.setItem("clients", JSON.stringify(clients));
-    }
-  }, [clients, mode]);
-
-  // Re-pull from the projection whenever the user returns to Home so any
-  // edits made in ClientHome show up in the dropdown immediately.
-  useEffect(() => {
-    if (mode === "live" && isTauri && view === "home") {
-      refreshFromProjection();
-    }
+    if (isTauri) refreshFromProjection();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, mode]);
+  }, []);
 
-  // Compute a display name from whichever shape the demographics blob
-  // happens to be in (flat or nested under `demographics`). Mirrors the
-  // fallback the backend projection applies on hydration.
-  function deriveName(c: any): string {
-    const explicit = (c?.name || "").toString().trim();
-    if (explicit) return explicit;
-    const blob = c?.demographics || {};
-    const flatF = (blob.forename || "").toString().trim();
-    const flatS = (blob.surname || "").toString().trim();
-    if (flatF || flatS) return `${flatF} ${flatS}`.trim();
-    const nested = blob.demographics || {};
-    const nF = (nested.forename || "").toString().trim();
-    const nS = (nested.surname || "").toString().trim();
-    if (nF || nS) return `${nF} ${nS}`.trim();
-    return "Unnamed Client";
-  }
+  useEffect(() => {
+    if (isTauri && view === "home") refreshFromProjection();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
 
-  // Upsert: ClientHome calls `onSave(updated)` with the canonical id
-  // (the backend UUIDv7 once a projection record exists). We store that
-  // verbatim so the Home dropdown and subsequent `getClientView` lookups
-  // find the same row that backend SQL holds.
   function handleClientSave(updated: Client) {
-    const merged = { ...updated, name: deriveName(updated) };
-    setClients(prev => {
-      const exists = prev.some(c => c.id === merged.id);
+    const blob = mergeBlob(updated);
+    const name =
+      (updated.name as string) ||
+      buildClientName(blob.demographics) ||
+      "Unnamed Client";
+    const merged: Client = { ...updated, name };
+    setClients((prev) => {
+      const exists = prev.some((c) => c.id === merged.id);
       return exists
-        ? prev.map(c => (c.id === merged.id ? merged : c))
+        ? prev.map((c) => (c.id === merged.id ? merged : c))
         : [...prev, merged];
     });
     setActiveClient(merged);
   }
 
-
-  if (view === "home") {
-    return (
-      <Home
-        clients={clients}
-        setActiveClient={(c: Client) => {
-          setActiveClient(c);
-          setView("client");
-        }}
-        startCreate={() => setView("create")}
-        mode={mode}
-        setMode={setMode}
-      />
-    );
+  function navigate(target: string) {
+    if (target === "client") {
+      setView(activeClient ? "client" : "home");
+      return;
+    }
+    if (
+      target === "home" ||
+      target === "calendar" ||
+      target === "finance"
+    ) {
+      setView(target as View);
+    }
   }
 
-  if (view === "create") {
-    return (
-      <ClientHome
-        client={null}
-        isNew={true}
-        onSave={handleClientSave}
-        onCancel={() => setView("home")}
-        mode={mode}
-      />
-    );
+  function pageContent() {
+    if (view === "home") {
+      return (
+        <Home
+          clients={clients}
+          setActiveClient={(c: Client) => {
+            setActiveClient(c);
+            setView("client");
+          }}
+          startCreate={() => setView("create")}
+        />
+      );
+    }
+    if (view === "create") {
+      return (
+        <ClientHome
+          key="new"
+          client={null}
+          isNew={true}
+          onSave={handleClientSave}
+          onCancel={() => setView("home")}
+          registerSaveHandler={registerSaveHandler}
+          registerVersionHistoryHandler={registerVersionHistoryHandler}
+        />
+      );
+    }
+    if (view === "client") {
+      if (!activeClient) {
+        return (
+          <div className="p-8 text-slate-600">
+            Select a client from{" "}
+            <button
+              className="underline"
+              onClick={() => setView("home")}
+            >
+              Home
+            </button>
+            .
+          </div>
+        );
+      }
+      return (
+        <ClientHome
+          key={activeClient.id as string}
+          client={activeClient}
+          isNew={false}
+          onSave={handleClientSave}
+          onCancel={() => setView("home")}
+          openReport={() => setView("app")}
+          registerSaveHandler={registerSaveHandler}
+          registerVersionHistoryHandler={registerVersionHistoryHandler}
+        />
+      );
+    }
+    if (view === "calendar") {
+      return (
+        <CalendarView
+          clients={clients}
+          onNavigate={(clientId: string) => {
+            const found = clients.find((c) => c.id === clientId);
+            if (found) {
+              setActiveClient(found);
+              setView("client");
+            }
+          }}
+          onUpdateClient={(updated: Client) => {
+            const appointments = updated.appointments as Appointment[];
+            handleClientSave({ ...updated, appointments });
+          }}
+        />
+      );
+    }
+    if (view === "finance") {
+      return (
+        <div className="p-8 text-slate-600">
+          <h2 className="text-xl font-semibold text-slate-900 mb-2">
+            Finance
+          </h2>
+          <p className="text-sm">Coming soon.</p>
+        </div>
+      );
+    }
+    if (view === "app") {
+      return (
+        <App
+          client={activeClient}
+          goHome={() => setView("client")}
+        />
+      );
+    }
+    return null;
   }
 
-  if (view === "client" && activeClient) {
-    return (
-      <ClientHome
-        client={activeClient}
-        isNew={false}
-        onSave={handleClientSave}
-        onCancel={() => setView("home")}
-        openReport={() => setView("app")}
-        mode={mode}
-      />
-    );
+  function topBarProps(): TopBarProps {
+    if (view === "home") return { title: "Home" };
+    if (view === "create") {
+      return {
+        title: "New Client",
+        onBack: () => setView("home"),
+        showSave: true,
+        onSave: () => saveHandlerRef.current?.(),
+      };
+    }
+    if (view === "client") {
+      return {
+        title: (activeClient?.name as string) || "Client Profile",
+        onBack: () => setView("home"),
+        showSave: !!activeClient,
+        onSave: () => saveHandlerRef.current?.(),
+        showVersionHistory: !!activeClient,
+        onShowVersionHistory: () => vhHandlerRef.current?.(),
+      };
+    }
+    if (view === "calendar") return { title: "Calendar" };
+    if (view === "finance") return { title: "Finance" };
+    if (view === "app") {
+      return {
+        title: "Report Builder",
+        onBack: () => setView(activeClient ? "client" : "home"),
+      };
+    }
+    return { title: "" };
   }
 
   return (
-    <App
-      client={activeClient}
-      goHome={() => setView("client")}
-    />
+    <AppLayout
+      currentView={view}
+      setView={navigate}
+      topBarProps={topBarProps()}
+    >
+      {pageContent()}
+    </AppLayout>
   );
 }
 

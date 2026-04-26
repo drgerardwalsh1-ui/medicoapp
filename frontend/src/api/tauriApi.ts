@@ -116,6 +116,52 @@ export const TauriAPI = {
   /** List every client in the projection (full views). */
   listClients: (): Promise<ClientViewModel[]> => guarded("list_clients"),
 
+  // ── Step 6 — Version History (additive, audit-preserving) ───────────────
+  /** Ordered event history (oldest first) for a client. */
+  getClientEventHistory: (clientId: string): Promise<EventHistoryItem[]> =>
+    guarded("get_client_event_history", { clientId }),
+
+  /** Pure replay up to and including `version`. Stream-validated. */
+  getClientSnapshotAtVersion: (
+    clientId: string,
+    version: number
+  ): Promise<ClientStateSnapshot> =>
+    guarded("get_client_snapshot_at_version", { clientId, version }),
+
+  /**
+   * Promote a historical snapshot forward by emitting a brand-new
+   * `ClientRestoredFromVersion` event. Past events are not modified.
+   * Returns the new event version.
+   */
+  restoreClientFromVersion: (
+    clientId: string,
+    version: number
+  ): Promise<number> =>
+    guarded("restore_client_from_version", { clientId, version }),
+
+  /**
+   * Promote a single field from a historical snapshot forward.
+   * Currently supports `"demographics"` (emits `DemographicsUpdated`).
+   */
+  restoreClientFieldFromVersion: (
+    clientId: string,
+    version: number,
+    field: string
+  ): Promise<number> =>
+    guarded("restore_client_field_from_version", { clientId, version, field }),
+
+  /**
+   * Step 7 — pure replay-based diff between two versions. UI not wired yet.
+   * Returns a deterministic list of `{field, from, to}` for the
+   * `demographics` / `referrer` / `appointment` sub-blobs.
+   */
+  diffClientVersions: (
+    clientId: string,
+    versionA: number,
+    versionB: number
+  ): Promise<VersionDiff[]> =>
+    guarded("diff_client_versions", { clientId, versionA, versionB }),
+
   /**
    * Replace a client's demographics blob. Emits `DemographicsUpdated`
    * and projects forward. Returns the new version.
@@ -145,6 +191,37 @@ export const TauriAPI = {
       charCount,
       correlationId: correlationId ?? null,
     }),
+};
+
+/** Mirrors the Rust `EventHistoryItem`. */
+export type EventHistoryItem = {
+  version: number;
+  timestamp: string;
+  event_type: string;
+};
+
+/** Mirrors the Rust `VersionDiff` (Step 7). */
+export type VersionDiff = {
+  field: string;
+  from: unknown;
+  to: unknown;
+};
+
+/** Mirrors the Rust `reducer::ClientState` (snake_case field names). */
+export type ClientStateSnapshot = {
+  client_id: string;
+  last_version: number;
+  first_seen: string | null;
+  last_updated: string | null;
+  name: string | null;
+  demographics: Record<string, unknown> | null;
+  documents: Array<{
+    document_id: string;
+    file_name: string;
+    char_count: number;
+    method: string;
+    uploaded_at: string;
+  }>;
 };
 
 /** Mirrors `projection::DocumentSummary`. */

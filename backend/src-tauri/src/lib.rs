@@ -230,6 +230,233 @@ fn get_client_view(client_id: String) -> Result<projection::ClientViewModel, Str
     }
 }
 
+// ─── Step 6 — Version History (additive, audit-preserving) ──────────────────
+//
+// All four commands below are read-mostly. The two `restore_*` commands
+// emit BRAND NEW events; they never modify or delete past events.
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct EventHistoryItem {
+    pub version: u64,
+    pub timestamp: String,
+    pub event_type: String,
+}
+
+fn truncate_to_version(
+    events: Vec<events::EventEnvelope>,
+    version: u64,
+) -> Result<Vec<events::EventEnvelope>, String> {
+    let truncated: Vec<events::EventEnvelope> =
+        events.into_iter().take_while(|e| e.version <= version).collect();
+    if truncated.is_empty() {
+        return Err(format!("no events at or before version {version}"));
+    }
+    if truncated.last().unwrap().version != version {
+        return Err(format!("version {version} not found"));
+    }
+    Ok(truncated)
+}
+
+/// List every event for a client, oldest first.
+#[tauri::command(rename_all = "camelCase")]
+fn get_client_event_history(client_id: String) -> Result<Vec<EventHistoryItem>, String> {
+    let (store, _proj) = init_event_store_strict()?;
+    let evs = store.get_events(&client_id).map_err(|e| e.to_string())?;
+    Ok(evs
+        .into_iter()
+        .map(|e| EventHistoryItem {
+            version: e.version,
+            timestamp: e.timestamp.to_rfc3339(),
+            event_type: e.event_type.as_str().to_string(),
+        })
+        .collect())
+}
+
+/// Replay events for a client up to and including `version`, returning the
+/// pure `ClientState` at that point. Stream is validated first; a corrupt
+/// stream is a hard error.
+#[tauri::command(rename_all = "camelCase")]
+fn get_client_snapshot_at_version(
+    client_id: String,
+    version: u64,
+) -> Result<reducer::ClientState, String> {
+    let (store, _proj) = init_event_store_strict()?;
+    let evs = store.get_events(&client_id).map_err(|e| e.to_string())?;
+    replay::validate_event_stream(&evs).map_err(|e| format!("validation failed: {e}"))?;
+    let truncated = truncate_to_version(evs, version)?;
+    Ok(reducer::reduce(&truncated))
+}
+
+/// Promote an entire historical snapshot forward by emitting a brand-new
+/// `ClientRestoredFromVersion` event. Returns the new version.
+#[tauri::command(rename_all = "camelCase")]
+fn restore_client_from_version(client_id: String, version: u64) -> Result<u64, String> {
+    let (store, proj) = init_event_store_strict()?;
+    let evs = store.get_events(&client_id).map_err(|e| e.to_string())?;
+    replay::validate_event_stream(&evs).map_err(|e| format!("validation failed: {e}"))?;
+    let truncated = truncate_to_version(evs, version)?;
+    let snapshot = reducer::reduce(&truncated);
+
+    let next_version = store.next_version(&client_id).map_err(|e| e.to_string())?;
+    let env = events::EventEnvelope::new(
+        client_id.clone(),
+        next_version,
+        events::Actor::System {
+            component: "restore_client_from_version".into(),
+        },
+        events::EventPayload::ClientRestoredFromVersion(events::ClientRestoredFromVersionP {
+            from_version: version,
+            name: snapshot.name.clone().unwrap_or_default(),
+            demographics: snapshot
+                .demographics
+                .clone()
+                .unwrap_or(serde_json::Value::Null),
+        }),
+        None,
+        None,
+    );
+    store
+        .append_event(&env)
+        .map_err(|e| format!("restore_client_from_version: append failed: {e}"))?;
+    proj.project_forward(std::slice::from_ref(&env))
+        .map_err(|e| format!("restore_client_from_version: project_forward failed: {e}"))?;
+    Ok(next_version)
+}
+
+/// One field-level change between two snapshots. `from` and `to` are the
+/// raw `serde_json::Value`s — strings, numbers, nulls — left untouched so
+/// the consumer can render them however it wants.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct VersionDiff {
+    pub field: String,
+    pub from: serde_json::Value,
+    pub to: serde_json::Value,
+}
+
+fn diff_section(
+    out: &mut Vec<VersionDiff>,
+    name: &str,
+    a: Option<&serde_json::Value>,
+    b: Option<&serde_json::Value>,
+) {
+    let a_obj = a.and_then(|v| v.as_object());
+    let b_obj = b.and_then(|v| v.as_object());
+    let mut keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    if let Some(o) = a_obj {
+        keys.extend(o.keys().cloned());
+    }
+    if let Some(o) = b_obj {
+        keys.extend(o.keys().cloned());
+    }
+    for key in keys {
+        let av = a_obj
+            .and_then(|o| o.get(&key))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let bv = b_obj
+            .and_then(|o| o.get(&key))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        if av != bv {
+            out.push(VersionDiff {
+                field: format!("{name}.{key}"),
+                from: av,
+                to: bv,
+            });
+        }
+    }
+}
+
+/// Pure replay-based diff between two versions of the same client.
+/// Compares `demographics`, `referrer`, and `appointment` sub-blobs.
+/// Output order is deterministic (BTreeSet of keys, fixed section order).
+#[tauri::command(rename_all = "camelCase")]
+fn diff_client_versions(
+    client_id: String,
+    version_a: u64,
+    version_b: u64,
+) -> Result<Vec<VersionDiff>, String> {
+    let (store, _proj) = init_event_store_strict()?;
+    let evs = store.get_events(&client_id).map_err(|e| e.to_string())?;
+    replay::validate_event_stream(&evs).map_err(|e| format!("validation failed: {e}"))?;
+
+    let trunc_a = truncate_to_version(evs.clone(), version_a)?;
+    let snap_a = reducer::reduce(&trunc_a);
+    let trunc_b = truncate_to_version(evs, version_b)?;
+    let snap_b = reducer::reduce(&trunc_b);
+
+    let null = serde_json::Value::Null;
+    let blob_a = snap_a.demographics.as_ref().unwrap_or(&null);
+    let blob_b = snap_b.demographics.as_ref().unwrap_or(&null);
+
+    let mut out = Vec::new();
+    diff_section(
+        &mut out,
+        "demographics",
+        blob_a.get("demographics"),
+        blob_b.get("demographics"),
+    );
+    diff_section(
+        &mut out,
+        "referrer",
+        blob_a.get("referrer"),
+        blob_b.get("referrer"),
+    );
+    diff_section(
+        &mut out,
+        "appointment",
+        blob_a.get("appointment"),
+        blob_b.get("appointment"),
+    );
+    Ok(out)
+}
+
+/// Promote a single field from a historical snapshot forward by emitting
+/// the appropriate field-level event. Currently supports `"demographics"`,
+/// which emits `DemographicsUpdated`. Returns the new version.
+#[tauri::command(rename_all = "camelCase")]
+fn restore_client_field_from_version(
+    client_id: String,
+    version: u64,
+    field: String,
+) -> Result<u64, String> {
+    let (store, proj) = init_event_store_strict()?;
+    let evs = store.get_events(&client_id).map_err(|e| e.to_string())?;
+    replay::validate_event_stream(&evs).map_err(|e| format!("validation failed: {e}"))?;
+    let truncated = truncate_to_version(evs, version)?;
+    let snapshot = reducer::reduce(&truncated);
+
+    let payload = match field.as_str() {
+        "demographics" => events::EventPayload::DemographicsUpdated(
+            events::DemographicsUpdatedP {
+                demographics: snapshot
+                    .demographics
+                    .clone()
+                    .unwrap_or(serde_json::Value::Null),
+            },
+        ),
+        other => return Err(format!("unsupported field: {other}")),
+    };
+
+    let next_version = store.next_version(&client_id).map_err(|e| e.to_string())?;
+    let env = events::EventEnvelope::new(
+        client_id.clone(),
+        next_version,
+        events::Actor::System {
+            component: "restore_client_field_from_version".into(),
+        },
+        payload,
+        None,
+        None,
+    );
+    store
+        .append_event(&env)
+        .map_err(|e| format!("restore_client_field_from_version: append failed: {e}"))?;
+    proj.project_forward(std::slice::from_ref(&env))
+        .map_err(|e| format!("restore_client_field_from_version: project_forward failed: {e}"))?;
+    Ok(next_version)
+}
+
 /// List every client in the projection. Returns full `ClientViewModel`s so
 /// callers can render dropdowns / lists without further round-trips.
 #[tauri::command]
@@ -3823,6 +4050,13 @@ pub fn run() {
             update_client_demographics,
             attach_document,
             list_clients,
+            // ── Step 6 — Version History ─────────────────────────────────────
+            get_client_event_history,
+            get_client_snapshot_at_version,
+            restore_client_from_version,
+            restore_client_field_from_version,
+            // ── Step 7 — diff prep ──────────────────────────────────────────
+            diff_client_versions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

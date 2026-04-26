@@ -76,12 +76,16 @@ function NerBlock({ ner }: { ner?: NerEntities }) {
     ["Dates",         ner.DATE,   "bg-sky-50 text-sky-800 border-sky-200"],
   ];
   const any = groups.some(([, v]) => v && v.length);
-  if (!any) return null;
   return (
     <div className="border-t px-4 py-3 space-y-2">
       <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
         spaCy NER
       </div>
+      {!any && (
+        <div className="text-[11px] text-slate-400 italic">
+          No entities detected.
+        </div>
+      )}
       {groups.map(([label, values, cls]) =>
         values && values.length ? (
           <div key={label} className="space-y-1">
@@ -112,12 +116,16 @@ function SciBlock({ sci }: { sci?: SciEntities }) {
     ["Other",       sci.other,       "bg-slate-50 text-slate-700 border-slate-200"],
   ];
   const any = groups.some(([, v]) => v && v.length);
-  if (!any) return null;
   return (
     <div className="border-t px-4 py-3 space-y-2">
       <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
         scispaCy biomedical
       </div>
+      {!any && (
+        <div className="text-[11px] text-slate-400 italic">
+          No biomedical entities detected.
+        </div>
+      )}
       {groups.map(([label, values, cls]) =>
         values && values.length ? (
           <div key={label} className="space-y-1">
