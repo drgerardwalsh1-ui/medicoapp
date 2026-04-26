@@ -62,26 +62,16 @@ export default function ClientHome({
 
   function hydrateFromView(v: ClientViewModel) {
     setView(v);
-    const blob = (v.demographics ?? {}) as any;
-    // Prefer top-level fields if the projection surfaces them, then fall
-    // back to the nested-blob shape (`{demographics, referrer, appointment}`)
-    // that the existing UI persists. Either way we land on plain `{}` so
-    // the form inputs always have a defined object to read from.
+    const demo = (v.demographics ?? {}) as any;
+
     setData((prev: any) => ({
       ...prev,
       id: v.id,
       name: v.name ?? prev.name,
-      demographics: blob.demographics ?? blob ?? {},
-      referrer: (v as any).referrer ?? blob.referrer ?? {},
-      appointment: (v as any).appointment ?? blob.appointment ?? {},
+      demographics: demo,   // ✅ flat + correct
+      referrer: v.referrer ?? {},
+      appointment: v.appointment ?? {},
     }));
-  }
-
-  // Debug-only reference so `view` isn't flagged as unused while still
-  // being available for future read paths (e.g. Report Builder hydration).
-  if (typeof window !== "undefined" && (window as any).__DEV_PROJECTION__) {
-    // eslint-disable-next-line no-console
-    console.debug("[client-home] last view", view);
   }
 
   async function refetchView(id: string) {
