@@ -20,13 +20,16 @@ export function useCalendar(
 
   // Flatten all appointments across all clients, tagged with their client object
   const allAppointments = useMemo<AppointmentWithClient[]>(
-    () =>
-      clients.flatMap((c) =>
+    () => {
+      console.log("[calendar] clients", clients);
+      console.log("[calendar] appointments per client", clients.map((c) => ({ id: c.id, name: c.name, appointments: c.appointments })));
+      return clients.flatMap((c) =>
         ((c.appointments as Appointment[]) ?? []).map((a) => ({
           ...a,
           client: c,
         }))
-      ),
+      );
+    },
     [clients]
   );
 
@@ -83,12 +86,16 @@ export function useCalendar(
     onUpdateClient(updated);
 
     if (isTauri) {
+      // Full blob — demographics flat at top level, no legacy "appointment" field
       const blob = {
-        demographics: client.demographics,
+        ...client.demographics,
+        injury: client.injury,
         referrer: client.referrer,
-        appointment: client.appointment,
         appointments,
+        assessmentChecklist: client.assessmentChecklist,
+        report: client.report,
       };
+      console.log("[calendar] saving client", clientId, "with", appointments.length, "appointments");
       try {
         await TauriAPI.updateClientDemographics(clientId, blob);
       } catch (err) {

@@ -10,6 +10,11 @@
     @apply scroll-smooth;
   }
 
+  /* Force 24-hour display on WebKit time inputs */
+  input[type="time"]::-webkit-datetime-edit-ampm-field {
+    display: none;
+  }
+
   body {
     @apply bg-slate-50 text-slate-700 antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";

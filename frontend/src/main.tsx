@@ -5,6 +5,7 @@ import Home from "./pages/Home";
 import ClientHome from "./pages/ClientHome";
 import App from "./App";
 import CalendarView from "./calendar/CalendarView";
+import SystemPage from "./pages/SystemPage";
 import { TauriAPI, isTauri, type ClientViewModel } from "./api/tauriApi";
 import AppLayout from "./components/AppLayout";
 import type { TopBarProps } from "./components/TopBar";
@@ -15,20 +16,16 @@ import {
 } from "./types/client";
 
 type Client = Record<string, unknown>;
-type View = "home" | "client" | "app" | "create" | "calendar" | "finance";
+type View = "home" | "client" | "app" | "create" | "calendar" | "finance" | "system";
 
 // Adapt a ClientViewModel from the projection into the in-memory client shape.
 function viewToClient(v: ClientViewModel): Client {
   const blob = mergeBlob(v.demographics);
   return {
     id: v.id,
-    name:
-      v.name ||
-      buildClientName(blob.demographics) ||
-      "Unnamed Client",
+    name: v.name || buildClientName(blob.demographics) || "Unnamed Client",
     ...blob,
     documents: v.documents ?? [],
-    report: {},
   };
 }
 
@@ -58,14 +55,15 @@ function Root() {
     }
   }
 
-  // Initial load and reload when returning to Home.
+  // Initial load.
   useEffect(() => {
     if (isTauri) refreshFromProjection();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Refresh projection when navigating to Home or Calendar.
   useEffect(() => {
-    if (isTauri && view === "home") refreshFromProjection();
+    if (isTauri && (view === "home" || view === "calendar")) refreshFromProjection();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
@@ -85,6 +83,12 @@ function Root() {
     setActiveClient(merged);
   }
 
+  function handleReset() {
+    setClients([]);
+    setActiveClient(null);
+    setView("home");
+  }
+
   function navigate(target: string) {
     if (target === "client") {
       setView(activeClient ? "client" : "home");
@@ -93,7 +97,8 @@ function Root() {
     if (
       target === "home" ||
       target === "calendar" ||
-      target === "finance"
+      target === "finance" ||
+      target === "system"
     ) {
       setView(target as View);
     }
@@ -130,10 +135,7 @@ function Root() {
         return (
           <div className="p-8 text-slate-600">
             Select a client from{" "}
-            <button
-              className="underline"
-              onClick={() => setView("home")}
-            >
+            <button className="underline" onClick={() => setView("home")}>
               Home
             </button>
             .
@@ -174,18 +176,20 @@ function Root() {
     if (view === "finance") {
       return (
         <div className="p-8 text-slate-600">
-          <h2 className="text-xl font-semibold text-slate-900 mb-2">
-            Finance
-          </h2>
+          <h2 className="text-xl font-semibold text-slate-900 mb-2">Finance</h2>
           <p className="text-sm">Coming soon.</p>
         </div>
       );
+    }
+    if (view === "system") {
+      return <SystemPage onReset={handleReset} />;
     }
     if (view === "app") {
       return (
         <App
           client={activeClient}
           goHome={() => setView("client")}
+          onSave={handleClientSave}
         />
       );
     }
@@ -214,6 +218,7 @@ function Root() {
     }
     if (view === "calendar") return { title: "Calendar" };
     if (view === "finance") return { title: "Finance" };
+    if (view === "system")  return { title: "System" };
     if (view === "app") {
       return {
         title: "Report Builder",
@@ -224,11 +229,7 @@ function Root() {
   }
 
   return (
-    <AppLayout
-      currentView={view}
-      setView={navigate}
-      topBarProps={topBarProps()}
-    >
+    <AppLayout currentView={view} setView={navigate} topBarProps={topBarProps()}>
       {pageContent()}
     </AppLayout>
   );

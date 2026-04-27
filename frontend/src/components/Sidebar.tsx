@@ -15,6 +15,7 @@ const ITEMS: Item[] = [
   { id: "client",   label: "Client Profile" },
   { id: "calendar", label: "Calendar" },
   { id: "finance",  label: "Finance" },
+  { id: "system",   label: "System" },
 ];
 
 export default function Sidebar({ currentView, setView }: SidebarProps) {

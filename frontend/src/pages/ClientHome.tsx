@@ -12,10 +12,12 @@ import {
   buildClientName,
   mergeBlob,
   defaultAssessmentChecklist,
+  defaultReportData,
   isAppointmentToday,
   calcAge,
   calcAgeAtDate,
   calcYearsSince,
+  type Appointment,
 } from "../types/client";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -61,10 +63,10 @@ export default function ClientHome({
     demographics: client?.demographics ?? initBlob.demographics,
     injury: client?.injury ?? initBlob.injury,
     referrer: client?.referrer ?? initBlob.referrer,
-    appointment: client?.appointment ?? initBlob.appointment,
     appointments: client?.appointments ?? initBlob.appointments,
     assessmentChecklist:
       client?.assessmentChecklist ?? initBlob.assessmentChecklist,
+    report: client?.report ?? initBlob.report ?? defaultReportData(),
   }));
 
   const [isSaved, setIsSaved] = useState(!isNew);
@@ -105,7 +107,6 @@ export default function ClientHome({
   const dem = data.demographics ?? {};
   const inj = data.injury ?? {};
   const ref = data.referrer ?? {};
-  const apt = data.appointment ?? {};
   const chk = data.assessmentChecklist ?? defaultAssessmentChecklist();
   const att = chk.attendees ?? {};
 
@@ -124,6 +125,55 @@ export default function ClientHome({
     () => (inj.dateOfInjury ? calcYearsSince(inj.dateOfInjury) : ""),
     [inj.dateOfInjury]
   );
+
+  // ── Primary appointment (next upcoming, or most recent past) ───────────────
+  const apptDisplay = useMemo(() => {
+    const appts = (data.appointments ?? []) as Appointment[];
+    if (appts.length === 0) return null;
+    const now = Date.now();
+    const future = appts.filter((a) => new Date(a.start).getTime() >= now);
+    const target =
+      future.length > 0
+        ? future.reduce((n, a) => (new Date(a.start) < new Date(n.start) ? a : n))
+        : appts.reduce((l, a) => (new Date(a.start) > new Date(l.start) ? a : l));
+    const d = new Date(target.start);
+    return {
+      id: target.id,
+      raw: target,
+      date: [
+        d.getFullYear(),
+        String(d.getMonth() + 1).padStart(2, "0"),
+        String(d.getDate()).padStart(2, "0"),
+      ].join("-"),
+      time: `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,
+      isFuture: future.length > 0,
+    };
+  }, [data.appointments]);
+
+  function upsertAppointment(date: string, time: string) {
+    if (!date) return;
+    const effectiveTime = time || "09:00";
+    const start = new Date(`${date}T${effectiveTime}:00`);
+    if (isNaN(start.getTime())) return;
+    const end = new Date(start.getTime() + 60 * 60_000);
+    const existing = apptDisplay?.raw;
+    const appt: Appointment = {
+      id: existing?.id ?? crypto.randomUUID(),
+      clientId: data.id,
+      start: start.toISOString(),
+      end: end.toISOString(),
+      type: existing?.type ?? "assessment",
+    };
+    setData((prev: any) => ({
+      ...prev,
+      appointments: existing
+        ? (prev.appointments ?? []).map((a: Appointment) =>
+            a.id === existing.id ? appt : a
+          )
+        : [...(prev.appointments ?? []), appt],
+    }));
+    setIsDirty(true);
+  }
 
   // ── Update helpers ─────────────────────────────────────────────────────────
   function update(section: string, field: string, value: unknown) {
@@ -172,7 +222,6 @@ export default function ClientHome({
       demographics: { ...(prev.demographics ?? {}), ...blob.demographics },
       injury: { ...(prev.injury ?? {}), ...blob.injury },
       referrer: blob.referrer,
-      appointment: blob.appointment,
       appointments: blob.appointments.length
         ? blob.appointments
         : (prev.appointments ?? []),
@@ -288,10 +337,9 @@ export default function ClientHome({
     const dob = data.demographics?.dateOfBirth;
     const doi = data.injury?.dateOfInjury;
     return {
-      demographics: {
-        ...data.demographics,
-        age: dob ? calcAge(dob) : (data.demographics?.age ?? 0),
-      },
+      // Demographics fields flat at the top level — no nested "demographics" key
+      ...data.demographics,
+      age: dob ? calcAge(dob) : (data.demographics?.age ?? 0),
       injury: {
         ...data.injury,
         ageAtInjury:
@@ -301,15 +349,20 @@ export default function ClientHome({
           : (data.injury?.yearsSinceInjury ?? 0),
       },
       referrer: data.referrer ?? {},
-      appointment: data.appointment ?? {},
       appointments: data.appointments ?? [],
       assessmentChecklist: data.assessmentChecklist ?? defaultAssessmentChecklist(),
+      report: data.report ?? defaultReportData(),
     };
   }
 
   async function handleSave() {
+    console.log("SAVE BUTTON CLICKED / handleSave entered");
+    console.log("SAVING CLIENT", data);
     const blob = buildBlob();
-    const computedName = buildClientName(blob.demographics);
+    // data.demographics holds the structured Demographics object.
+    // blob is flat (demographics fields at top level, no blob.demographics key).
+    const computedName = buildClientName(data.demographics) || "Unnamed Client";
+    console.log("onSave CALLED", data);
     setSaveStatus("saving");
 
     if (!isTauri) {
@@ -381,6 +434,7 @@ export default function ClientHome({
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
+        console.log("CMD+S TRIGGERED");
         const el = document.activeElement;
         if (el instanceof HTMLElement) el.blur();
         setTimeout(() => handleSaveRef.current?.(), 0);
@@ -758,24 +812,46 @@ export default function ClientHome({
 
       {/* ── APPOINTMENT ── */}
       <div className="card space-y-4">
-        <h2 className="section-title">Appointment</h2>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="flex items-center justify-between">
+          <h2 className="section-title mb-0">Appointment</h2>
+          {apptDisplay && (
+            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+              apptDisplay.isFuture
+                ? "bg-violet-100 text-violet-700"
+                : "bg-slate-100 text-slate-500"
+            }`}>
+              {apptDisplay.isFuture ? "Upcoming" : "Past"}
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="label">Date</label>
-            <input type="date" className="input" value={apt.date || ""}
-              onChange={(e) => update("appointment", "date", e.target.value)} />
+            <input
+              type="date"
+              className="input"
+              value={apptDisplay?.date ?? ""}
+              onChange={(e) =>
+                upsertAppointment(e.target.value, apptDisplay?.time ?? "")
+              }
+            />
           </div>
           <div>
-            <label className="label">Time</label>
-            <input type="time" className="input" value={apt.time || ""}
-              onChange={(e) => update("appointment", "time", e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Location</label>
-            <input className="input" value={apt.location || ""}
-              onChange={(e) => update("appointment", "location", e.target.value)} />
+            <label className="label">Time (24h)</label>
+            <TimeSelect
+              value={apptDisplay?.time ?? ""}
+              onChange={(t) =>
+                upsertAppointment(apptDisplay?.date ?? "", t)
+              }
+            />
           </div>
         </div>
+        {(data.appointments ?? []).length > 1 && (
+          <p className="text-xs text-slate-400">
+            {(data.appointments ?? []).length} appointments total — showing{" "}
+            {apptDisplay?.isFuture ? "next upcoming" : "most recent"}. Manage others in Calendar.
+          </p>
+        )}
       </div>
 
       {/* ── ASSESSMENT CHECKLIST ── */}
@@ -924,9 +1000,7 @@ export default function ClientHome({
             ) : (
               <p className="text-xs text-emerald-600">
                 Completed{" "}
-                {chk.completedAt
-                  ? new Date(chk.completedAt).toLocaleString()
-                  : ""}
+                {chk.completedAt ? formatTimestamp(chk.completedAt) : ""}
               </p>
             )}
           </div>
@@ -1089,7 +1163,6 @@ export default function ClientHome({
                   const d = blob.demographics;
                   const inj2 = blob.injury;
                   const r2 = blob.referrer;
-                  const a2 = blob.appointment;
                   return (
                     <>
                       <PreviewSection title="Demographics" rows={[
@@ -1116,11 +1189,6 @@ export default function ClientHome({
                       <PreviewSection title="Referrer" rows={[
                         ["Name", r2.name],
                         ["Organisation", r2.org],
-                      ]} />
-                      <PreviewSection title="Appointment" rows={[
-                        ["Date", a2.date],
-                        ["Time", a2.time],
-                        ["Location", a2.location],
                       ]} />
                     </>
                   );
@@ -1157,6 +1225,43 @@ export default function ClientHome({
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+const HOURS_24 = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0"));
+const MINUTES_5 = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, "0"));
+
+function TimeSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [hh = "", mm = ""] = (value || "").split(":");
+  const safeHH = HOURS_24.includes(hh) ? hh : "";
+  const safeMM = MINUTES_5.includes(mm) ? mm : "";
+
+  return (
+    <div className="flex gap-1 items-center">
+      <select
+        className="input"
+        value={safeHH}
+        onChange={(e) => onChange(`${e.target.value}:${safeMM || "00"}`)}
+      >
+        <option value="">HH</option>
+        {HOURS_24.map((h) => <option key={h} value={h}>{h}</option>)}
+      </select>
+      <span className="text-slate-400 font-semibold select-none">:</span>
+      <select
+        className="input"
+        value={safeMM}
+        onChange={(e) => onChange(`${safeHH || "00"}:${e.target.value}`)}
+      >
+        <option value="">MM</option>
+        {MINUTES_5.map((m) => <option key={m} value={m}>{m}</option>)}
+      </select>
+    </div>
+  );
+}
+
 function SaveStatusIndicator({
   status,
   dirty,
@@ -1174,7 +1279,11 @@ function SaveStatusIndicator({
 function formatTimestamp(iso: string): string {
   try {
     const d = new Date(iso);
-    return isNaN(d.getTime()) ? iso : d.toLocaleString();
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString("en-AU", {
+      day: "2-digit", month: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    });
   } catch {
     return iso;
   }

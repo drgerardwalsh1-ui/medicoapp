@@ -18,6 +18,7 @@ export type PIRSResult = {
 };
 
 export type PIRSTableModel = {
+  id: string;
   name: string;
   classes: number[];
   reasons?: ReasonEntry[];

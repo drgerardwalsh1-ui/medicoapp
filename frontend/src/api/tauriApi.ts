@@ -150,6 +150,41 @@ export const TauriAPI = {
   ): Promise<number> =>
     guarded("restore_client_field_from_version", { clientId, version, field }),
 
+  // ── System Management ────────────────────────────────────────────────────
+
+  /**
+   * Wipe all client data (events + projection). DESTRUCTIVE AND IRREVERSIBLE.
+   * Frontend must require explicit "DELETE" confirmation before calling.
+   * Returns JSON: { status: "ok", message: string }
+   */
+  resetDatabase: (): Promise<JsonString> => guarded("reset_database"),
+
+  /**
+   * Run a SELECT-only SQL query against the projection DB (default) or events DB.
+   * `db` can be "projection" (default) or "events".
+   * Returns JSON: { columns: string[], rows: any[][] }
+   */
+  runSqlQuery: (query: string, db?: "projection" | "events"): Promise<JsonString> =>
+    guarded("run_sql_query", { query, db: db ?? "projection" }),
+
+  /**
+   * Export all events and projection data as a pretty-printed JSON bundle.
+   */
+  exportAllData: (): Promise<JsonString> => guarded("export_all_data"),
+
+  /**
+   * Open a native save dialog, write `content` to the chosen path.
+   * Returns the absolute path, or rejects with "cancelled" if dismissed.
+   */
+  saveTextFile: (content: string, defaultFilename: string): Promise<string> =>
+    guarded("save_text_file", { content, defaultFilename }),
+
+  /**
+   * Reveal a file or folder in Finder (macOS) / Explorer (Windows).
+   */
+  revealInFinder: (path: string): Promise<void> =>
+    guarded("reveal_in_finder", { path }),
+
   /**
    * Step 7 — pure replay-based diff between two versions. UI not wired yet.
    * Returns a deterministic list of `{field, from, to}` for the
@@ -254,11 +289,6 @@ export type ClientViewModel = {
   timeline: unknown[];
   pirs_snapshots: PIRSTableViewModel[];
 
-  // Optional top-level mirrors that the projection may surface alongside
-  // demographics. Kept loose (`any`) — the consumer falls back to the nested
-  // shape when these are absent.
-  referrer?: any;
-  appointment?: any;
 };
 
 export type TauriAPIType = typeof TauriAPI;

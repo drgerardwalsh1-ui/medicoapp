@@ -1,3 +1,6 @@
+import type { PIRSTableModel } from "./types";
+export type { PIRSTableModel } from "./types";
+
 // ── Core types ────────────────────────────────────────────────────────────────
 
 export interface Demographics {
@@ -54,12 +57,6 @@ export interface Referrer {
   org?: string;
 }
 
-export interface AppointmentSlot {
-  date?: string;
-  time?: string;
-  location?: string;
-}
-
 export interface Appointment {
   id: string;
   clientId: string;
@@ -68,13 +65,33 @@ export interface Appointment {
   type?: string;
 }
 
+// ── Report types ─────────────────────────────────────────────────────────────
+
+export interface PreviousAssessorPIRS {
+  id: string;
+  date: string;
+  author: string;
+  authorRole: string;
+  table: PIRSTableModel;
+}
+
+export interface ReportData {
+  fields: Record<string, unknown>;
+  pirsTables: PIRSTableModel[];
+  previousAssessorPirs: PreviousAssessorPIRS[];
+  history: unknown[];
+  lastUpdated: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface ClientBlob {
   demographics: Demographics;
   injury: Injury;
   referrer: Referrer;
-  appointment: AppointmentSlot;
   appointments: Appointment[];
   assessmentChecklist: AssessmentChecklist;
+  report: ReportData;
 }
 
 // ── Default factories ────────────────────────────────────────────────────────
@@ -119,14 +136,24 @@ export function defaultAssessmentChecklist(): AssessmentChecklist {
   };
 }
 
+export function defaultReportData(): ReportData {
+  return {
+    fields: {},
+    pirsTables: [],
+    previousAssessorPirs: [],
+    history: [],
+    lastUpdated: "",
+  };
+}
+
 export function defaultClientBlob(): ClientBlob {
   return {
     demographics: defaultDemographics(),
     injury: defaultInjury(),
     referrer: {},
-    appointment: {},
     appointments: [],
     assessmentChecklist: defaultAssessmentChecklist(),
+    report: defaultReportData(),
   };
 }
 
@@ -164,20 +191,51 @@ export function calcYearsSince(fromDate: string): number {
   return Math.max(0, Math.floor(ms / (365.25 * 24 * 60 * 60 * 1000)));
 }
 
-/** Merge a raw blob from the projection with fresh defaults for missing fields. */
+// All known demographics field names — used to safely pick flat demographics
+// from a blob where they live at the top level alongside other sections.
+const DEMOGRAPHICS_KEYS: ReadonlyArray<keyof Demographics> = [
+  "title", "titleOther", "firstName", "middleName", "lastName",
+  "gender", "dateOfBirth", "age", "relationshipStatus", "occupation",
+  "employer", "handDominance", "handDominanceOther",
+];
+
+function pickDemographics(src: Record<string, unknown>): Partial<Demographics> {
+  const out: Partial<Demographics> = {};
+  for (const k of DEMOGRAPHICS_KEYS) {
+    if (k in src) (out as Record<string, unknown>)[k] = src[k];
+  }
+  return out;
+}
+
+/**
+ * Merge a raw blob from the projection with fresh defaults for missing fields.
+ *
+ * Storage format (new): demographics fields are flat at the top level of the
+ * blob — no nested `demographics` key. Legacy blobs that still have a nested
+ * `demographics` object are transparently handled via the fallback branch.
+ */
 export function mergeBlob(raw: unknown): ClientBlob {
   const b = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const rawReport = (b.report && typeof b.report === "object" ? b.report : {}) as Record<string, unknown>;
+
+  // New format: demographics fields live flat at the top level.
+  // Legacy format: they were nested under a "demographics" key — fall back to
+  // that if the new flat keys are absent.
+  const demSrc =
+    (b.demographics && typeof b.demographics === "object" && !Array.isArray(b.demographics))
+      ? (b.demographics as Record<string, unknown>)
+      : b;
+
   return {
     demographics: {
       ...defaultDemographics(),
-      ...((b.demographics && typeof b.demographics === "object" ? b.demographics : {}) as Partial<Demographics>),
+      ...pickDemographics(demSrc),
     },
     injury: {
       ...defaultInjury(),
       ...((b.injury && typeof b.injury === "object" ? b.injury : {}) as Partial<Injury>),
     },
     referrer: ((b.referrer && typeof b.referrer === "object" ? b.referrer : {}) as Referrer),
-    appointment: ((b.appointment && typeof b.appointment === "object" ? b.appointment : {}) as AppointmentSlot),
     appointments: Array.isArray(b.appointments) ? (b.appointments as Appointment[]) : [],
     assessmentChecklist: {
       ...defaultAssessmentChecklist(),
@@ -185,9 +243,19 @@ export function mergeBlob(raw: unknown): ClientBlob {
       attendees: {
         ...defaultAttendees(),
         ...((b.assessmentChecklist && typeof b.assessmentChecklist === "object"
-          ? (b.assessmentChecklist as any).attendees
+          ? (b.assessmentChecklist as Record<string, unknown>).attendees
           : {}) as Partial<AssessmentAttendees>),
       },
+    },
+    report: {
+      ...defaultReportData(),
+      fields: (rawReport.fields && typeof rawReport.fields === "object" ? rawReport.fields : {}) as Record<string, unknown>,
+      pirsTables: Array.isArray(rawReport.pirsTables) ? (rawReport.pirsTables as PIRSTableModel[]) : [],
+      previousAssessorPirs: Array.isArray(rawReport.previousAssessorPirs)
+        ? (rawReport.previousAssessorPirs as PreviousAssessorPIRS[])
+        : [],
+      history: Array.isArray(rawReport.history) ? rawReport.history : [],
+      lastUpdated: typeof rawReport.lastUpdated === "string" ? rawReport.lastUpdated : "",
     },
   };
 }

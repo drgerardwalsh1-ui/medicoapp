@@ -100,11 +100,10 @@ export function pixelsToDateTime(py: number, dayDate: Date): Date {
 // ── Format helpers ──────────────────────────────────────────────────────────
 
 export function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  const d = new Date(iso);
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  return `${h}:${m}`;
 }
 
 export function formatMonthYear(d: Date): string {

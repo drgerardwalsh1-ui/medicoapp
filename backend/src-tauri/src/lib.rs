@@ -3999,6 +3999,220 @@ fn reason_document(canonical: serde_json::Value) -> Result<String, String> {
     .to_string())
 }
 
+// ─── System Management commands ──────────────────────────────────────────────
+
+/// Wipe all client data by dropping and recreating the events table, then
+/// rebuilding the projection from an empty event list.
+///
+/// Safety: this is destructive and irreversible. The frontend must require
+/// explicit user confirmation ("type DELETE") before calling this.
+#[tauri::command(rename_all = "camelCase")]
+fn reset_database() -> Result<String, String> {
+    use rusqlite::Connection;
+
+    // --- Reset events.db -------------------------------------------------
+    // DROP TABLE is not blocked by the append-only DELETE trigger (triggers
+    // only fire on DML, not DDL), so this bypasses the guard cleanly.
+    {
+        let path = event_store::default_events_db_path();
+        let conn = Connection::open(&path).map_err(|e| e.to_string())?;
+        conn.execute_batch(
+            r#"
+            DROP TABLE IF EXISTS events;
+            DROP INDEX IF EXISTS idx_events_client_version;
+            DROP INDEX IF EXISTS idx_events_timestamp;
+
+            CREATE TABLE IF NOT EXISTS events (
+                id              TEXT PRIMARY KEY,
+                client_id       TEXT NOT NULL,
+                type            TEXT NOT NULL,
+                timestamp       TEXT NOT NULL,
+                version         INTEGER NOT NULL,
+                schema_version  INTEGER NOT NULL,
+                actor_json      TEXT NOT NULL,
+                causation_id    TEXT,
+                correlation_id  TEXT,
+                payload_json    TEXT NOT NULL,
+                UNIQUE (client_id, version)
+            );
+            CREATE INDEX IF NOT EXISTS idx_events_client_version
+                ON events (client_id, version);
+            CREATE INDEX IF NOT EXISTS idx_events_timestamp
+                ON events (timestamp);
+            CREATE TRIGGER IF NOT EXISTS events_no_update
+            BEFORE UPDATE ON events
+            BEGIN
+                SELECT RAISE(ABORT, 'events table is append-only — UPDATE forbidden');
+            END;
+            CREATE TRIGGER IF NOT EXISTS events_no_delete
+            BEFORE DELETE ON events
+            BEGIN
+                SELECT RAISE(ABORT, 'events table is append-only — DELETE forbidden');
+            END;
+            "#,
+        )
+        .map_err(|e| format!("events reset failed: {e}"))?;
+    }
+
+    // --- Reset projection.db via singleton's rebuild_from_events([]) -----
+    let (_, proj) = init_event_store_strict()?;
+    proj.rebuild_from_events(&[])
+        .map_err(|e| format!("projection reset failed: {e}"))?;
+
+    Ok(serde_json::json!({ "status": "ok", "message": "Database reset complete" }).to_string())
+}
+
+/// Run a read-only SQL query against the projection DB (default) or the
+/// events DB.  Any statement that is not a SELECT is rejected before
+/// execution to prevent accidental writes.
+///
+/// Returns JSON: { columns: string[], rows: any[][] }
+#[tauri::command(rename_all = "camelCase")]
+fn run_sql_query(query: String, db: Option<String>) -> Result<String, String> {
+    use rusqlite::{Connection, types::ValueRef};
+
+    // Safety: statement-level validation only — no substring matching to avoid
+    // false positives on column names like `updated_at` containing "update".
+    let trimmed = query.trim().to_lowercase();
+
+    // No semicolons: prevents multiple statements in a single call.
+    if trimmed.contains(';') {
+        return Err("Multiple statements are not allowed. Remove any semicolons.".to_string());
+    }
+
+    let first_word = trimmed.split_whitespace().next().unwrap_or("");
+    match first_word {
+        "select" | "with" => {} // allowed
+        "insert" | "update" | "delete" | "drop" | "alter" | "create" | "attach" | "pragma" => {
+            return Err(format!(
+                "Statement type '{}' is not permitted. Only SELECT and WITH queries are allowed.",
+                first_word
+            ));
+        }
+        other => {
+            return Err(format!(
+                "Unsupported statement type '{}'. Only SELECT and WITH queries are allowed.",
+                other
+            ));
+        }
+    }
+
+    let db_path = match db.as_deref() {
+        Some("events") => event_store::default_events_db_path(),
+        _ => event_store::default_projection_db_path(),
+    };
+
+    let conn = Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
+
+    let col_names: Vec<String> = stmt
+        .column_names()
+        .into_iter()
+        .map(String::from)
+        .collect();
+
+    let col_count = col_names.len();
+    let mut rows_out: Vec<serde_json::Value> = Vec::new();
+
+    let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+    while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        let mut row_vals: Vec<serde_json::Value> = Vec::with_capacity(col_count);
+        for i in 0..col_count {
+            let val = match row.get_ref(i).map_err(|e| e.to_string())? {
+                ValueRef::Null      => serde_json::Value::Null,
+                ValueRef::Integer(n) => serde_json::json!(n),
+                ValueRef::Real(f)   => serde_json::json!(f),
+                ValueRef::Text(s)   => {
+                    serde_json::Value::String(
+                        std::str::from_utf8(s).unwrap_or("").to_string()
+                    )
+                }
+                ValueRef::Blob(b)   => {
+                    serde_json::Value::String(format!("<blob {} bytes>", b.len()))
+                }
+            };
+            row_vals.push(val);
+        }
+        rows_out.push(serde_json::Value::Array(row_vals));
+    }
+
+    Ok(serde_json::json!({
+        "columns": col_names,
+        "rows":    rows_out,
+    })
+    .to_string())
+}
+
+/// Export all events and projection data as a JSON bundle for backup.
+#[tauri::command(rename_all = "camelCase")]
+fn export_all_data() -> Result<String, String> {
+    let (store, proj) = init_event_store_strict()?;
+    let events = store.get_all_events().map_err(|e| e.to_string())?;
+    let ids = proj.list_client_ids().map_err(|e| e.to_string())?;
+
+    let mut clients = Vec::new();
+    for id in &ids {
+        if let Some(v) = proj.get_client_view(id).map_err(|e| e.to_string())? {
+            clients.push(serde_json::to_value(&v).unwrap_or(serde_json::Value::Null));
+        }
+    }
+
+    let payload = serde_json::json!({
+        "exported_at": chrono::Utc::now().to_rfc3339(),
+        "event_count": events.len(),
+        "client_count": clients.len(),
+        "events": events.iter().map(|e| serde_json::to_value(e).unwrap_or(serde_json::Value::Null)).collect::<Vec<_>>(),
+        "clients": clients,
+    });
+
+    serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())
+}
+
+/// Open a native save dialog, then write `content` to the chosen path.
+/// Returns the absolute path on success, or the string "cancelled" if the
+/// user dismissed the dialog without choosing a location.
+#[tauri::command(rename_all = "camelCase")]
+fn save_text_file(
+    app: tauri::AppHandle,
+    content: String,
+    default_filename: String,
+) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let file_path = app
+        .dialog()
+        .file()
+        .set_file_name(&default_filename)
+        .add_filter("JSON", &["json"])
+        .blocking_save_file();
+
+    match file_path {
+        Some(fp) => {
+            let path = fp
+                .as_path()
+                .ok_or_else(|| "Cannot resolve save path".to_string())?;
+            std::fs::write(path, content.as_bytes())
+                .map_err(|e| format!("Write failed: {e}"))?;
+            Ok(path.to_string_lossy().to_string())
+        }
+        None => Err("cancelled".to_string()),
+    }
+}
+
+/// Reveal a file or directory in the system file manager (Finder on macOS).
+#[tauri::command(rename_all = "camelCase")]
+fn reveal_in_finder(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .reveal_item_in_dir(&path)
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -4057,6 +4271,12 @@ pub fn run() {
             restore_client_field_from_version,
             // ── Step 7 — diff prep ──────────────────────────────────────────
             diff_client_versions,
+            // ── System Management ────────────────────────────────────────────
+            reset_database,
+            run_sql_query,
+            export_all_data,
+            save_text_file,
+            reveal_in_finder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
