@@ -2,38 +2,35 @@ import { useState, useMemo, useCallback } from "react";
 import { TauriAPI, isTauri } from "../api/tauriApi";
 import {
   type Appointment,
+  type CalendarEvent,
+  type Client,
+  mapClientToCalendarEvents,
+} from "../types/client";
+import {
   getWeekStart,
   getWeekDates,
   isSameDay,
-  generateId,
 } from "./calendarUtils";
 
-export type AppointmentWithClient = Appointment & { client: any };
+export type { CalendarEvent as AppointmentWithClient };
 
 export function useCalendar(
-  clients: any[],
-  onUpdateClient: (updated: any) => void
+  clients: Client[],
+  onUpdateClient: (updated: Client) => void
 ) {
   const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date()));
 
   const weekDates = useMemo(() => getWeekDates(weekStart), [weekStart]);
 
-  // Flatten all appointments across all clients, tagged with their client object
-  const allAppointments = useMemo<AppointmentWithClient[]>(
+  const allAppointments = useMemo<CalendarEvent[]>(
     () => {
       console.log("[calendar] clients", clients);
-      console.log("[calendar] appointments per client", clients.map((c) => ({ id: c.id, name: c.name, appointments: c.appointments })));
-      return clients.flatMap((c) =>
-        ((c.appointments as Appointment[]) ?? []).map((a) => ({
-          ...a,
-          client: c,
-        }))
-      );
+      return clients.flatMap((c) => mapClientToCalendarEvents(c));
     },
     [clients]
   );
 
-  const weekAppointments = useMemo<AppointmentWithClient[]>(
+  const weekAppointments = useMemo<CalendarEvent[]>(
     () =>
       allAppointments.filter((a) =>
         weekDates.some((d) => isSameDay(d, new Date(a.start)))
@@ -41,9 +38,8 @@ export function useCalendar(
     [allAppointments, weekDates]
   );
 
-  // Keyed by day index (0 = Mon … 6 = Sun) for O(1) column render
   const appointmentsByDay = useMemo(() => {
-    const map: Record<number, AppointmentWithClient[]> = {};
+    const map: Record<number, CalendarEvent[]> = {};
     for (let i = 0; i < 7; i++) map[i] = [];
     weekAppointments.forEach((a) => {
       weekDates.forEach((d, i) => {
@@ -53,7 +49,7 @@ export function useCalendar(
     return map;
   }, [weekAppointments, weekDates]);
 
-  // ── Navigation ─────────────────────────────────────────────────────────────
+  // ── Navigation ────────────────────────────────────────────────────────────
 
   function prevWeek() {
     setWeekStart((w) => {
@@ -75,36 +71,34 @@ export function useCalendar(
     setWeekStart(getWeekStart(new Date()));
   }
 
-  // ── Persistence ────────────────────────────────────────────────────────────
+  // ── Persistence ───────────────────────────────────────────────────────────
 
   async function persistClientAppointments(
-    clientId: string,
-    appointments: Appointment[],
-    client: any
+    client: Client,
+    appointments: Appointment[]
   ) {
-    const updated = { ...client, appointments };
+    const updated: Client = { ...client, appointments };
     onUpdateClient(updated);
 
     if (isTauri) {
-      // Full blob — demographics flat at top level, no legacy "appointment" field
       const blob = {
-        ...client.demographics,
-        injury: client.injury,
-        referrer: client.referrer,
+        identity: client.identity,
+        administrative: client.administrative,
+        clinical: client.clinical,
         appointments,
         assessmentChecklist: client.assessmentChecklist,
         report: client.report,
       };
-      console.log("[calendar] saving client", clientId, "with", appointments.length, "appointments");
+      console.log("[calendar] saving client", client.id, "with", appointments.length, "appointments");
       try {
-        await TauriAPI.updateClientDemographics(clientId, blob);
+        await TauriAPI.updateClientDemographics(client.id, blob);
       } catch (err) {
         console.warn("[calendar] persist failed:", err);
       }
     }
   }
 
-  // ── CRUD ───────────────────────────────────────────────────────────────────
+  // ── CRUD ──────────────────────────────────────────────────────────────────
 
   async function createAppointment(
     clientId: string,
@@ -115,39 +109,31 @@ export function useCalendar(
     const client = clients.find((c) => c.id === clientId);
     if (!client) return;
     const appt: Appointment = {
-      id: generateId(),
-      clientId,
+      id: crypto.randomUUID(),
       start: start.toISOString(),
       end: end.toISOString(),
       type,
     };
-    await persistClientAppointments(
-      clientId,
-      [...(client.appointments ?? []), appt],
-      client
-    );
+    await persistClientAppointments(client, [...client.appointments, appt]);
   }
 
   const updateAppointment = useCallback(
-    async (updated: Appointment) => {
-      const client = clients.find((c) => c.id === updated.clientId);
-      if (!client) return;
-      const newList = ((client.appointments ?? []) as Appointment[]).map((a) =>
-        a.id === updated.id ? updated : a
+    async (updated: CalendarEvent) => {
+      const client = updated.client;
+      const { client: _client, ...appt } = updated;
+      const newList = client.appointments.map((a) =>
+        a.id === appt.id ? appt : a
       );
-      await persistClientAppointments(updated.clientId, newList, client);
+      await persistClientAppointments(client, newList);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [clients]
   );
 
-  async function deleteAppointment(id: string, clientId: string) {
-    const client = clients.find((c) => c.id === clientId);
-    if (!client) return;
-    const newList = ((client.appointments ?? []) as Appointment[]).filter(
-      (a) => a.id !== id
-    );
-    await persistClientAppointments(clientId, newList, client);
+  async function deleteAppointment(event: CalendarEvent) {
+    const client = event.client;
+    const newList = client.appointments.filter((a) => a.id !== event.id);
+    await persistClientAppointments(client, newList);
   }
 
   return {

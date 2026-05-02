@@ -1,35 +1,62 @@
 import type { PIRSTableModel } from "./types";
 export type { PIRSTableModel } from "./types";
 
-// ── Core types ────────────────────────────────────────────────────────────────
+export type UUID = string;
 
-export interface Demographics {
-  title: string;
-  titleOther?: string;
+// ── Identity ──────────────────────────────────────────────────────────────────
+
+export type Identity = {
+  title: string | null;
+  titleOther?: string | null;
   firstName: string;
-  middleName?: string;
+  middleName: string | null;
   lastName: string;
-  gender: string;
-  dateOfBirth: string;
-  age: number;
-  relationshipStatus?: string;
-  occupation?: string;
-  employer?: string;
-  handDominance: string;
-  handDominanceOther?: string;
-}
+  dateOfBirth: string | null;
+  gender: string | null;
+  handDominance?: string | null;
+  handDominanceOther?: string | null;
+};
 
-export interface Injury {
-  dateOfInjury: string;
-  ageAtInjury: number;
-  yearsSinceInjury: number;
-  injuryType: string;
-  injuryTypeOther?: string;
-  claimNumber?: string;
-  insurerName?: string;
-  insurerReference?: string;
-  insurerContactPerson?: string;
-}
+// ── Administrative ────────────────────────────────────────────────────────────
+
+export type Administrative = {
+  employer: string | null;
+  occupation: string | null;
+  relationshipStatus: string | null;
+  referrer: {
+    name: string | null;
+    org: string | null;
+  };
+};
+
+// ── Clinical ──────────────────────────────────────────────────────────────────
+
+export type InjuryData = {
+  dateOfInjury: string | null;
+  ageAtInjury: number | null;
+  yearsSinceInjury: number | null;
+  injuryType: string | null;
+  injuryTypeOther?: string | null;
+  claimNumber: string | null;
+  insurerName: string | null;
+  insurerReference: string | null;
+  insurerContactPerson: string | null;
+};
+
+export type Clinical = {
+  injury: InjuryData | null;
+};
+
+// ── Appointment ───────────────────────────────────────────────────────────────
+
+export type Appointment = {
+  id: UUID;
+  start: string;
+  end: string;
+  type: string;
+};
+
+// ── Assessment checklist ──────────────────────────────────────────────────────
 
 export interface AssessmentAttendees {
   attendedAlone: boolean;
@@ -52,20 +79,7 @@ export interface AssessmentChecklist {
   completedAt?: string;
 }
 
-export interface Referrer {
-  name?: string;
-  org?: string;
-}
-
-export interface Appointment {
-  id: string;
-  clientId: string;
-  start: string;
-  end: string;
-  type?: string;
-}
-
-// ── Report types ─────────────────────────────────────────────────────────────
+// ── Report ────────────────────────────────────────────────────────────────────
 
 export interface PreviousAssessorPIRS {
   id: string;
@@ -75,7 +89,7 @@ export interface PreviousAssessorPIRS {
   table: PIRSTableModel;
 }
 
-export interface ReportData {
+export interface Report {
   fields: Record<string, unknown>;
   pirsTables: PIRSTableModel[];
   previousAssessorPirs: PreviousAssessorPIRS[];
@@ -83,45 +97,62 @@ export interface ReportData {
   lastUpdated: string;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Client ────────────────────────────────────────────────────────────────────
 
-export interface ClientBlob {
-  demographics: Demographics;
-  injury: Injury;
-  referrer: Referrer;
+export type Client = {
+  id: UUID;
+  identity: Identity;
+  administrative: Administrative;
+  clinical: Clinical;
   appointments: Appointment[];
+  report: Report;
   assessmentChecklist: AssessmentChecklist;
-  report: ReportData;
-}
+  created_at: string;
+  updated_at: string;
+};
 
-// ── Default factories ────────────────────────────────────────────────────────
+// ── Default factories ─────────────────────────────────────────────────────────
 
-export function defaultDemographics(): Demographics {
+export function defaultIdentity(): Identity {
   return {
-    title: "",
+    title: null,
     firstName: "",
+    middleName: null,
     lastName: "",
-    gender: "",
-    dateOfBirth: "",
-    age: 0,
-    handDominance: "",
+    dateOfBirth: null,
+    gender: null,
+    handDominance: null,
   };
 }
 
-export function defaultInjury(): Injury {
+export function defaultAdministrative(): Administrative {
   return {
-    dateOfInjury: "",
-    ageAtInjury: 0,
-    yearsSinceInjury: 0,
-    injuryType: "",
+    employer: null,
+    occupation: null,
+    relationshipStatus: null,
+    referrer: { name: null, org: null },
   };
+}
+
+export function defaultInjury(): InjuryData {
+  return {
+    dateOfInjury: null,
+    ageAtInjury: null,
+    yearsSinceInjury: null,
+    injuryType: null,
+    claimNumber: null,
+    insurerName: null,
+    insurerReference: null,
+    insurerContactPerson: null,
+  };
+}
+
+export function defaultClinical(): Clinical {
+  return { injury: null };
 }
 
 export function defaultAttendees(): AssessmentAttendees {
-  return {
-    attendedAlone: true,
-    interpreterPresent: false,
-  };
+  return { attendedAlone: true, interpreterPresent: false };
 }
 
 export function defaultAssessmentChecklist(): AssessmentChecklist {
@@ -136,7 +167,7 @@ export function defaultAssessmentChecklist(): AssessmentChecklist {
   };
 }
 
-export function defaultReportData(): ReportData {
+export function defaultReport(): Report {
   return {
     fields: {},
     pirsTables: [],
@@ -146,24 +177,31 @@ export function defaultReportData(): ReportData {
   };
 }
 
-export function defaultClientBlob(): ClientBlob {
+export function defaultClient(): Client {
+  const now = new Date().toISOString();
   return {
-    demographics: defaultDemographics(),
-    injury: defaultInjury(),
-    referrer: {},
+    id: crypto.randomUUID(),
+    identity: defaultIdentity(),
+    administrative: defaultAdministrative(),
+    clinical: defaultClinical(),
     appointments: [],
+    report: defaultReport(),
     assessmentChecklist: defaultAssessmentChecklist(),
-    report: defaultReportData(),
+    created_at: now,
+    updated_at: now,
   };
 }
 
-// ── Utilities ────────────────────────────────────────────────────────────────
+// ── Utilities ─────────────────────────────────────────────────────────────────
 
-export function buildClientName(d: Demographics): string {
+export function buildClientName(
+  identity: Pick<Identity, "title" | "titleOther" | "firstName" | "lastName"> | null | undefined
+): string {
+  if (!identity) return "Unnamed Client";
   const displayTitle =
-    d.title === "Other" ? (d.titleOther || "") : (d.title || "");
+    identity.title === "Other" ? (identity.titleOther ?? "") : (identity.title ?? "");
   return (
-    [displayTitle, d.firstName, d.lastName].filter(Boolean).join(" ") ||
+    [displayTitle, identity.firstName, identity.lastName].filter(Boolean).join(" ") ||
     "Unnamed Client"
   );
 }
@@ -191,71 +229,79 @@ export function calcYearsSince(fromDate: string): number {
   return Math.max(0, Math.floor(ms / (365.25 * 24 * 60 * 60 * 1000)));
 }
 
-// All known demographics field names — used to safely pick flat demographics
-// from a blob where they live at the top level alongside other sections.
-const DEMOGRAPHICS_KEYS: ReadonlyArray<keyof Demographics> = [
-  "title", "titleOther", "firstName", "middleName", "lastName",
-  "gender", "dateOfBirth", "age", "relationshipStatus", "occupation",
-  "employer", "handDominance", "handDominanceOther",
-];
+// ── Blob parsing ──────────────────────────────────────────────────────────────
 
-function pickDemographics(src: Record<string, unknown>): Partial<Demographics> {
-  const out: Partial<Demographics> = {};
-  for (const k of DEMOGRAPHICS_KEYS) {
-    if (k in src) (out as Record<string, unknown>)[k] = src[k];
-  }
-  return out;
-}
-
-/**
- * Merge a raw blob from the projection with fresh defaults for missing fields.
- *
- * Storage format (new): demographics fields are flat at the top level of the
- * blob — no nested `demographics` key. Legacy blobs that still have a nested
- * `demographics` object are transparently handled via the fallback branch.
- */
-export function mergeBlob(raw: unknown): ClientBlob {
+export function parseClientBlob(id: string, raw: unknown): Client {
   const b = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const ident = (b.identity && typeof b.identity === "object" ? b.identity : {}) as Record<string, unknown>;
+  const admin = (b.administrative && typeof b.administrative === "object" ? b.administrative : {}) as Record<string, unknown>;
+  const ref = (admin.referrer && typeof admin.referrer === "object" ? admin.referrer : {}) as Record<string, unknown>;
+  const clin = (b.clinical && typeof b.clinical === "object" ? b.clinical : {}) as Record<string, unknown>;
+  const injRaw = clin.injury && typeof clin.injury === "object" ? (clin.injury as Record<string, unknown>) : null;
   const rawReport = (b.report && typeof b.report === "object" ? b.report : {}) as Record<string, unknown>;
-
-  // New format: demographics fields live flat at the top level.
-  // Legacy format: they were nested under a "demographics" key — fall back to
-  // that if the new flat keys are absent.
-  const demSrc =
-    (b.demographics && typeof b.demographics === "object" && !Array.isArray(b.demographics))
-      ? (b.demographics as Record<string, unknown>)
-      : b;
+  const chkRaw = (b.assessmentChecklist && typeof b.assessmentChecklist === "object" ? b.assessmentChecklist : {}) as Record<string, unknown>;
+  const attRaw = (chkRaw.attendees && typeof chkRaw.attendees === "object" ? chkRaw.attendees : {}) as Record<string, unknown>;
 
   return {
-    demographics: {
-      ...defaultDemographics(),
-      ...pickDemographics(demSrc),
+    id,
+    identity: {
+      title: (ident.title as string | null) ?? null,
+      titleOther: (ident.titleOther as string | null) ?? null,
+      firstName: (ident.firstName as string) ?? "",
+      middleName: (ident.middleName as string | null) ?? null,
+      lastName: (ident.lastName as string) ?? "",
+      dateOfBirth: (ident.dateOfBirth as string | null) ?? null,
+      gender: (ident.gender as string | null) ?? null,
+      handDominance: (ident.handDominance as string | null) ?? null,
+      handDominanceOther: (ident.handDominanceOther as string | null) ?? null,
     },
-    injury: {
-      ...defaultInjury(),
-      ...((b.injury && typeof b.injury === "object" ? b.injury : {}) as Partial<Injury>),
-    },
-    referrer: ((b.referrer && typeof b.referrer === "object" ? b.referrer : {}) as Referrer),
-    appointments: Array.isArray(b.appointments) ? (b.appointments as Appointment[]) : [],
-    assessmentChecklist: {
-      ...defaultAssessmentChecklist(),
-      ...((b.assessmentChecklist && typeof b.assessmentChecklist === "object" ? b.assessmentChecklist : {}) as Partial<AssessmentChecklist>),
-      attendees: {
-        ...defaultAttendees(),
-        ...((b.assessmentChecklist && typeof b.assessmentChecklist === "object"
-          ? (b.assessmentChecklist as Record<string, unknown>).attendees
-          : {}) as Partial<AssessmentAttendees>),
+    administrative: {
+      employer: (admin.employer as string | null) ?? null,
+      occupation: (admin.occupation as string | null) ?? null,
+      relationshipStatus: (admin.relationshipStatus as string | null) ?? null,
+      referrer: {
+        name: (ref.name as string | null) ?? null,
+        org: (ref.org as string | null) ?? null,
       },
     },
+    clinical: {
+      injury: injRaw ? {
+        dateOfInjury: (injRaw.dateOfInjury as string | null) ?? null,
+        ageAtInjury: (injRaw.ageAtInjury as number | null) ?? null,
+        yearsSinceInjury: (injRaw.yearsSinceInjury as number | null) ?? null,
+        injuryType: (injRaw.injuryType as string | null) ?? null,
+        injuryTypeOther: (injRaw.injuryTypeOther as string | null) ?? null,
+        claimNumber: (injRaw.claimNumber as string | null) ?? null,
+        insurerName: (injRaw.insurerName as string | null) ?? null,
+        insurerReference: (injRaw.insurerReference as string | null) ?? null,
+        insurerContactPerson: (injRaw.insurerContactPerson as string | null) ?? null,
+      } : null,
+    },
+    appointments: Array.isArray(b.appointments) ? (b.appointments as Appointment[]) : [],
     report: {
-      ...defaultReportData(),
       fields: (rawReport.fields && typeof rawReport.fields === "object" ? rawReport.fields : {}) as Record<string, unknown>,
       pirsTables: Array.isArray(rawReport.pirsTables) ? (rawReport.pirsTables as PIRSTableModel[]) : [],
-      previousAssessorPirs: Array.isArray(rawReport.previousAssessorPirs)
-        ? (rawReport.previousAssessorPirs as PreviousAssessorPIRS[])
-        : [],
+      previousAssessorPirs: Array.isArray(rawReport.previousAssessorPirs) ? (rawReport.previousAssessorPirs as PreviousAssessorPIRS[]) : [],
       history: Array.isArray(rawReport.history) ? rawReport.history : [],
       lastUpdated: typeof rawReport.lastUpdated === "string" ? rawReport.lastUpdated : "",
     },
+    assessmentChecklist: {
+      ...defaultAssessmentChecklist(),
+      ...(chkRaw as Partial<AssessmentChecklist>),
+      attendees: {
+        ...defaultAttendees(),
+        ...(attRaw as Partial<AssessmentAttendees>),
+      },
+    },
+    created_at: typeof b.created_at === "string" ? b.created_at : new Date().toISOString(),
+    updated_at: typeof b.updated_at === "string" ? b.updated_at : new Date().toISOString(),
   };
+}
+
+// ── Calendar adapter ──────────────────────────────────────────────────────────
+
+export type CalendarEvent = Appointment & { client: Client };
+
+export function mapClientToCalendarEvents(client: Client): CalendarEvent[] {
+  return client.appointments.map((a) => ({ ...a, client }));
 }

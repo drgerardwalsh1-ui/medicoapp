@@ -44,6 +44,7 @@ type CategoryRowProps = {
   table: PIRSTableModel;
   update: (t: PIRSTableModel) => void;
   hideRationale: boolean;
+  onCategoryFocus?: (index: number) => void;
 };
 
 const CategoryRow = memo(function CategoryRow({
@@ -51,7 +52,8 @@ const CategoryRow = memo(function CategoryRow({
   categoryName,
   table,
   update,
-  hideRationale
+  hideRationale,
+  onCategoryFocus,
 }: CategoryRowProps) {
   const handleClassChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -90,7 +92,11 @@ const CategoryRow = memo(function CategoryRow({
   const impairmentText = IMPAIR_TEXT[(classValue || 1) - 1];
 
   return (
-    <tr className="align-top">
+    <tr
+      className="align-top"
+      onFocusCapture={() => onCategoryFocus?.(index)}
+      onClickCapture={() => onCategoryFocus?.(index)}
+    >
   {/* CATEGORY COLUMN — small */}
   <td className="py-2 pr-4 w-1/6">
     {index + 1}. {categoryName}
@@ -598,7 +604,15 @@ const ThreeColumnTable = memo(function ThreeColumnTable({
 // MAIN COMPONENT EXPORT
 // ------------------------------------------------------------
 
-export default function PIRSTable({ table, update }: { table: PIRSTableModel; update: (t: PIRSTableModel) => void }) {
+export default function PIRSTable({
+  table,
+  update,
+  onCategoryFocus,
+}: {
+  table: PIRSTableModel;
+  update: (t: PIRSTableModel) => void;
+  onCategoryFocus?: (index: number) => void;
+}) {
   const result = useMemo(() => calculatePIRS(table), [table]);
 
   const isPreInjury = table.name.includes("Pre-injury");
@@ -641,6 +655,7 @@ export default function PIRSTable({ table, update }: { table: PIRSTableModel; up
               table={table}
               update={update}
               hideRationale={hideRationale}
+              onCategoryFocus={onCategoryFocus}
             />
           ))}
         </tbody>

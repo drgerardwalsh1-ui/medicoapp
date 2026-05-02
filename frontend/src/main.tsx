@@ -11,22 +11,15 @@ import AppLayout from "./components/AppLayout";
 import type { TopBarProps } from "./components/TopBar";
 import {
   buildClientName,
-  mergeBlob,
+  parseClientBlob,
+  type Client,
   type Appointment,
 } from "./types/client";
 
-type Client = Record<string, unknown>;
 type View = "home" | "client" | "app" | "create" | "calendar" | "finance" | "system";
 
-// Adapt a ClientViewModel from the projection into the in-memory client shape.
 function viewToClient(v: ClientViewModel): Client {
-  const blob = mergeBlob(v.demographics);
-  return {
-    id: v.id,
-    name: v.name || buildClientName(blob.demographics) || "Unnamed Client",
-    ...blob,
-    documents: v.documents ?? [],
-  };
+  return parseClientBlob(v.id, v.demographics);
 }
 
 function Root() {
@@ -34,13 +27,11 @@ function Root() {
   const [activeClient, setActiveClient] = useState<Client | null>(null);
   const [view, setView] = useState<View>("home");
 
-  // Bridge from the global TopBar Save button to ClientHome's handleSave.
   const saveHandlerRef = useRef<(() => void) | null>(null);
   const registerSaveHandler = (fn: (() => void) | null) => {
     saveHandlerRef.current = fn;
   };
 
-  // Bridge from TopBar Version History button.
   const vhHandlerRef = useRef<(() => void) | null>(null);
   const registerVersionHistoryHandler = (fn: (() => void) | null) => {
     vhHandlerRef.current = fn;
@@ -55,32 +46,24 @@ function Root() {
     }
   }
 
-  // Initial load.
   useEffect(() => {
     if (isTauri) refreshFromProjection();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Refresh projection when navigating to Home or Calendar.
   useEffect(() => {
     if (isTauri && (view === "home" || view === "calendar")) refreshFromProjection();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
   function handleClientSave(updated: Client) {
-    const blob = mergeBlob(updated);
-    const name =
-      (updated.name as string) ||
-      buildClientName(blob.demographics) ||
-      "Unnamed Client";
-    const merged: Client = { ...updated, name };
     setClients((prev) => {
-      const exists = prev.some((c) => c.id === merged.id);
+      const exists = prev.some((c) => c.id === updated.id);
       return exists
-        ? prev.map((c) => (c.id === merged.id ? merged : c))
-        : [...prev, merged];
+        ? prev.map((c) => (c.id === updated.id ? updated : c))
+        : [...prev, updated];
     });
-    setActiveClient(merged);
+    setActiveClient(updated);
   }
 
   function handleReset() {
@@ -144,7 +127,7 @@ function Root() {
       }
       return (
         <ClientHome
-          key={activeClient.id as string}
+          key={activeClient.id}
           client={activeClient}
           isNew={false}
           onSave={handleClientSave}
@@ -208,7 +191,7 @@ function Root() {
     }
     if (view === "client") {
       return {
-        title: (activeClient?.name as string) || "Client Profile",
+        title: buildClientName(activeClient?.identity) || "Client Profile",
         onBack: () => setView("home"),
         showSave: !!activeClient,
         onSave: () => saveHandlerRef.current?.(),

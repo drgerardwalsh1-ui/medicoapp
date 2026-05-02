@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { TauriAPI, isTauri } from "../api/tauriApi";
+import { buildClientName } from "../types/client";
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 
@@ -583,9 +584,10 @@ function ClientTools({
 
   async function downloadClientJson() {
     if (!isTauri) { push("error", "Tauri runtime not available."); return; }
-    const c = selectedClient() as { name?: string; id: string } | null;
+    const c = selectedClient() as { id: string; identity?: unknown } | null;
     if (!c) return;
-    const slug = (c.name ?? c.id).replace(/[^a-z0-9]+/gi, "_").toLowerCase();
+    const name = buildClientName((c as any).identity);
+    const slug = (name || c.id).replace(/[^a-z0-9]+/gi, "_").toLowerCase();
     const filename = `client_${slug}.json`;
     try {
       const json = JSON.stringify(c, null, 2);
@@ -596,9 +598,13 @@ function ClientTools({
           action: () => TauriAPI.revealInFinder(savedPath).catch(() => {}),
         },
       ]);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg !== "cancelled") push("error", `Save failed: ${msg}`);
+    } catch (err) {
+      if ((err as any)?.name === "AbortError") return;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg !== "cancelled") {
+        console.error("Download failed:", err);
+        push("error", `Save failed: ${msg}`);
+      }
     }
   }
 
@@ -610,7 +616,7 @@ function ClientTools({
     push("info", "Client data logged to console (open DevTools to view)");
   }
 
-  const client = selectedClient() as { name?: string } | null;
+  const client = selectedClient() as { id: string; identity?: unknown } | null;
 
   return (
     <div>
@@ -638,9 +644,9 @@ function ClientTools({
               onChange={(e) => setSelectedId(e.target.value)}
               className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm text-slate-700 bg-white max-w-xs"
             >
-              {(clients as Array<{ id: string; name?: string }>).map((c) => (
+              {(clients as Array<{ id: string; identity?: unknown }>).map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name ?? c.id}
+                  {buildClientName((c.identity as any) ?? null) || c.id}
                 </option>
               ))}
             </select>
@@ -660,7 +666,7 @@ function ClientTools({
           <button
             onClick={() =>
               setJsonModal({
-                title: (client as { name?: string }).name ?? "Client",
+                title: buildClientName((client.identity as any) ?? null) || "Client",
                 data: client,
               })
             }

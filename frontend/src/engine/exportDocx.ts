@@ -1,31 +1,34 @@
 import { saveAs } from "file-saver";
 import { Document, Packer, Paragraph } from "docx";
 import { buildDocument } from "./documentEngine";
+import { buildClientName, type Client } from "../types/client";
 
-export async function exportReportToDocx(client: any, _title: string) {
+export async function exportReportToDocx(client: Client, _title: string) {
+  const report = client.report ?? {};
+  const identity = client.identity;
+  const inj = client.clinical?.injury;
 
-  const report = client.report || {};
-  const d = client.demographics || {};
+  const name = buildClientName(identity);
+  const header = [
+    `Name: ${name}`,
+    `DOB: ${identity?.dateOfBirth ?? ""}`,
+    `Claim: ${inj?.claimNumber ?? ""}`,
+    `Insurer: ${inj?.insurerName ?? ""}`,
+  ].join("\n");
 
-  const header = `
-Name: ${d.forename || ""} ${d.surname || ""}
-DOB: ${d.dob || ""}
-Claim: ${d.claim || ""}
-Insurer: ${d.insurer || ""}
-`;
-
-  const text = header + "\n\n" + buildDocument(report);
+  const text = header + "\n\n" + buildDocument(report.fields ?? {});
 
   const doc = new Document({
     sections: [
       {
         children: text.split("\n").map(
           (line) => new Paragraph({ text: line })
-        )
-      }
-    ]
+        ),
+      },
+    ],
   });
 
   const blob = await Packer.toBlob(doc);
-  saveAs(blob, `${client.name}.docx`);
+  const slug = name.replace(/[^a-z0-9]+/gi, "_").toLowerCase() || "client";
+  saveAs(blob, `${slug}.docx`);
 }

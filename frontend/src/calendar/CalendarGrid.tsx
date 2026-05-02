@@ -10,14 +10,13 @@ import {
   pixelsToDateTime,
 } from "./calendarUtils";
 import type { AppointmentWithClient } from "./useCalendar";
-import type { Appointment } from "./calendarUtils";
 
 interface Props {
   weekDates: Date[];
   appointmentsByDay: Record<number, AppointmentWithClient[]>;
   onNavigate: (clientId: string) => void;
   onSlotClick: (start: Date) => void;
-  onUpdateAppointment: (updated: Appointment) => Promise<void>;
+  onUpdateAppointment: (updated: AppointmentWithClient) => Promise<void>;
 }
 
 export default function CalendarGrid({

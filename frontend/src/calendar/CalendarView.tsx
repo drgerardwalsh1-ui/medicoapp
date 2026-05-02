@@ -1,16 +1,16 @@
 import { useState, useMemo } from "react";
 import CalendarGrid from "./CalendarGrid";
+import { buildClientName, type Client, type Appointment } from "../types/client";
 import { useCalendar } from "./useCalendar";
 import {
-  type Appointment,
   formatMonthYear,
   formatDateRange,
 } from "./calendarUtils";
 
 interface CalendarViewProps {
-  clients: any[];
+  clients: Client[];
   onNavigate: (clientId: string) => void;
-  onUpdateClient: (updated: any) => void;
+  onUpdateClient: (updated: Client) => void;
 }
 
 // ── New-appointment modal ────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ function NewApptModal({ clients, initialStart, onSave, onCancel }: NewApptModalP
             )}
             {clients.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.name}
+                {buildClientName(c.identity) || c.id}
               </option>
             ))}
           </select>

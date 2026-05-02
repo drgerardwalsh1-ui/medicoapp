@@ -10,14 +10,19 @@ import {
 import DocumentCard, { type IngestedDoc } from "../components/DocumentCard";
 import {
   buildClientName,
-  mergeBlob,
+  parseClientBlob,
+  defaultClient,
   defaultAssessmentChecklist,
-  defaultReportData,
+  defaultAttendees,
+  defaultReport,
+  defaultInjury,
   isAppointmentToday,
   calcAge,
   calcAgeAtDate,
   calcYearsSince,
+  type Client,
   type Appointment,
+  type InjuryData,
 } from "../types/client";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -41,6 +46,7 @@ const TECHNICAL_ISSUES = [
   { value: "minor", label: "Minor" },
   { value: "significant", label: "Significant" },
 ];
+const ORG_PRESETS = ["PIC Workers", "PIC Motor", "HPL", "Medilaw"];
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -55,18 +61,14 @@ export default function ClientHome({
 }: any) {
 
   // ── Initial state ──────────────────────────────────────────────────────────
-  const initBlob = mergeBlob(client ?? {});
+  const initClient: Client = client
+    ? (client as Client)
+    : defaultClient();
 
-  const [data, setData] = useState<any>(() => ({
-    id: client?.id || Date.now().toString(),
-    name: client?.name || "",
-    demographics: client?.demographics ?? initBlob.demographics,
-    injury: client?.injury ?? initBlob.injury,
-    referrer: client?.referrer ?? initBlob.referrer,
-    appointments: client?.appointments ?? initBlob.appointments,
-    assessmentChecklist:
-      client?.assessmentChecklist ?? initBlob.assessmentChecklist,
-    report: client?.report ?? initBlob.report ?? defaultReportData(),
+  const [data, setData] = useState<Client>(() => ({
+    ...initClient,
+    report: initClient.report ?? defaultReport(),
+    assessmentChecklist: initClient.assessmentChecklist ?? defaultAssessmentChecklist(),
   }));
 
   const [isSaved, setIsSaved] = useState(!isNew);
@@ -75,7 +77,7 @@ export default function ClientHome({
     useState<"idle" | "saving" | "saved" | "error">("idle");
 
   const [docs, setDocs] = useState<IngestedDoc[]>(() =>
-    (client?.documents || []).map((d: any): IngestedDoc => ({
+    ((client as any)?.documents || []).map((d: any): IngestedDoc => ({
       fileName: d.fileName ?? d.file_name ?? "(unnamed)",
       path: d.path ?? d.id ?? "",
       method: d.method ?? "text",
@@ -98,37 +100,38 @@ export default function ClientHome({
   const [ingesting, setIngesting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
 
-  // Checklist expanded if there's an appointment today, otherwise collapsed.
   const [checklistExpanded, setChecklistExpanded] = useState(() =>
     isAppointmentToday(data.appointments ?? [])
   );
 
-  // ── Derived display values (computed at render, stored at save) ────────────
-  const dem = data.demographics ?? {};
-  const inj = data.injury ?? {};
-  const ref = data.referrer ?? {};
+  // ── Derived aliases ────────────────────────────────────────────────────────
+  const ident = data.identity;
+  const admin = data.administrative;
+  const inj = data.clinical.injury;
+  const ref = data.administrative.referrer;
   const chk = data.assessmentChecklist ?? defaultAssessmentChecklist();
   const att = chk.attendees ?? {};
 
+  // ── Computed display values ────────────────────────────────────────────────
   const displayAge = useMemo(
-    () => (dem.dateOfBirth ? calcAge(dem.dateOfBirth) : ""),
-    [dem.dateOfBirth]
+    () => (ident.dateOfBirth ? calcAge(ident.dateOfBirth) : ""),
+    [ident.dateOfBirth]
   );
   const displayAgeAtInjury = useMemo(
     () =>
-      dem.dateOfBirth && inj.dateOfInjury
-        ? calcAgeAtDate(dem.dateOfBirth, inj.dateOfInjury)
+      ident.dateOfBirth && inj?.dateOfInjury
+        ? calcAgeAtDate(ident.dateOfBirth, inj.dateOfInjury)
         : "",
-    [dem.dateOfBirth, inj.dateOfInjury]
+    [ident.dateOfBirth, inj?.dateOfInjury]
   );
   const displayYearsSince = useMemo(
-    () => (inj.dateOfInjury ? calcYearsSince(inj.dateOfInjury) : ""),
-    [inj.dateOfInjury]
+    () => (inj?.dateOfInjury ? calcYearsSince(inj.dateOfInjury) : ""),
+    [inj?.dateOfInjury]
   );
 
-  // ── Primary appointment (next upcoming, or most recent past) ───────────────
+  // ── Primary appointment ────────────────────────────────────────────────────
   const apptDisplay = useMemo(() => {
-    const appts = (data.appointments ?? []) as Appointment[];
+    const appts = data.appointments ?? [];
     if (appts.length === 0) return null;
     const now = Date.now();
     const future = appts.filter((a) => new Date(a.start).getTime() >= now);
@@ -159,33 +162,60 @@ export default function ClientHome({
     const existing = apptDisplay?.raw;
     const appt: Appointment = {
       id: existing?.id ?? crypto.randomUUID(),
-      clientId: data.id,
       start: start.toISOString(),
       end: end.toISOString(),
       type: existing?.type ?? "assessment",
     };
-    setData((prev: any) => ({
+    setData((prev) => ({
       ...prev,
       appointments: existing
-        ? (prev.appointments ?? []).map((a: Appointment) =>
-            a.id === existing.id ? appt : a
-          )
-        : [...(prev.appointments ?? []), appt],
+        ? prev.appointments.map((a) => (a.id === existing.id ? appt : a))
+        : [...prev.appointments, appt],
     }));
     setIsDirty(true);
   }
 
   // ── Update helpers ─────────────────────────────────────────────────────────
-  function update(section: string, field: string, value: unknown) {
-    setData((prev: any) => ({
+
+  function updateIdentity(field: keyof typeof ident, value: unknown) {
+    setData((prev) => ({
       ...prev,
-      [section]: { ...(prev[section] ?? {}), [field]: value },
+      identity: { ...prev.identity, [field]: value },
+    }));
+    setIsDirty(true);
+  }
+
+  function updateAdministrative(field: keyof typeof admin, value: unknown) {
+    setData((prev) => ({
+      ...prev,
+      administrative: { ...prev.administrative, [field]: value },
+    }));
+    setIsDirty(true);
+  }
+
+  function updateReferrer(field: string, value: unknown) {
+    setData((prev) => ({
+      ...prev,
+      administrative: {
+        ...prev.administrative,
+        referrer: { ...prev.administrative.referrer, [field]: value },
+      },
+    }));
+    setIsDirty(true);
+  }
+
+  function updateInjury(field: keyof InjuryData, value: unknown) {
+    setData((prev) => ({
+      ...prev,
+      clinical: {
+        injury: { ...(prev.clinical.injury ?? defaultInjury()), [field]: value } as InjuryData,
+      },
     }));
     setIsDirty(true);
   }
 
   function updateChecklist(field: string, value: unknown) {
-    setData((prev: any) => ({
+    setData((prev) => ({
       ...prev,
       assessmentChecklist: {
         ...(prev.assessmentChecklist ?? defaultAssessmentChecklist()),
@@ -196,7 +226,7 @@ export default function ClientHome({
   }
 
   function updateAttendees(field: string, value: unknown) {
-    setData((prev: any) => ({
+    setData((prev) => ({
       ...prev,
       assessmentChecklist: {
         ...(prev.assessmentChecklist ?? defaultAssessmentChecklist()),
@@ -214,25 +244,22 @@ export default function ClientHome({
 
   function hydrateFromView(v: ClientViewModel) {
     setViewState(v);
-    const blob = mergeBlob(v.demographics);
-    setData((prev: any) => ({
-      ...prev,
+    const parsed = parseClientBlob(v.id, v.demographics);
+    setData((prev) => ({
+      ...parsed,
       id: v.id,
-      name: v.name ?? prev.name,
-      demographics: { ...(prev.demographics ?? {}), ...blob.demographics },
-      injury: { ...(prev.injury ?? {}), ...blob.injury },
-      referrer: blob.referrer,
-      appointments: blob.appointments.length
-        ? blob.appointments
-        : (prev.appointments ?? []),
+      report: prev.report,
       assessmentChecklist: {
-        ...(prev.assessmentChecklist ?? defaultAssessmentChecklist()),
-        ...blob.assessmentChecklist,
+        ...defaultAssessmentChecklist(),
+        ...parsed.assessmentChecklist,
         attendees: {
-          ...(prev.assessmentChecklist?.attendees ?? {}),
-          ...blob.assessmentChecklist.attendees,
+          ...defaultAttendees(),
+          ...parsed.assessmentChecklist.attendees,
         },
       },
+      appointments: parsed.appointments.length
+        ? parsed.appointments
+        : prev.appointments,
     }));
   }
 
@@ -333,40 +360,36 @@ export default function ClientHome({
   }
 
   // ── Save ───────────────────────────────────────────────────────────────────
-  function buildBlob() {
-    const dob = data.demographics?.dateOfBirth;
-    const doi = data.injury?.dateOfInjury;
+  function buildBlob(): Record<string, unknown> {
+    const dob = data.identity.dateOfBirth;
+    const doi = data.clinical.injury?.dateOfInjury ?? null;
     return {
-      // Demographics fields flat at the top level — no nested "demographics" key
-      ...data.demographics,
-      age: dob ? calcAge(dob) : (data.demographics?.age ?? 0),
-      injury: {
-        ...data.injury,
-        ageAtInjury:
-          dob && doi ? calcAgeAtDate(dob, doi) : (data.injury?.ageAtInjury ?? 0),
-        yearsSinceInjury: doi
-          ? calcYearsSince(doi)
-          : (data.injury?.yearsSinceInjury ?? 0),
+      identity: data.identity,
+      administrative: data.administrative,
+      clinical: {
+        injury: data.clinical.injury ? {
+          ...data.clinical.injury,
+          ageAtInjury:
+            dob && doi ? calcAgeAtDate(dob, doi) : (data.clinical.injury.ageAtInjury ?? null),
+          yearsSinceInjury: doi
+            ? calcYearsSince(doi)
+            : (data.clinical.injury.yearsSinceInjury ?? null),
+        } : null,
       },
-      referrer: data.referrer ?? {},
-      appointments: data.appointments ?? [],
+      appointments: data.appointments,
       assessmentChecklist: data.assessmentChecklist ?? defaultAssessmentChecklist(),
-      report: data.report ?? defaultReportData(),
+      report: data.report ?? defaultReport(),
     };
   }
 
   async function handleSave() {
     console.log("SAVE BUTTON CLICKED / handleSave entered");
-    console.log("SAVING CLIENT", data);
     const blob = buildBlob();
-    // data.demographics holds the structured Demographics object.
-    // blob is flat (demographics fields at top level, no blob.demographics key).
-    const computedName = buildClientName(data.demographics) || "Unnamed Client";
-    console.log("onSave CALLED", data);
+    const computedName = buildClientName(data.identity) || "Unnamed Client";
     setSaveStatus("saving");
 
     if (!isTauri) {
-      const updated = { ...data, name: computedName, documents: docs };
+      const updated: Client = { ...data, documents: (docs as any) };
       onSave?.(updated);
       setData(updated);
       setIsSaved(true);
@@ -377,7 +400,7 @@ export default function ClientHome({
     }
 
     try {
-      let id = data.id as string;
+      let id = data.id;
       let exists = false;
       try {
         await TauriAPI.getClientView(id);
@@ -394,7 +417,7 @@ export default function ClientHome({
 
       await refetchView(id);
       setIsSaved(true);
-      onSave?.({ ...data, id, name: computedName, documents: docs });
+      onSave?.({ ...data, id, documents: docs });
       setIsDirty(false);
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 2000);
@@ -434,7 +457,6 @@ export default function ClientHome({
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        console.log("CMD+S TRIGGERED");
         const el = document.activeElement;
         if (el instanceof HTMLElement) el.blur();
         setTimeout(() => handleSaveRef.current?.(), 0);
@@ -461,7 +483,6 @@ export default function ClientHome({
     return () => clearTimeout(timer);
   }, [isDirty, isSaved, data]);
 
-  // ── Auto-save on unmount ───────────────────────────────────────────────────
   useEffect(() => {
     return () => {
       if (isDirtyRef.current && isTauri) {
@@ -472,7 +493,6 @@ export default function ClientHome({
     };
   }, []);
 
-  // ── Before-unload warning ──────────────────────────────────────────────────
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
       if (isDirtyRef.current) { e.preventDefault(); e.returnValue = ""; }
@@ -589,9 +609,8 @@ export default function ClientHome({
     };
   }, [isSaved]);
 
-  // ── Mark checklist complete ────────────────────────────────────────────────
   function markChecklistComplete() {
-    setData((prev: any) => ({
+    setData((prev) => ({
       ...prev,
       assessmentChecklist: {
         ...(prev.assessmentChecklist ?? defaultAssessmentChecklist()),
@@ -614,63 +633,61 @@ export default function ClientHome({
           ← Back
         </button>
         <span className="text-sm font-semibold text-slate-700">
-          {buildClientName(dem) || "New Client"}
+          {buildClientName(ident) || "New Client"}
         </span>
         <SaveStatusIndicator status={saveStatus} dirty={isDirty} />
       </div>
 
-      {/* ── DEMOGRAPHICS ── */}
+      {/* ── IDENTITY ── */}
       <div className="card space-y-4">
         <h2 className="section-title">Demographics</h2>
 
-        {/* Title + First + Middle + Last */}
         <div className="grid grid-cols-4 gap-3">
           <div>
             <label className="label">Title</label>
-            <select className="input" value={dem.title || ""}
-              onChange={(e) => update("demographics", "title", e.target.value)}>
+            <select className="input" value={ident.title || ""}
+              onChange={(e) => updateIdentity("title", e.target.value || null)}>
               <option value="">—</option>
               {TITLE_OPTIONS.map((t) => (
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>
           </div>
-          {dem.title === "Other" && (
+          {ident.title === "Other" && (
             <div>
               <label className="label">Title (specify)</label>
-              <input className="input" value={dem.titleOther || ""}
-                onChange={(e) => update("demographics", "titleOther", e.target.value)} />
+              <input className="input" value={ident.titleOther || ""}
+                onChange={(e) => updateIdentity("titleOther", e.target.value || null)} />
             </div>
           )}
-          <div className={dem.title === "Other" ? "" : "col-span-1"}>
+          <div className={ident.title === "Other" ? "" : "col-span-1"}>
             <label className="label">First Name</label>
-            <input className="input" value={dem.firstName || ""}
-              onChange={(e) => update("demographics", "firstName", e.target.value)} />
+            <input className="input" value={ident.firstName || ""}
+              onChange={(e) => updateIdentity("firstName", e.target.value)} />
           </div>
           <div>
             <label className="label">Middle Name</label>
-            <input className="input" value={dem.middleName || ""}
-              onChange={(e) => update("demographics", "middleName", e.target.value)} />
+            <input className="input" value={ident.middleName || ""}
+              onChange={(e) => updateIdentity("middleName", e.target.value || null)} />
           </div>
           <div>
             <label className="label">Last Name</label>
-            <input className="input" value={dem.lastName || ""}
-              onChange={(e) => update("demographics", "lastName", e.target.value)} />
+            <input className="input" value={ident.lastName || ""}
+              onChange={(e) => updateIdentity("lastName", e.target.value)} />
           </div>
         </div>
 
-        {/* Gender + DOB + Age */}
         <div className="grid grid-cols-3 gap-3">
           <div>
             <label className="label">Gender</label>
-            <input className="input" value={dem.gender || ""}
+            <input className="input" value={ident.gender || ""}
               placeholder="e.g. Male, Female, Non-binary"
-              onChange={(e) => update("demographics", "gender", e.target.value)} />
+              onChange={(e) => updateIdentity("gender", e.target.value || null)} />
           </div>
           <div>
             <label className="label">Date of Birth</label>
-            <input type="date" className="input" value={dem.dateOfBirth || ""}
-              onChange={(e) => update("demographics", "dateOfBirth", e.target.value)} />
+            <input type="date" className="input" value={ident.dateOfBirth || ""}
+              onChange={(e) => updateIdentity("dateOfBirth", e.target.value || null)} />
           </div>
           <div>
             <label className="label">Age</label>
@@ -688,35 +705,35 @@ export default function ClientHome({
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="label">Relationship Status</label>
-            <input className="input" value={dem.relationshipStatus || ""}
+            <input className="input" value={admin.relationshipStatus || ""}
               placeholder="e.g. Married, Single"
-              onChange={(e) => update("demographics", "relationshipStatus", e.target.value)} />
+              onChange={(e) => updateAdministrative("relationshipStatus", e.target.value || null)} />
           </div>
           <div>
             <label className="label">Occupation</label>
-            <input className="input" value={dem.occupation || ""}
-              onChange={(e) => update("demographics", "occupation", e.target.value)} />
+            <input className="input" value={admin.occupation || ""}
+              onChange={(e) => updateAdministrative("occupation", e.target.value || null)} />
           </div>
           <div>
             <label className="label">Employer</label>
-            <input className="input" value={dem.employer || ""}
-              onChange={(e) => update("demographics", "employer", e.target.value)} />
+            <input className="input" value={admin.employer || ""}
+              onChange={(e) => updateAdministrative("employer", e.target.value || null)} />
           </div>
           <div>
             <label className="label">Hand Dominance</label>
-            <select className="input" value={dem.handDominance || ""}
-              onChange={(e) => update("demographics", "handDominance", e.target.value)}>
+            <select className="input" value={ident.handDominance || ""}
+              onChange={(e) => updateIdentity("handDominance", e.target.value || null)}>
               <option value="">—</option>
               {HAND_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
           </div>
-          {dem.handDominance === "other" && (
+          {ident.handDominance === "other" && (
             <div>
               <label className="label">Hand Dominance (specify)</label>
-              <input className="input" value={dem.handDominanceOther || ""}
-                onChange={(e) => update("demographics", "handDominanceOther", e.target.value)} />
+              <input className="input" value={ident.handDominanceOther || ""}
+                onChange={(e) => updateIdentity("handDominanceOther", e.target.value || null)} />
             </div>
           )}
         </div>
@@ -726,12 +743,11 @@ export default function ClientHome({
       <div className="card space-y-4">
         <h2 className="section-title">Injury Details</h2>
 
-        {/* Dates row */}
         <div className="grid grid-cols-3 gap-3">
           <div>
             <label className="label">Date of Injury</label>
-            <input type="date" className="input" value={inj.dateOfInjury || ""}
-              onChange={(e) => update("injury", "dateOfInjury", e.target.value)} />
+            <input type="date" className="input" value={inj?.dateOfInjury || ""}
+              onChange={(e) => updateInjury("dateOfInjury", e.target.value || null)} />
           </div>
           <div>
             <label className="label">Age at Injury</label>
@@ -747,48 +763,46 @@ export default function ClientHome({
           </div>
         </div>
 
-        {/* Injury type */}
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="label">Injury Type</label>
-            <select className="input" value={inj.injuryType || ""}
-              onChange={(e) => update("injury", "injuryType", e.target.value)}>
+            <select className="input" value={inj?.injuryType || ""}
+              onChange={(e) => updateInjury("injuryType", e.target.value || null)}>
               <option value="">—</option>
               {INJURY_TYPES.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
           </div>
-          {inj.injuryType === "other" && (
+          {inj?.injuryType === "other" && (
             <div>
               <label className="label">Injury Type (specify)</label>
-              <input className="input" value={inj.injuryTypeOther || ""}
-                onChange={(e) => update("injury", "injuryTypeOther", e.target.value)} />
+              <input className="input" value={inj?.injuryTypeOther || ""}
+                onChange={(e) => updateInjury("injuryTypeOther", e.target.value || null)} />
             </div>
           )}
           <div>
             <label className="label">Claim Number</label>
-            <input className="input" value={inj.claimNumber || ""}
-              onChange={(e) => update("injury", "claimNumber", e.target.value)} />
+            <input className="input" value={inj?.claimNumber || ""}
+              onChange={(e) => updateInjury("claimNumber", e.target.value || null)} />
           </div>
         </div>
 
-        {/* Insurer */}
         <div className="grid grid-cols-3 gap-3">
           <div>
             <label className="label">Insurer Name</label>
-            <input className="input" value={inj.insurerName || ""}
-              onChange={(e) => update("injury", "insurerName", e.target.value)} />
+            <input className="input" value={inj?.insurerName || ""}
+              onChange={(e) => updateInjury("insurerName", e.target.value || null)} />
           </div>
           <div>
             <label className="label">Insurer Reference</label>
-            <input className="input" value={inj.insurerReference || ""}
-              onChange={(e) => update("injury", "insurerReference", e.target.value)} />
+            <input className="input" value={inj?.insurerReference || ""}
+              onChange={(e) => updateInjury("insurerReference", e.target.value || null)} />
           </div>
           <div>
             <label className="label">Insurer Contact</label>
-            <input className="input" value={inj.insurerContactPerson || ""}
-              onChange={(e) => update("injury", "insurerContactPerson", e.target.value)} />
+            <input className="input" value={inj?.insurerContactPerson || ""}
+              onChange={(e) => updateInjury("insurerContactPerson", e.target.value || null)} />
           </div>
         </div>
       </div>
@@ -800,12 +814,20 @@ export default function ClientHome({
           <div>
             <label className="label">Referrer Name</label>
             <input className="input" value={ref.name || ""}
-              onChange={(e) => update("referrer", "name", e.target.value)} />
+              onChange={(e) => updateReferrer("name", e.target.value || null)} />
           </div>
           <div>
             <label className="label">Organisation</label>
-            <input className="input" value={ref.org || ""}
-              onChange={(e) => update("referrer", "org", e.target.value)} />
+            <input
+              className="input"
+              list="org-presets"
+              value={ref.org || ""}
+              placeholder="Select or type…"
+              onChange={(e) => updateReferrer("org", e.target.value || null)}
+            />
+            <datalist id="org-presets">
+              {ORG_PRESETS.map((o) => <option key={o} value={o} />)}
+            </datalist>
           </div>
         </div>
       </div>
@@ -846,9 +868,9 @@ export default function ClientHome({
             />
           </div>
         </div>
-        {(data.appointments ?? []).length > 1 && (
+        {data.appointments.length > 1 && (
           <p className="text-xs text-slate-400">
-            {(data.appointments ?? []).length} appointments total — showing{" "}
+            {data.appointments.length} appointments total — showing{" "}
             {apptDisplay?.isFuture ? "next upcoming" : "most recent"}. Manage others in Calendar.
           </p>
         )}
@@ -876,7 +898,6 @@ export default function ClientHome({
 
         {checklistExpanded && (
           <div className="space-y-5 pt-1">
-            {/* Modality */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="label">Assessment Modality</label>
@@ -894,7 +915,6 @@ export default function ClientHome({
               </div>
             </div>
 
-            {/* Consent + Purpose */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="label">Consent Given</label>
@@ -921,7 +941,6 @@ export default function ClientHome({
               </div>
             </div>
 
-            {/* Technical issues */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="label">Technical Issues</label>
@@ -941,7 +960,6 @@ export default function ClientHome({
               )}
             </div>
 
-            {/* Attendees */}
             <div className="space-y-3">
               <h3 className="text-sm font-semibold text-slate-700">Attendees</h3>
               <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
@@ -959,7 +977,6 @@ export default function ClientHome({
               )}
             </div>
 
-            {/* Interpreter */}
             <div className="space-y-3">
               <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
                 <input type="checkbox" className="w-4 h-4 accent-violet-600"
@@ -988,7 +1005,6 @@ export default function ClientHome({
               )}
             </div>
 
-            {/* Mark complete */}
             {!chk.completed ? (
               <button
                 type="button"
@@ -1099,8 +1115,6 @@ export default function ClientHome({
         }}
       >
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh]">
-
-          {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
             <div className="flex items-center gap-3">
               {previewVersion !== null && (
@@ -1127,7 +1141,6 @@ export default function ClientHome({
             </button>
           </div>
 
-          {/* Body */}
           <div className="flex-1 overflow-y-auto">
             {previewVersion === null ? (
               <div className="p-6">
@@ -1159,10 +1172,13 @@ export default function ClientHome({
             ) : (
               <div className="p-6 space-y-5">
                 {previewSnapshot ? (() => {
-                  const blob = mergeBlob(previewSnapshot.demographics);
-                  const d = blob.demographics;
-                  const inj2 = blob.injury;
-                  const r2 = blob.referrer;
+                  const parsed = parseClientBlob(
+                    previewSnapshot.client_id ?? data.id,
+                    previewSnapshot.demographics
+                  );
+                  const d = parsed.identity;
+                  const inj2 = parsed.clinical.injury;
+                  const r2 = parsed.administrative.referrer;
                   return (
                     <>
                       <PreviewSection title="Demographics" rows={[
@@ -1175,16 +1191,16 @@ export default function ClientHome({
                         ["Hand Dominance", d.handDominance],
                       ]} />
                       <PreviewSection title="Personal & Occupational" rows={[
-                        ["Relationship Status", d.relationshipStatus],
-                        ["Occupation", d.occupation],
-                        ["Employer", d.employer],
+                        ["Relationship Status", parsed.administrative.relationshipStatus],
+                        ["Occupation", parsed.administrative.occupation],
+                        ["Employer", parsed.administrative.employer],
                       ]} />
                       <PreviewSection title="Injury Details" rows={[
-                        ["Date of Injury", inj2.dateOfInjury],
-                        ["Injury Type", inj2.injuryType === "other" ? inj2.injuryTypeOther : inj2.injuryType],
-                        ["Claim Number", inj2.claimNumber],
-                        ["Insurer", inj2.insurerName],
-                        ["Insurer Ref", inj2.insurerReference],
+                        ["Date of Injury", inj2?.dateOfInjury],
+                        ["Injury Type", inj2?.injuryType === "other" ? inj2?.injuryTypeOther : inj2?.injuryType],
+                        ["Claim Number", inj2?.claimNumber],
+                        ["Insurer", inj2?.insurerName],
+                        ["Insurer Ref", inj2?.insurerReference],
                       ]} />
                       <PreviewSection title="Referrer" rows={[
                         ["Name", r2.name],
@@ -1199,7 +1215,6 @@ export default function ClientHome({
             )}
           </div>
 
-          {/* Footer (preview mode only) */}
           {previewVersion !== null && previewSnapshot && (
             <div className="px-6 py-4 border-t border-slate-200 shrink-0 flex gap-3 flex-wrap">
               <button className="btn-secondary" onClick={copyDemographicsFromPreview}

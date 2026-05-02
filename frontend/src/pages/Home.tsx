@@ -1,6 +1,5 @@
 import { useState } from "react";
-
-type Client = Record<string, unknown>;
+import { buildClientName, type Client } from "../types/client";
 
 function nextAppointmentStart(client: Client): number {
   const appts = client.appointments as Array<{ start: string }> | undefined;
@@ -74,7 +73,7 @@ export default function Home({
   }
 
   function clientDisplayName(c: Client): string {
-    return (c.name as string) || "Unnamed Client";
+    return buildClientName(c.identity) || "Unnamed Client";
   }
 
   function ClientRow({ c }: { c: Client }) {

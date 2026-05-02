@@ -1,19 +1,13 @@
-export type Appointment = {
-  id: string;
-  clientId: string;
-  start: string; // ISO datetime
-  end: string;   // ISO datetime
-  type?: "assessment" | "review" | "other";
-};
+export type { Appointment } from "../types/client";
 
 export type ClientStatus = "complete" | "in_progress" | "missing";
 
 // Grid layout constants
-export const HOUR_HEIGHT = 64;       // px per hour
-export const START_HOUR = 8;         // 8 AM
-export const END_HOUR = 19;          // last label = 18:00, grid ends at 19
+export const HOUR_HEIGHT = 64;
+export const START_HOUR = 8;
+export const END_HOUR = 19;
 export const SNAP_MINUTES = 15;
-export const TIME_LABEL_WIDTH = 56;  // px
+export const TIME_LABEL_WIDTH = 56;
 
 export const HOURS = Array.from(
   { length: END_HOUR - START_HOUR },
@@ -22,13 +16,13 @@ export const HOURS = Array.from(
 
 export const TOTAL_GRID_HEIGHT = (END_HOUR - START_HOUR) * HOUR_HEIGHT;
 
-// ── Week helpers ────────────────────────────────────────────────────────────
+// ── Week helpers ─────────────────────────────────────────────────────────────
 
 export function getWeekStart(date: Date): Date {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
-  const day = d.getDay(); // 0 = Sun
-  const diff = day === 0 ? -6 : 1 - day; // Monday anchor
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
   return d;
 }
@@ -49,7 +43,7 @@ export function isSameDay(a: Date, b: Date): boolean {
   );
 }
 
-// ── Status derivation ───────────────────────────────────────────────────────
+// ── Status derivation ────────────────────────────────────────────────────────
 
 export function getClientStatus(client: any): ClientStatus {
   const docs: any[] = client?.documents ?? [];
@@ -72,7 +66,7 @@ export function statusStyle(status: ClientStatus): StatusStyle {
   }
 }
 
-// ── Grid position math ──────────────────────────────────────────────────────
+// ── Grid position math ───────────────────────────────────────────────────────
 
 export function appointmentTopPx(isoStart: string): number {
   const d = new Date(isoStart);
@@ -86,7 +80,6 @@ export function appointmentHeightPx(isoStart: string, isoEnd: string): number {
   return (durationMins / 60) * HOUR_HEIGHT;
 }
 
-/** Convert a pixel offset from the grid top (8 AM) to a snapped Date. */
 export function pixelsToDateTime(py: number, dayDate: Date): Date {
   const rawMins = (py / HOUR_HEIGHT) * 60;
   const snapped = Math.round(rawMins / SNAP_MINUTES) * SNAP_MINUTES;
@@ -97,7 +90,7 @@ export function pixelsToDateTime(py: number, dayDate: Date): Date {
   return result;
 }
 
-// ── Format helpers ──────────────────────────────────────────────────────────
+// ── Format helpers ───────────────────────────────────────────────────────────
 
 export function formatTime(iso: string): string {
   const d = new Date(iso);
@@ -116,8 +109,4 @@ export function formatDateRange(start: Date, end: Date): string {
     return `${start.toLocaleDateString([], opts)} – ${end.getDate()}`;
   }
   return `${start.toLocaleDateString([], opts)} – ${end.toLocaleDateString([], opts)}`;
-}
-
-export function generateId(): string {
-  return `appt_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }

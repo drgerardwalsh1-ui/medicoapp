@@ -1,5 +1,6 @@
 import { memo } from "react";
 import type { AppointmentWithClient } from "./useCalendar";
+import { buildClientName } from "../types/client";
 import {
   getClientStatus,
   statusStyle,
@@ -13,7 +14,6 @@ interface Props {
   onNavigate: (clientId: string) => void;
   onDragStart: (e: React.DragEvent, a: AppointmentWithClient) => void;
   onResizeStart: (e: React.PointerEvent, a: AppointmentWithClient) => void;
-  /** Replaces appointment.end during an active resize preview. */
   endOverride?: string;
 }
 
@@ -31,7 +31,7 @@ const AppointmentBlock = memo(function AppointmentBlock({
   const height = appointmentHeightPx(appointment.start, effectiveEnd);
   const isShort = height < 38;
   const hasMissingDocs = status === "missing";
-  const label = appointment.client?.name ?? "Unknown";
+  const label = buildClientName(appointment.client?.identity) || "Unknown";
 
   return (
     <div
@@ -39,7 +39,7 @@ const AppointmentBlock = memo(function AppointmentBlock({
       onDragStart={(e) => onDragStart(e, appointment)}
       onClick={(e) => {
         e.stopPropagation();
-        onNavigate(appointment.clientId);
+        onNavigate(appointment.client.id);
       }}
       style={{
         position: "absolute",
@@ -65,7 +65,6 @@ const AppointmentBlock = memo(function AppointmentBlock({
         .filter(Boolean)
         .join("\n")}
     >
-      {/* Content */}
       <div className="px-1.5 pt-0.5 pb-3 h-full overflow-hidden pointer-events-none">
         {isShort ? (
           <span className="text-xs font-medium truncate block leading-tight">
@@ -79,10 +78,7 @@ const AppointmentBlock = memo(function AppointmentBlock({
                 {label}
               </span>
               {hasMissingDocs && (
-                <span
-                  className="shrink-0 text-xs leading-snug"
-                  title="Documents not uploaded"
-                >
+                <span className="shrink-0 text-xs leading-snug" title="Documents not uploaded">
                   ⚠
                 </span>
               )}
@@ -99,7 +95,6 @@ const AppointmentBlock = memo(function AppointmentBlock({
         )}
       </div>
 
-      {/* Resize handle */}
       <div
         onPointerDown={(e) => {
           e.stopPropagation();

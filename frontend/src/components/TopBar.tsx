@@ -1,9 +1,3 @@
-/**
- * Contextual top bar — page title, optional Back / Save / Version History.
- * Styling is intentionally minimal so it sits above existing pages
- * without redesigning their internal headers.
- */
-
 export type TopBarProps = {
   title: string;
   onBack?: () => void;
@@ -11,6 +5,10 @@ export type TopBarProps = {
   showSave?: boolean;
   showVersionHistory?: boolean;
   onShowVersionHistory?: () => void;
+  onExportDocx?: () => void;
+  showExportDocx?: boolean;
+  saveDisabled?: boolean;
+  saveLabel?: string;
 };
 
 export default function TopBar({
@@ -20,9 +18,13 @@ export default function TopBar({
   showSave = false,
   showVersionHistory = false,
   onShowVersionHistory,
+  onExportDocx,
+  showExportDocx = false,
+  saveDisabled = false,
+  saveLabel = "Save",
 }: TopBarProps) {
   return (
-    <div className="flex justify-between items-center h-16 border-b px-4 bg-white">
+    <div className="flex justify-between items-center h-14 border-b px-4 bg-white shrink-0">
       <div className="flex items-center gap-3">
         {onBack && (
           <button
@@ -50,9 +52,19 @@ export default function TopBar({
           <button
             type="button"
             onClick={() => onSave?.()}
-            className="text-xs px-3 py-1.5 rounded-md bg-violet-600 hover:bg-violet-500 text-white"
+            disabled={saveDisabled}
+            className="text-xs px-3 py-1.5 rounded-md bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-50"
           >
-            Save
+            {saveLabel}
+          </button>
+        )}
+        {showExportDocx && (
+          <button
+            type="button"
+            onClick={() => onExportDocx?.()}
+            className="text-xs px-3 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50 text-slate-700"
+          >
+            Export DOCX
           </button>
         )}
       </div>
