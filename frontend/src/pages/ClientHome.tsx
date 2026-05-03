@@ -9,7 +9,7 @@ import {
 } from "../api/tauriApi";
 import DocumentCard, { type IngestedDoc } from "../components/DocumentCard";
 import {
-  buildClientName,
+  formatFullName,
   parseClientBlob,
   defaultClient,
   defaultAssessmentChecklist,
@@ -385,13 +385,11 @@ export default function ClientHome({
   async function handleSave() {
     console.log("SAVE BUTTON CLICKED / handleSave entered");
     const blob = buildBlob();
-    const computedName = buildClientName(data.identity) || "Unnamed Client";
     setSaveStatus("saving");
 
     if (!isTauri) {
-      const updated: Client = { ...data, documents: (docs as any) };
-      onSave?.(updated);
-      setData(updated);
+      onSave?.(data);
+      setData(data);
       setIsSaved(true);
       setIsDirty(false);
       setSaveStatus("saved");
@@ -410,7 +408,7 @@ export default function ClientHome({
       }
 
       if (!exists) {
-        id = await TauriAPI.createClient(computedName, blob);
+        id = await TauriAPI.createClient(blob);
       } else {
         await TauriAPI.updateClientDemographics(id, blob);
       }
@@ -633,7 +631,7 @@ export default function ClientHome({
           ← Back
         </button>
         <span className="text-sm font-semibold text-slate-700">
-          {buildClientName(ident) || "New Client"}
+          {formatFullName(ident) || "New Client"}
         </span>
         <SaveStatusIndicator status={saveStatus} dirty={isDirty} />
       </div>

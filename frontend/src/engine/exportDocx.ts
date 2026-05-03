@@ -1,14 +1,14 @@
 import { saveAs } from "file-saver";
 import { Document, Packer, Paragraph } from "docx";
 import { buildDocument } from "./documentEngine";
-import { buildClientName, type Client } from "../types/client";
+import { formatFullName, type Client } from "../types/client";
 
 export async function exportReportToDocx(client: Client, _title: string) {
   const report = client.report ?? {};
   const identity = client.identity;
   const inj = client.clinical?.injury;
 
-  const name = buildClientName(identity);
+  const name = formatFullName(identity);
   const header = [
     `Name: ${name}`,
     `DOB: ${identity?.dateOfBirth ?? ""}`,

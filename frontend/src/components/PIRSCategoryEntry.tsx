@@ -335,7 +335,7 @@ function CommonFields({
 // ── Accordion section ─────────────────────────────────────────────────────────
 
 function AccordionSection({
-  id, title, isOpen, onToggle, badge, children,
+  id: _id, title, isOpen, onToggle, badge, children,
 }: {
   id: string; title: string; isOpen: boolean;
   onToggle: () => void; badge?: string;
@@ -544,7 +544,7 @@ function TravelPanel({
 // ── Social Functioning Panel (entity-based) ───────────────────────────────────
 
 function RelationshipEntitySection({
-  label, data, onChange, children,
+  label: _label, data, onChange, children,
 }: {
   label: string;
   data: RelationshipEntry;
@@ -675,7 +675,7 @@ function SocialFunctioningPanel({
       )}
 
       {/* Other relationship entities */}
-      {entities.map(({ key, label, negateKey, negateLabel }) => {
+      {entities.map(({ key, label, negateKey, negateLabel: _negateLabel }) => {
         if (sf[negateKey]) return null;
         const data = (sf[key] ?? {}) as RelationshipEntry;
         return (

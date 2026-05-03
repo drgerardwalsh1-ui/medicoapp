@@ -186,7 +186,6 @@ fn verify_system_integrity() -> Result<String, String> {
 /// `ClientCreated` event at version 1, and projects forward immediately.
 #[tauri::command(rename_all = "camelCase")]
 fn create_client(
-    name: String,
     demographics: Option<serde_json::Value>,
 ) -> Result<String, String> {
     let (store, proj) = init_event_store_strict()?;
@@ -204,7 +203,6 @@ fn create_client(
         version,
         events::Actor::System { component: "create_client".into() },
         events::EventPayload::ClientCreated(events::ClientCreatedP {
-            name,
             demographics: demographics.unwrap_or(serde_json::Value::Null),
         }),
         None,
@@ -306,7 +304,6 @@ fn restore_client_from_version(client_id: String, version: u64) -> Result<u64, S
         },
         events::EventPayload::ClientRestoredFromVersion(events::ClientRestoredFromVersionP {
             from_version: version,
-            name: snapshot.name.clone().unwrap_or_default(),
             demographics: snapshot
                 .demographics
                 .clone()
@@ -4174,29 +4171,45 @@ fn export_all_data() -> Result<String, String> {
 }
 
 /// Open a native save dialog, then write `content` to the chosen path.
-/// Returns the absolute path on success, or the string "cancelled" if the
-/// user dismissed the dialog without choosing a location.
+/// Returns the absolute path on success, or "cancelled" if the user
+/// dismissed the dialog without choosing a location.
+///
+/// Uses the async (callback-based) dialog API so the main thread is never
+/// blocked from a Tokio worker — the previous `blocking_save_file` call
+/// deadlocked on macOS because it tried to wait for a main-thread UI event
+/// while holding a worker-thread lock.
 #[tauri::command(rename_all = "camelCase")]
-fn save_text_file(
+async fn save_text_file(
     app: tauri::AppHandle,
     content: String,
     default_filename: String,
 ) -> Result<String, String> {
     use tauri_plugin_dialog::DialogExt;
 
-    let file_path = app
-        .dialog()
+    let (tx, rx) = std::sync::mpsc::channel::<Option<tauri_plugin_dialog::FilePath>>();
+
+    app.dialog()
         .file()
-        .set_file_name(&default_filename)
+        .set_file_name(default_filename.as_str())
         .add_filter("JSON", &["json"])
-        .blocking_save_file();
+        .save_file(move |file_path| {
+            let _ = tx.send(file_path);
+        });
+
+    // Block a dedicated OS thread while awaiting the dialog result so the
+    // Tokio executor stays free.
+    let file_path = tauri::async_runtime::spawn_blocking(move || rx.recv())
+        .await
+        .map_err(|e| format!("dialog task failed: {e}"))?
+        .map_err(|e| format!("dialog channel error: {e}"))?;
 
     match file_path {
         Some(fp) => {
             let path = fp
                 .as_path()
-                .ok_or_else(|| "Cannot resolve save path".to_string())?;
-            std::fs::write(path, content.as_bytes())
+                .ok_or_else(|| "Cannot resolve save path".to_string())?
+                .to_path_buf();
+            std::fs::write(&path, content.as_bytes())
                 .map_err(|e| format!("Write failed: {e}"))?;
             Ok(path.to_string_lossy().to_string())
         }

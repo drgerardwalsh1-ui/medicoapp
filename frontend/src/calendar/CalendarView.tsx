@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import CalendarGrid from "./CalendarGrid";
-import { buildClientName, type Client, type Appointment } from "../types/client";
+import { formatFullName, type Client, type Appointment } from "../types/client";
 import { useCalendar } from "./useCalendar";
 import {
   formatMonthYear,
@@ -77,7 +77,7 @@ function NewApptModal({ clients, initialStart, onSave, onCancel }: NewApptModalP
             )}
             {clients.map((c) => (
               <option key={c.id} value={c.id}>
-                {buildClientName(c.identity) || c.id}
+                {formatFullName(c.identity) || c.id}
               </option>
             ))}
           </select>

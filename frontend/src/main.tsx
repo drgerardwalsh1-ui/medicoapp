@@ -10,7 +10,7 @@ import { TauriAPI, isTauri, type ClientViewModel } from "./api/tauriApi";
 import AppLayout from "./components/AppLayout";
 import type { TopBarProps } from "./components/TopBar";
 import {
-  buildClientName,
+  formatFullName,
   parseClientBlob,
   type Client,
   type Appointment,
@@ -191,7 +191,7 @@ function Root() {
     }
     if (view === "client") {
       return {
-        title: buildClientName(activeClient?.identity) || "Client Profile",
+        title: formatFullName(activeClient?.identity) || "Client Profile",
         onBack: () => setView("home"),
         showSave: !!activeClient,
         onSave: () => saveHandlerRef.current?.(),

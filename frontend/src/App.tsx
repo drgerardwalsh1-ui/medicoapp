@@ -19,7 +19,7 @@ import {
   type EventHistoryItem,
 } from "./api/tauriApi";
 import {
-  buildClientName,
+  formatFullName,
   parseClientBlob,
   defaultReport,
   type Client,
@@ -196,7 +196,7 @@ export default function App({ client, goHome, onSave }: {
     if (org === "Medilaw") ov = MEDILAW_OVERLAY;
     const merged = ov ? applyOverlay(base, ov) : base;
     return evaluateSchema(merged, report);
-  }, [client?.referrer?.org, report]);
+  }, [client?.administrative?.referrer?.org, report]);
 
   const activeSection = schema.sections?.[activeSectionIndex];
 
@@ -404,7 +404,7 @@ export default function App({ client, goHome, onSave }: {
           <button onClick={goHome} className="text-sm text-slate-500 hover:text-slate-900 shrink-0">
             ← Back
           </button>
-          <span className="text-sm font-semibold text-slate-800 shrink-0">{buildClientName(client?.identity)}</span>
+          <span className="text-sm font-semibold text-slate-800 shrink-0">{formatFullName(client?.identity)}</span>
           {client?.administrative?.referrer?.org && (
             <span className="text-[11px] text-slate-400 bg-slate-100 rounded px-2 py-0.5 shrink-0">{client.administrative.referrer.org}</span>
           )}
@@ -444,7 +444,7 @@ export default function App({ client, goHome, onSave }: {
             </button>
             <button
               className="text-xs px-3 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50 text-slate-700"
-              onClick={() => exportReportToDocx(client, schema.title)}
+              onClick={() => client && exportReportToDocx(client, schema.title)}
             >
               Export DOCX
             </button>
@@ -539,7 +539,7 @@ export default function App({ client, goHome, onSave }: {
                     categoryIndex={activeCategoryIndex}
                     table={currentPirsTable}
                     onUpdateTable={(updated) => updatePirsTable(updated.id, updated)}
-                    clientName={buildClientName(client?.identity)}
+                    clientName={formatFullName(client?.identity)}
                   />
                 </div>
 
@@ -697,7 +697,7 @@ export default function App({ client, goHome, onSave }: {
           <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
             <div className="px-6 py-4 border-b flex items-center justify-between">
               <h2 className="text-lg font-semibold text-slate-900">
-                Version History — {buildClientName(client?.identity) || "(no client)"}
+                Version History — {formatFullName(client?.identity) || "(no client)"}
               </h2>
               <button className="text-slate-400 hover:text-slate-700 text-2xl leading-none"
                 onClick={() => setHistoryOpen(false)}>×</button>

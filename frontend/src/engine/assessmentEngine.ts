@@ -1,9 +1,5 @@
-import type {
-  Demographics,
-  Injury,
-  AssessmentChecklist,
-} from "../types/client";
-import { calcAge, calcAgeAtDate, calcYearsSince } from "../types/client";
+import type { Client } from "../types/client";
+import { formatFullName, calcAge, calcAgeAtDate, calcYearsSince } from "../types/client";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,25 +31,21 @@ function cap(s: string): string {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export function generateAssessmentText(client: unknown): string {
-  const c = (client && typeof client === "object" ? client : {}) as Record<string, unknown>;
-  const demo = ((c.demographics ?? {}) as Demographics) || {};
-  const injury = ((c.injury ?? {}) as Injury) || {};
-  const checklist = ((c.assessmentChecklist ?? {}) as AssessmentChecklist) || {};
-  const p = pronouns(demo.gender ?? "");
+export function generateAssessmentText(client: Client): string {
+  const identity = client.identity;
+  const injury = client.clinical.injury;
+  const checklist = client.assessmentChecklist;
+  const admin = client.administrative;
+  const p = pronouns(identity.gender ?? "");
 
-  const displayTitle =
-    demo.title === "Other" ? (demo.titleOther || "") : (demo.title || "");
-  const fullName =
-    [displayTitle, demo.firstName, demo.lastName].filter(Boolean).join(" ") ||
-    "The claimant";
+  const fullName = formatFullName(identity) || "The claimant";
 
   const para: string[] = [];
 
-  // ── Demographics ─────────────────────────────────────────────────────────
+  // ── Identity ──────────────────────────────────────────────────────────────
   {
-    const age = demo.dateOfBirth ? calcAge(demo.dateOfBirth) : (demo.age ?? 0);
-    const genderStr = demo.gender ? demo.gender.toLowerCase() : null;
+    const age = identity.dateOfBirth ? calcAge(identity.dateOfBirth) : 0;
+    const genderStr = identity.gender ? identity.gender.toLowerCase() : null;
 
     const descriptors: string[] = [];
     if (age) descriptors.push(`${age}-year-old`);
@@ -63,26 +55,26 @@ export function generateAssessmentText(client: unknown): string {
     const desc = descriptors.length ? descriptors.join(" ") : "";
     let s = `${fullName} is ${article}${desc}.`;
 
-    if (demo.relationshipStatus) {
-      s += ` ${p.sub} is ${demo.relationshipStatus}.`;
+    if (admin.relationshipStatus) {
+      s += ` ${p.sub} is ${admin.relationshipStatus}.`;
     }
 
-    if (demo.occupation || demo.employer) {
-      const occPhrase = demo.occupation
-        ? `employed as ${startsWithVowel(demo.occupation) ? "an" : "a"} ${demo.occupation}`
+    if (admin.occupation || admin.employer) {
+      const occPhrase = admin.occupation
+        ? `employed as ${startsWithVowel(admin.occupation) ? "an" : "a"} ${admin.occupation}`
         : "employed";
-      const empPhrase = demo.employer ? ` at ${demo.employer}` : "";
+      const empPhrase = admin.employer ? ` at ${admin.employer}` : "";
       s += ` ${p.sub} is currently ${occPhrase}${empPhrase}.`;
     }
 
     para.push(s);
   }
 
-  // ── Injury ───────────────────────────────────────────────────────────────
-  if (injury.dateOfInjury) {
+  // ── Injury ────────────────────────────────────────────────────────────────
+  if (injury?.dateOfInjury) {
     const injDate = formatDateAU(injury.dateOfInjury);
-    const ageAtInj = demo.dateOfBirth
-      ? calcAgeAtDate(demo.dateOfBirth, injury.dateOfInjury)
+    const ageAtInj = identity.dateOfBirth
+      ? calcAgeAtDate(identity.dateOfBirth, injury.dateOfInjury)
       : (injury.ageAtInjury ?? 0);
     const yrs = calcYearsSince(injury.dateOfInjury);
 
@@ -90,9 +82,9 @@ export function generateAssessmentText(client: unknown): string {
       motor: "motor vehicle accident",
       workplace: "workplace injury",
       illness: "illness",
-      other: injury.injuryTypeOther || "injury",
+      other: injury.injuryTypeOther ?? "injury",
     };
-    const typeStr = injTypeMap[injury.injuryType] ?? "injury";
+    const typeStr = injTypeMap[injury.injuryType ?? ""] ?? "injury";
     const article = typeStr.match(/^[aeiou]/i) ? "an" : "a";
 
     let s = `${fullName} sustained ${article} ${typeStr} on ${injDate}`;
@@ -117,7 +109,7 @@ export function generateAssessmentText(client: unknown): string {
     para.push(s);
   }
 
-  // ── Assessment conduct ───────────────────────────────────────────────────
+  // ── Assessment conduct ────────────────────────────────────────────────────
   if (checklist.modality) {
     let s = `The assessment was conducted via ${checklist.modality}.`;
 
@@ -134,7 +126,7 @@ export function generateAssessmentText(client: unknown): string {
     para.push(s);
   }
 
-  // ── Attendees ────────────────────────────────────────────────────────────
+  // ── Attendees ─────────────────────────────────────────────────────────────
   const att = checklist.attendees;
   if (att) {
     if (att.attendedAlone !== false) {
@@ -157,7 +149,7 @@ export function generateAssessmentText(client: unknown): string {
     }
   }
 
-  // ── Technical issues ─────────────────────────────────────────────────────
+  // ── Technical issues ──────────────────────────────────────────────────────
   if (checklist.technicalIssues && checklist.technicalIssues !== "none") {
     const sev = cap(checklist.technicalIssues);
     let s = `${sev} technical issues were encountered during the assessment.`;

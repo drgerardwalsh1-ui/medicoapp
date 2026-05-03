@@ -11,30 +11,6 @@ use chrono::{DateTime, Utc};
 
 use crate::events::{EventEnvelope, EventPayload};
 
-/// Best-effort name extraction from a demographics blob. Looks at the top
-/// level first, then under a nested `demographics` key — the existing UI
-/// stores the user's forename/surname under `demographics.demographics.*`.
-fn derive_name(d: &serde_json::Value) -> Option<String> {
-    fn pick(scope: &serde_json::Value) -> Option<String> {
-        let f = scope
-            .get("forename")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty());
-        let s = scope
-            .get("surname")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty());
-        match (f, s) {
-            (Some(f), Some(s)) => Some(format!("{f} {s}")),
-            (Some(f), None) => Some(f.to_string()),
-            (None, Some(s)) => Some(s.to_string()),
-            (None, None) => None,
-        }
-    }
-    pick(d).or_else(|| d.get("demographics").and_then(pick))
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DocumentState {
@@ -53,8 +29,6 @@ pub struct ClientState {
     /// produce a deterministic `created_at` on the projection.
     pub first_seen: Option<DateTime<Utc>>,
     pub last_updated: Option<DateTime<Utc>>,
-    /// Set by `ClientCreated`. `None` until the create event has been folded.
-    pub name: Option<String>,
     /// Demographics JSON, opaque to the reducer.
     pub demographics: Option<serde_json::Value>,
     pub documents: Vec<DocumentState>,
@@ -74,28 +48,13 @@ pub fn reduce(events: &[EventEnvelope]) -> ClientState {
         state.last_updated = Some(env.timestamp);
         match &env.payload {
             EventPayload::ClientCreated(p) => {
-                state.name = Some(p.name.clone());
                 state.demographics = Some(p.demographics.clone());
             }
             EventPayload::ClientRestoredFromVersion(p) => {
-                // A restore folds in as a name + demographics replacement.
-                // Past events remain immutable; this is a brand-new event
-                // recording the promotion of an earlier snapshot.
-                if !p.name.is_empty() {
-                    state.name = Some(p.name.clone());
-                }
                 state.demographics = Some(p.demographics.clone());
             }
             EventPayload::DemographicsUpdated(p) => {
-                // Wholesale replacement of demographics. Name is recomputed
-                // from forename/surname when present so the header stays in
-                // sync without needing a separate event.
                 state.demographics = Some(p.demographics.clone());
-                if let Some(combined) = derive_name(&p.demographics) {
-                    if !combined.is_empty() {
-                        state.name = Some(combined);
-                    }
-                }
             }
             EventPayload::DocumentUploaded(p) => {
                 if let Some(existing) = state

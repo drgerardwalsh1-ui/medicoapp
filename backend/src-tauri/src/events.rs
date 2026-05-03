@@ -45,7 +45,6 @@ impl EventType {
 /// Client creation payload (Step 4).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientCreatedP {
-    pub name: String,
     /// Free-form demographics JSON. Reducer treats as opaque.
     pub demographics: serde_json::Value,
 }
@@ -63,7 +62,6 @@ pub struct DemographicsUpdatedP {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientRestoredFromVersionP {
     pub from_version: u64,
-    pub name: String,
     pub demographics: serde_json::Value,
 }
 

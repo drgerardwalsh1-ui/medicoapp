@@ -194,16 +194,21 @@ export function defaultClient(): Client {
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
-export function buildClientName(
+function toTitleCase(s: string | null | undefined): string {
+  if (!s) return "";
+  return s.trim().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+export function formatFullName(
   identity: Pick<Identity, "title" | "titleOther" | "firstName" | "lastName"> | null | undefined
 ): string {
-  if (!identity) return "Unnamed Client";
+  if (!identity) return "";
   const displayTitle =
     identity.title === "Other" ? (identity.titleOther ?? "") : (identity.title ?? "");
-  return (
-    [displayTitle, identity.firstName, identity.lastName].filter(Boolean).join(" ") ||
-    "Unnamed Client"
-  );
+  return [displayTitle, identity.firstName, identity.lastName]
+    .map(toTitleCase)
+    .filter(Boolean)
+    .join(" ");
 }
 
 export function isAppointmentToday(appointments: Appointment[]): boolean {

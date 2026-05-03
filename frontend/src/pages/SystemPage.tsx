@@ -1,6 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { TauriAPI, isTauri } from "../api/tauriApi";
-import { buildClientName } from "../types/client";
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 
@@ -98,23 +97,61 @@ async function copyToClipboard(text: string): Promise<void> {
 
 type QueryResult = { columns: string[]; rows: unknown[][] } | null;
 
+type ClientViewRaw = {
+  id: string;
+  demographics: Record<string, unknown> | null;
+  last_version?: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+  document_count?: number;
+  documents?: unknown[];
+  entities?: unknown[];
+  timeline?: unknown[];
+  pirs_snapshots?: unknown[];
+};
+
+function clientLabel(c: ClientViewRaw): string {
+  const identity = (c.demographics ?? {}) as Record<string, unknown>;
+  const ident = (identity.identity ?? {}) as Record<string, unknown>;
+  const first = typeof ident.firstName === "string" ? ident.firstName.trim() : "";
+  const last = typeof ident.lastName === "string" ? ident.lastName.trim() : "";
+  const label = [first, last].filter(Boolean).join(" ");
+  return label || c.id;
+}
+
+function safeClientExport(c: ClientViewRaw): Record<string, unknown> {
+  const demo = c.demographics ?? {};
+  return {
+    id: c.id,
+    identity: (demo as Record<string, unknown>).identity ?? null,
+    administrative: (demo as Record<string, unknown>).administrative ?? null,
+    clinical: (demo as Record<string, unknown>).clinical ?? null,
+    appointments: (demo as Record<string, unknown>).appointments ?? [],
+    report: (demo as Record<string, unknown>).report ?? null,
+    assessmentChecklist: (demo as Record<string, unknown>).assessmentChecklist ?? null,
+    documents: c.documents ?? [],
+    created_at: c.created_at ?? null,
+    updated_at: c.updated_at ?? null,
+  };
+}
+
 // ─── Preset queries ───────────────────────────────────────────────────────────
 
 const PRESET_QUERIES = [
   {
     label: "All Clients",
     db: "projection" as const,
-    sql: "SELECT id, name, last_version, created_at, updated_at, document_count FROM clients ORDER BY created_at DESC",
+    sql: "SELECT id, last_version, created_at, updated_at, document_count FROM clients ORDER BY created_at DESC",
   },
   {
     label: "All Documents",
     db: "projection" as const,
-    sql: "SELECT d.client_id, c.name, d.file_name, d.method, d.char_count, d.uploaded_at FROM documents d LEFT JOIN clients c ON c.id = d.client_id ORDER BY d.uploaded_at DESC",
+    sql: "SELECT d.client_id, d.file_name, d.method, d.char_count, d.uploaded_at FROM documents d ORDER BY d.uploaded_at DESC",
   },
   {
     label: "Demographics (all clients)",
     db: "projection" as const,
-    sql: "SELECT id, name, demographics FROM clients ORDER BY name",
+    sql: "SELECT id, json_extract(demographics, '$.identity.title') || ' ' || json_extract(demographics, '$.identity.firstName') || ' ' || json_extract(demographics, '$.identity.lastName') AS FullName, demographics FROM clients ORDER BY id",
   },
   {
     label: "All Events",
@@ -456,6 +493,35 @@ function DatabaseExplorer({
   );
 }
 
+// ─── Safe serialiser ─────────────────────────────────────────────────────────
+
+function safeStringify(obj: unknown): string {
+  const seen = new WeakSet();
+  return JSON.stringify(
+    obj,
+    (_key, value) => {
+      if (typeof value === "function" || typeof value === "undefined") return undefined;
+      if (value !== null && typeof value === "object") {
+        if (seen.has(value)) return "[Circular]";
+        seen.add(value);
+      }
+      return value;
+    },
+    2
+  );
+}
+
+async function buildExportPayload(): Promise<{ json: string; clientCount: number }> {
+  const list = await TauriAPI.listClients();
+  const clients = (list as ClientViewRaw[]).map(safeClientExport);
+  const payload = {
+    exported_at: new Date().toISOString(),
+    client_count: clients.length,
+    clients,
+  };
+  return { json: safeStringify(payload), clientCount: clients.length };
+}
+
 // ─── Global export section ────────────────────────────────────────────────────
 
 function GlobalExport({
@@ -465,15 +531,11 @@ function GlobalExport({
 }) {
   const [busy, setBusy] = useState(false);
 
-  async function getJson(): Promise<string> {
-    return TauriAPI.exportAllData();
-  }
-
   async function handleExportToFile() {
     if (!isTauri) { push("error", "Tauri runtime not available."); return; }
     setBusy(true);
     try {
-      const json = await getJson();
+      const { json } = await buildExportPayload();
       const filename = `clients_export_${new Date().toISOString().slice(0, 10)}.json`;
       const savedPath = await TauriAPI.saveTextFile(json, filename);
       push("success", `Exported successfully to: ${savedPath}`, [
@@ -498,13 +560,9 @@ function GlobalExport({
     if (!isTauri) { push("error", "Tauri runtime not available."); return; }
     setBusy(true);
     try {
-      const json = await getJson();
+      const { json, clientCount } = await buildExportPayload();
       await copyToClipboard(json);
-      const meta = JSON.parse(json) as { client_count: number; event_count: number };
-      push(
-        "success",
-        `All client data copied to clipboard (${meta.client_count} clients, ${meta.event_count} events)`
-      );
+      push("success", `All client data copied to clipboard (${clientCount} client${clientCount !== 1 ? "s" : ""})`);
     } catch (e) {
       push("error", `Copy failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -571,9 +629,10 @@ function ClientTools({
   }
 
   async function copyClientJson(pretty: boolean) {
-    const c = selectedClient();
+    const c = selectedClient() as ClientViewRaw | null;
     if (!c) return;
-    const text = pretty ? JSON.stringify(c, null, 2) : JSON.stringify(c);
+    const safe = safeClientExport(c);
+    const text = pretty ? JSON.stringify(safe, null, 2) : JSON.stringify(safe);
     try {
       await copyToClipboard(text);
       push("success", "Client JSON copied to clipboard");
@@ -584,13 +643,13 @@ function ClientTools({
 
   async function downloadClientJson() {
     if (!isTauri) { push("error", "Tauri runtime not available."); return; }
-    const c = selectedClient() as { id: string; identity?: unknown } | null;
+    const c = selectedClient() as ClientViewRaw | null;
     if (!c) return;
-    const name = buildClientName((c as any).identity);
-    const slug = (name || c.id).replace(/[^a-z0-9]+/gi, "_").toLowerCase();
+    const safe = safeClientExport(c);
+    const slug = clientLabel(c).replace(/[^a-z0-9]+/gi, "_").toLowerCase() || c.id;
     const filename = `client_${slug}.json`;
     try {
-      const json = JSON.stringify(c, null, 2);
+      const json = JSON.stringify(safe, null, 2);
       const savedPath = await TauriAPI.saveTextFile(json, filename);
       push("success", `Saved to: ${savedPath}`, [
         {
@@ -616,7 +675,7 @@ function ClientTools({
     push("info", "Client data logged to console (open DevTools to view)");
   }
 
-  const client = selectedClient() as { id: string; identity?: unknown } | null;
+  const client = selectedClient() as ClientViewRaw | null;
 
   return (
     <div>
@@ -644,9 +703,9 @@ function ClientTools({
               onChange={(e) => setSelectedId(e.target.value)}
               className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm text-slate-700 bg-white max-w-xs"
             >
-              {(clients as Array<{ id: string; identity?: unknown }>).map((c) => (
+              {(clients as ClientViewRaw[]).map((c) => (
                 <option key={c.id} value={c.id}>
-                  {buildClientName((c.identity as any) ?? null) || c.id}
+                  {clientLabel(c)}
                 </option>
               ))}
             </select>
@@ -666,8 +725,8 @@ function ClientTools({
           <button
             onClick={() =>
               setJsonModal({
-                title: buildClientName((client.identity as any) ?? null) || "Client",
-                data: client,
+                title: clientLabel(client),
+                data: safeClientExport(client),
               })
             }
             className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm text-slate-700 hover:bg-slate-50"

@@ -1,6 +1,6 @@
 import { memo } from "react";
 import type { AppointmentWithClient } from "./useCalendar";
-import { buildClientName } from "../types/client";
+import { formatFullName } from "../types/client";
 import {
   getClientStatus,
   statusStyle,
@@ -31,7 +31,7 @@ const AppointmentBlock = memo(function AppointmentBlock({
   const height = appointmentHeightPx(appointment.start, effectiveEnd);
   const isShort = height < 38;
   const hasMissingDocs = status === "missing";
-  const label = buildClientName(appointment.client?.identity) || "Unknown";
+  const label = formatFullName(appointment.client?.identity) || "Unknown";
 
   return (
     <div

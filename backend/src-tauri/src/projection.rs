@@ -34,7 +34,6 @@ pub struct ProjectionSnapshot {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClientViewModel {
     pub id: String,
-    pub name: Option<String>,
     /// Full demographics JSON as stored on the projection. Parsed into a
     /// `serde_json::Value` so every key round-trips losslessly.
     pub demographics: Option<serde_json::Value>,
@@ -78,23 +77,6 @@ fn json_str(v: &serde_json::Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Derive a display name from a demographics blob. Looks first at the
-/// top level (flat shape), then at a nested `demographics` object so the
-/// existing UI's `{demographics:{forename,surname}, referrer, appointment}`
-/// layout is also covered.
-fn derive_name_from_demographics(d: &serde_json::Value) -> Option<String> {
-    let try_pair = |scope: &serde_json::Value| -> Option<String> {
-        let f = json_str(scope, "forename");
-        let s = json_str(scope, "surname");
-        match (f, s) {
-            (Some(f), Some(s)) => Some(format!("{f} {s}")),
-            (Some(f), None) => Some(f),
-            (None, Some(s)) => Some(s),
-            (None, None) => None,
-        }
-    };
-    try_pair(d).or_else(|| d.get("demographics").and_then(try_pair))
-}
 
 #[derive(Debug, Clone)]
 pub struct DriftReport {
@@ -248,22 +230,21 @@ impl Projection {
         let conn = self.conn.lock().expect("projection poisoned");
 
         let row = conn.query_row(
-            r#"SELECT id, name, demographics, last_version, created_at, updated_at
+            r#"SELECT id, demographics, last_version, created_at, updated_at
                  FROM clients WHERE id = ?1"#,
             params![client_id],
             |r| {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, Option<String>>(1)?,
-                    r.get::<_, Option<String>>(2)?,
-                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, Option<String>>(3)?,
                     r.get::<_, Option<String>>(4)?,
-                    r.get::<_, Option<String>>(5)?,
                 ))
             },
         );
 
-        let (id, name, demographics, last_version, created_at, updated_at) = match row {
+        let (id, demographics, last_version, created_at, updated_at) = match row {
             Ok(t) => t,
             Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
             Err(e) => return Err(e),
@@ -327,14 +308,6 @@ impl Projection {
             );
         }
 
-        // ── Name fallback ──────────────────────────────────────────────────
-        let name_final: Option<String> = match &name {
-            Some(n) if !n.trim().is_empty() => Some(n.clone()),
-            _ => demographics_parsed
-                .as_ref()
-                .and_then(derive_name_from_demographics),
-        };
-
         // ── PIRS snapshots ─────────────────────────────────────────────────
         let mut pirs_stmt = conn.prepare(
             r#"SELECT version, snapshot_json, created_at
@@ -365,7 +338,6 @@ impl Projection {
 
         Ok(Some(ClientViewModel {
             id,
-            name: name_final,
             demographics: demographics_parsed,
             last_version: last_version as u64,
             created_at,
@@ -465,7 +437,6 @@ fn create_schema_in_tx(tx: &rusqlite::Transaction<'_>) -> rusqlite::Result<()> {
 const SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS clients (
     id            TEXT PRIMARY KEY,
-    name          TEXT,
     demographics  TEXT,
     last_version  INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT,
@@ -523,21 +494,17 @@ fn upsert_client(tx: &rusqlite::Transaction<'_>, state: &ClientState) -> rusqlit
         .map(|v| v.to_string()); // canonical compact JSON
 
     tx.execute(
-        // Incremental upsert: the reducer leaves name/demographics as None
-        // for events that don't touch them (e.g. DocumentUploaded), which
+        // Incremental upsert: the reducer leaves demographics as None
+        // for events that don't touch it (e.g. DocumentUploaded), which
         // serialises to SQL NULL — COALESCE then preserves the prior value.
-        // DemographicsUpdated and ClientCreated supply non-NULL values and
-        // therefore take effect.
-        r#"INSERT INTO clients (id, name, demographics, last_version, created_at, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        r#"INSERT INTO clients (id, demographics, last_version, created_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5)
            ON CONFLICT(id) DO UPDATE SET
-               name         = COALESCE(excluded.name, clients.name),
                demographics = COALESCE(excluded.demographics, clients.demographics),
                last_version = MAX(clients.last_version, excluded.last_version),
                updated_at   = excluded.updated_at"#,
         params![
             state.client_id,
-            state.name,
             demographics_json,
             state.last_version as i64,
             created_at,
@@ -579,7 +546,6 @@ fn upsert_document(
 fn canon_clients(conn: &Connection) -> rusqlite::Result<String> {
     let mut stmt = conn.prepare(
         "SELECT id,
-                COALESCE(name,''),
                 COALESCE(demographics,''),
                 last_version,
                 COALESCE(created_at,''),
@@ -588,13 +554,12 @@ fn canon_clients(conn: &Connection) -> rusqlite::Result<String> {
     )?;
     let rows = stmt.query_map([], |r| {
         Ok(format!(
-            "{}|{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}",
             r.get::<_, String>(0)?,
             r.get::<_, String>(1)?,
-            r.get::<_, String>(2)?,
-            r.get::<_, i64>(3)?,
+            r.get::<_, i64>(2)?,
+            r.get::<_, String>(3)?,
             r.get::<_, String>(4)?,
-            r.get::<_, String>(5)?,
         ))
     })?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?.join("\n"))

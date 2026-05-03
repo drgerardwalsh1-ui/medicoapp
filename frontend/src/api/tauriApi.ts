@@ -104,10 +104,9 @@ export const TauriAPI = {
    * Returns the new UUIDv7 `client_id`.
    */
   createClient: (
-    name: string,
     demographics?: Record<string, unknown>
   ): Promise<string> =>
-    guarded("create_client", { name, demographics: demographics ?? null }),
+    guarded("create_client", { demographics: demographics ?? null }),
 
   /** Read a client view from the projection. Errors if not found. */
   getClientView: (clientId: string): Promise<ClientViewModel> =>
@@ -278,7 +277,6 @@ export type PIRSTableViewModel = {
 /** Mirrors `projection::ClientViewModel` on the Rust side. */
 export type ClientViewModel = {
   id: string;
-  name: string | null;
   demographics: Record<string, unknown> | null;
   last_version: number;
   created_at: string | null;
