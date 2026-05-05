@@ -55,10 +55,6 @@ export function generateAssessmentText(client: Client): string {
     const desc = descriptors.length ? descriptors.join(" ") : "";
     let s = `${fullName} is ${article}${desc}.`;
 
-    if (admin.relationshipStatus) {
-      s += ` ${p.sub} is ${admin.relationshipStatus}.`;
-    }
-
     if (admin.occupation || admin.employer) {
       const occPhrase = admin.occupation
         ? `employed as ${startsWithVowel(admin.occupation) ? "an" : "a"} ${admin.occupation}`

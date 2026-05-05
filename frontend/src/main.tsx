@@ -26,6 +26,7 @@ function Root() {
   const [clients, setClients] = useState<Client[]>([]);
   const [activeClient, setActiveClient] = useState<Client | null>(null);
   const [view, setView] = useState<View>("home");
+  const [reportSectionIndex, setReportSectionIndex] = useState(0);
 
   const saveHandlerRef = useRef<(() => void) | null>(null);
   const registerSaveHandler = (fn: (() => void) | null) => {
@@ -132,7 +133,10 @@ function Root() {
           isNew={false}
           onSave={handleClientSave}
           onCancel={() => setView("home")}
-          openReport={() => setView("app")}
+          openReport={(sectionIndex?: number) => {
+            setReportSectionIndex(sectionIndex ?? 0);
+            setView("app");
+          }}
           registerSaveHandler={registerSaveHandler}
           registerVersionHistoryHandler={registerVersionHistoryHandler}
         />
@@ -173,6 +177,7 @@ function Root() {
           client={activeClient}
           goHome={() => setView("client")}
           onSave={handleClientSave}
+          initialSectionIndex={reportSectionIndex}
         />
       );
     }

@@ -5,15 +5,18 @@ import type {
   PirsCategoryKey,
   CommonSubdomainEntry,
   SocialSubdomainEntry,
-  TravelSubdomainEntry,
   SocialFunctioningData,
-  ConcentrationSubdomainEntry,
   EmployabilitySubdomainEntry,
   RelationshipEntry,
   ChildrenEntry,
 } from "../types/types";
+import {
+  buildSubject,
+  generateCategoryNarrative,
+  formatFrequency,
+} from "../engine/narrativeEngine";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Infrastructure ────────────────────────────────────────────────────────────
 
 function getSD<T>(table: PIRSTableModel | undefined, catIdx: number, key: string): T {
   const raw = (table?.reasons?.[catIdx] as ReasonEntry | undefined)?.subdomainData;
@@ -56,66 +59,82 @@ function isFindingManual(table: PIRSTableModel | undefined, catIdx: number) {
   return (table?.reasons?.[catIdx] as ReasonEntry | undefined)?.findingsManuallyEdited ?? false;
 }
 
-// ── Shared option sets ────────────────────────────────────────────────────────
+// ── Frequency helpers ─────────────────────────────────────────────────────────
 
-const INDEPENDENCE_OPTIONS = [
-  { value: "", label: "— select —" },
-  { value: "independent", label: "Independent" },
-  { value: "independent_with_difficulty", label: "Independent with difficulty" },
-  { value: "requires_prompting", label: "Requires prompting" },
-  { value: "requires_assistance", label: "Requires assistance" },
-  { value: "dependent", label: "Dependent" },
+const FREQ_UNITS = ["Day", "Week", "Fortnight", "Month"];
+const FREQ_QUICK = ["1", "2–3", "4–5", "Daily"];
+
+// ── Subdomain status ──────────────────────────────────────────────────────────
+
+type SubdomainStatus = "complete" | "partial" | "empty";
+
+function computeStatus(data: CommonSubdomainEntry): SubdomainStatus {
+  if (data.doesNotPerform || data.noIssues || data.managementLevel) return "complete";
+  const hasPartial = !!(
+    data.frequencyUnit || data.frequencyCount ||
+    data.behaviourModifiers?.length ||
+    data.recencyValue || data.evidenceSnippets?.length
+  );
+  return hasPartial ? "partial" : "empty";
+}
+
+// ── Management level display ──────────────────────────────────────────────────
+
+const MGMT_DISPLAY: Record<string, string> = {
+  independent: "independent",
+  independent_difficulty: "independent with difficulty",
+  needs_prompting: "requires prompting",
+  needs_assistance: "requires assistance",
+  dependent: "dependent",
+};
+
+// ── Option constants ──────────────────────────────────────────────────────────
+
+const MANAGEMENT_OPTIONS = [
+  { value: "independent",           label: "Independent" },
+  { value: "independent_difficulty", label: "Difficulty" },
+  { value: "needs_prompting",        label: "Prompting" },
+  { value: "needs_assistance",       label: "Assistance" },
+  { value: "dependent",              label: "Dependent" },
 ];
 
-const PROMPTING_OPTIONS = [
-  { value: "", label: "— select —" },
-  { value: "none", label: "None" },
-  { value: "occasional", label: "Occasional" },
-  { value: "regular", label: "Regular" },
-  { value: "constant", label: "Constant" },
+const BEHAVIOUR_MODIFIERS = [
+  "Regular", "Irregular", "Avoids people", "Low motivation", "Anxiety", "Pain", "No enjoyment",
 ];
 
-const SUPPORT_OPTIONS = [
-  { value: "", label: "— select —" },
-  { value: "none", label: "None" },
-  { value: "informal", label: "Informal (family/friend)" },
-  { value: "formal", label: "Formal (paid support)" },
+const WHO_CHIPS = ["Partner", "Family", "Friend", "Support worker", "Carer"];
+const HOURS_CHIPS = ["<5", "5–10", "10–20", ">20"];
+const RECENCY_UNITS = ["days", "weeks", "months", "years"];
+
+const PRE_INJURY_CHIPS = [
+  { value: "better", label: "Better pre-injury" },
+  { value: "same",   label: "Same pre-injury" },
+  { value: "worse",  label: "Worse pre-injury" },
 ];
 
-const PRE_INJURY_OPTIONS = [
-  { value: "", label: "— select —" },
-  { value: "same", label: "Same as current" },
-  { value: "better", label: "Better than current" },
-  { value: "worse", label: "Worse than current" },
+const ACTIVITY_TYPE_CHIPS = [
+  "Walking", "Gym", "Swimming", "Cycling", "Sport", "Clubs",
+  "Church", "Social visits", "Dining out", "Gardening", "Arts/crafts", "Screen time",
+];
+const AVOIDANCE_REASON_CHIPS = [
+  "Pain", "Fatigue", "Anxiety", "Low mood", "Embarrassment",
+  "Physical limitation", "No motivation", "Social withdrawal",
+];
+const INITIATION_CHIPS = ["Self-initiated", "Prompted", "Avoidant"];
+const INVOLVEMENT_CHIPS = ["Active", "Passive", "Withdrawn"];
+const ENGAGEMENT_CHIPS  = ["Alone", "With friends", "Group setting", "None"];
+const MOTIVATION_CHIPS  = ["Normal", "Moderate", "Low"];
+
+const TRAVEL_MODE_CHIPS    = ["Car (driver)", "Car (passenger)", "Train", "Bus", "Tram", "Walk", "Taxi/rideshare"];
+const DRIVING_STATUS_CHIPS = ["Drives independently", "Drives with difficulty", "Ceased — symptoms", "Ceased — licence", "Never drove"];
+
+const MEMORY_ISSUE_CHIPS = [
+  "Short-term", "Long-term", "Prospective", "Word-finding", "Repetition",
 ];
 
-const INITIATION_OPTIONS = [
-  { value: "", label: "— select —" },
-  { value: "self_initiated", label: "Self-initiated" },
-  { value: "prompted", label: "Prompted" },
-  { value: "avoidant", label: "Avoidant" },
-];
-
-const INVOLVEMENT_OPTIONS = [
-  { value: "", label: "— select —" },
-  { value: "active", label: "Active participation" },
-  { value: "passive", label: "Passive attendance" },
-  { value: "withdrawn", label: "Withdrawn" },
-];
-
-const ABILITY_OPTIONS = [
-  { value: "", label: "— select —" },
-  { value: "alone", label: "Alone" },
-  { value: "with_support", label: "With support" },
-  { value: "unable", label: "Unable" },
-];
-
-const DIFFICULTY_OPTIONS = [
-  { value: "", label: "— select —" },
-  { value: "none", label: "None" },
-  { value: "mild", label: "Mild" },
-  { value: "moderate", label: "Moderate" },
-  { value: "severe", label: "Severe" },
+const BARRIERS_CHIPS = [
+  "Pain", "Fatigue", "Mood", "Cognition", "Social anxiety",
+  "Physical capacity", "Transport", "Childcare", "Employer reluctance",
 ];
 
 const RELATIONSHIP_QUALITY_OPTIONS = [
@@ -125,49 +144,44 @@ const RELATIONSHIP_QUALITY_OPTIONS = [
   { value: "conflict", label: "Conflict" },
   { value: "no_relationship", label: "No relationship" },
 ];
-
 const DEPENDENCY_OPTIONS = [
   { value: "", label: "— select —" },
-  { value: "independent", label: "Independent" },
+  { value: "independent",   label: "Independent" },
   { value: "provides_care", label: "Provides care" },
   { value: "receives_care", label: "Receives care" },
 ];
-
+const EMPLOYMENT_STATUS_OPTIONS = [
+  { value: "", label: "— select —" },
+  { value: "full_time",   label: "Full time" },
+  { value: "part_time",   label: "Part time" },
+  { value: "casual",      label: "Casual" },
+  { value: "unemployed",  label: "Unemployed" },
+  { value: "not_seeking", label: "Not seeking work" },
+  { value: "retired",     label: "Retired" },
+  { value: "student",     label: "Student" },
+];
 const CONSISTENCY_OPTIONS = [
   { value: "", label: "— select —" },
   { value: "consistent", label: "Consistent" },
-  { value: "reduced", label: "Reduced" },
-  { value: "erratic", label: "Erratic" },
+  { value: "reduced",    label: "Reduced" },
+  { value: "erratic",    label: "Erratic" },
 ];
-
-const EMPLOYMENT_STATUS_OPTIONS = [
-  { value: "", label: "— select —" },
-  { value: "full_time", label: "Full time" },
-  { value: "part_time", label: "Part time" },
-  { value: "casual", label: "Casual" },
-  { value: "unemployed", label: "Unemployed" },
-  { value: "not_seeking", label: "Not seeking work" },
-  { value: "retired", label: "Retired" },
-  { value: "student", label: "Student" },
-];
-
 const LIVING_ARRANGEMENT_OPTIONS = [
   { value: "", label: "— select —" },
-  { value: "alone", label: "Lives alone" },
-  { value: "with_partner", label: "Lives with partner" },
+  { value: "alone",         label: "Lives alone" },
+  { value: "with_partner",  label: "Lives with partner" },
   { value: "with_children", label: "Lives with children" },
-  { value: "with_parents", label: "Lives with parents" },
-  { value: "with_others", label: "Lives with others" },
+  { value: "with_parents",  label: "Lives with parents" },
+  { value: "with_others",   label: "Lives with others" },
 ];
-
 const CARE_RESPONSIBILITY_OPTIONS = [
   { value: "", label: "— select —" },
-  { value: "full", label: "Full care" },
+  { value: "full",   label: "Full care" },
   { value: "shared", label: "Shared care" },
   { value: "others", label: "Others care for children" },
 ];
 
-// ── Primitive field helpers ───────────────────────────────────────────────────
+// ── Primitive UI components ───────────────────────────────────────────────────
 
 function SF({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -193,15 +207,16 @@ function Sel({
 }
 
 function Txt({
-  value, onChange, placeholder,
+  value, onChange, placeholder, small,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  small?: boolean;
 }) {
   return (
     <input
-      className="input"
+      className={`input ${small ? "text-xs py-0.5" : ""}`}
       value={value ?? ""}
       placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
@@ -209,16 +224,11 @@ function Txt({
   );
 }
 
-function Snippets({
-  snippets, onChange,
-}: {
-  snippets: string[];
-  onChange: (s: string[]) => void;
-}) {
+function Snippets({ snippets, onChange }: { snippets: string[]; onChange: (s: string[]) => void }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <label className="label mb-0">Evidence Snippets</label>
+        <label className="label mb-0">Evidence snippets</label>
         <button type="button" className="text-xs text-violet-600 hover:text-violet-800"
           onClick={() => onChange([...snippets, ""])}>+ Add</button>
       </div>
@@ -227,12 +237,8 @@ function Snippets({
       )}
       {snippets.map((s, i) => (
         <div key={i} className="flex gap-1.5 mb-1.5">
-          <input
-            className="input flex-1 text-xs"
-            value={s}
-            placeholder="One clinical fact"
-            onChange={(e) => { const n = [...snippets]; n[i] = e.target.value; onChange(n); }}
-          />
+          <input className="input flex-1 text-xs" value={s} placeholder="One clinical fact"
+            onChange={(e) => { const n = [...snippets]; n[i] = e.target.value; onChange(n); }} />
           <button type="button" className="text-slate-400 hover:text-red-500 px-1"
             onClick={() => onChange(snippets.filter((_, idx) => idx !== i))}>×</button>
         </div>
@@ -241,13 +247,9 @@ function Snippets({
   );
 }
 
-function FlagRow({
-  checked, label, onChange,
-}: {
-  checked: boolean; label: string; onChange: (v: boolean) => void;
-}) {
+function FlagRow({ checked, label, onChange }: { checked: boolean; label: string; onChange: (v: boolean) => void }) {
   return (
-    <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+    <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer select-none">
       <input type="checkbox" className="w-3.5 h-3.5 accent-violet-600"
         checked={!!checked} onChange={(e) => onChange(e.target.checked)} />
       {label}
@@ -255,92 +257,439 @@ function FlagRow({
   );
 }
 
-// ── Common subdomain fields ───────────────────────────────────────────────────
+// ── Chip primitives ───────────────────────────────────────────────────────────
 
-function CommonFields({
-  data,
-  onPatch,
-  showFrequency = true,
-  extraTop,
-  extraBottom,
-}: {
-  data: CommonSubdomainEntry;
-  onPatch: (p: Partial<CommonSubdomainEntry>) => void;
-  showFrequency?: boolean;
-  extraTop?: React.ReactNode;
-  extraBottom?: React.ReactNode;
+function Chips({ label, options, selected, onChange }: {
+  label: string; options: string[]; selected: string[]; onChange: (v: string[]) => void;
 }) {
+  function toggle(opt: string) {
+    onChange(selected.includes(opt) ? selected.filter((s) => s !== opt) : [...selected, opt]);
+  }
   return (
-    <div className="space-y-3">
-      <div className="flex gap-3">
-        <FlagRow checked={!!data.doesNotPerform} label="Does not perform this activity"
-          onChange={(v) => onPatch({ doesNotPerform: v })} />
-        <FlagRow checked={!!data.noIssues} label="No issues in this area"
-          onChange={(v) => onPatch({ noIssues: v })} />
+    <div>
+      <label className="label">{label}</label>
+      <div className="flex flex-wrap gap-1.5 mt-1">
+        {options.map((opt) => (
+          <button key={opt} type="button" onClick={() => toggle(opt)}
+            className={`text-xs px-2.5 py-1 rounded-full border transition ${
+              selected.includes(opt)
+                ? "bg-violet-600 text-white border-violet-600"
+                : "bg-white text-slate-600 border-slate-300 hover:border-violet-400"
+            }`}>{opt}</button>
+        ))}
       </div>
-      {extraTop}
-      {showFrequency && (
-        <SF label="Frequency">
-          <Txt value={data.frequency ?? ""} onChange={(v) => onPatch({ frequency: v })}
-            placeholder="e.g. daily, 3×/week" />
-        </SF>
-      )}
-      <SF label="Independence Level">
-        <Sel value={data.independenceLevel ?? ""} options={INDEPENDENCE_OPTIONS}
-          onChange={(v) => onPatch({ independenceLevel: v as CommonSubdomainEntry["independenceLevel"] })} />
-      </SF>
-      <div className="grid grid-cols-2 gap-3">
-        <SF label="Prompting">
-          <Sel value={data.prompting ?? ""} options={PROMPTING_OPTIONS}
-            onChange={(v) => onPatch({ prompting: v as CommonSubdomainEntry["prompting"] })} />
-        </SF>
-        <SF label="Who prompts">
-          <Txt value={data.promptingWho ?? ""} onChange={(v) => onPatch({ promptingWho: v })}
-            placeholder="e.g. spouse, community nurse" />
-        </SF>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <SF label="Support Requirement">
-          <Sel value={data.supportType ?? ""} options={SUPPORT_OPTIONS}
-            onChange={(v) => onPatch({ supportType: v as CommonSubdomainEntry["supportType"] })} />
-        </SF>
-        <SF label="Hours per week">
-          <Txt value={data.supportHoursPerWeek ?? ""} onChange={(v) => onPatch({ supportHoursPerWeek: v })}
-            placeholder="e.g. 4 hrs" />
-        </SF>
-      </div>
-      <SF label="Recency (last performed independently)">
-        <Txt value={data.recency ?? ""} onChange={(v) => onPatch({ recency: v })}
-          placeholder="e.g. 6 months ago" />
-      </SF>
-      <div className="grid grid-cols-2 gap-3">
-        <SF label="Pre-injury Comparison">
-          <Sel value={data.preInjuryComparison ?? ""} options={PRE_INJURY_OPTIONS}
-            onChange={(v) => onPatch({ preInjuryComparison: v as CommonSubdomainEntry["preInjuryComparison"] })} />
-        </SF>
-        <SF label="Pre-injury Notes">
-          <Txt value={data.preInjuryComparisonNotes ?? ""} onChange={(v) => onPatch({ preInjuryComparisonNotes: v })}
-            placeholder="optional detail" />
-        </SF>
-      </div>
-      {extraBottom}
-      <Snippets
-        snippets={data.evidenceSnippets ?? []}
-        onChange={(s) => onPatch({ evidenceSnippets: s })}
-      />
     </div>
   );
 }
 
-// ── Accordion section ─────────────────────────────────────────────────────────
+function ChipSelect({ label, options, value, onChange }: {
+  label: string; options: string[]; value: string; onChange: (v: string) => void;
+}) {
+  return (
+    <div>
+      <label className="label">{label}</label>
+      <div className="flex flex-wrap gap-1.5 mt-1">
+        {options.map((opt) => (
+          <button key={opt} type="button" onClick={() => onChange(value === opt ? "" : opt)}
+            className={`text-xs px-2.5 py-1 rounded-full border transition ${
+              value === opt
+                ? "bg-violet-600 text-white border-violet-600"
+                : "bg-white text-slate-600 border-slate-300 hover:border-violet-400"
+            }`}>{opt}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── New structured components ─────────────────────────────────────────────────
+
+function mgmtColor(v: string): string {
+  if (v === "independent")           return "bg-emerald-600 text-white border-emerald-600";
+  if (v === "independent_difficulty") return "bg-amber-500 text-white border-amber-500";
+  if (v === "needs_prompting")        return "bg-orange-500 text-white border-orange-500";
+  if (v === "needs_assistance")       return "bg-red-500 text-white border-red-500";
+  if (v === "dependent")              return "bg-red-700 text-white border-red-700";
+  return "bg-violet-600 text-white border-violet-600";
+}
+
+function ManagementLevel({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div>
+      <label className="label">How do they manage this activity?</label>
+      <div className="flex gap-1.5 flex-wrap mt-1">
+        {MANAGEMENT_OPTIONS.map((opt) => (
+          <button key={opt.value} type="button"
+            onClick={() => onChange(value === opt.value ? "" : opt.value)}
+            className={`text-xs px-3 py-1.5 rounded-full border font-medium transition ${
+              value === opt.value ? mgmtColor(opt.value) : "bg-white text-slate-600 border-slate-300 hover:border-violet-400"
+            }`}>
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FrequencyInput({ label = "Frequency", unit, count, onUnit, onCount }: {
+  label?: string;
+  unit: string; count: string;
+  onUnit: (v: string) => void;
+  onCount: (v: string) => void;
+}) {
+  const isDailyShortcut = count === "Daily";
+  const formatted = formatFrequency(unit, count);
+  const isQuick = FREQ_QUICK.includes(count);
+
+  return (
+    <div>
+      <label className="label">{label}</label>
+      <div className="space-y-2 mt-1">
+        {/* Count first, then unit */}
+        <div className="flex gap-1.5 items-center flex-wrap">
+          {FREQ_QUICK.map((c) => (
+            <button key={c} type="button" onClick={() => onCount(count === c ? "" : c)}
+              className={`text-xs px-2.5 py-1 rounded border transition ${
+                count === c
+                  ? "bg-violet-600 text-white border-violet-600"
+                  : "bg-white text-slate-600 border-slate-300 hover:border-violet-400"
+              }`}>{c}</button>
+          ))}
+          <input
+            type="text"
+            className="input w-16 text-xs py-1"
+            placeholder="other"
+            value={isQuick ? "" : count}
+            onChange={(e) => onCount(e.target.value)}
+          />
+        </div>
+        <div className="flex gap-1.5 flex-wrap">
+          {FREQ_UNITS.map((u) => (
+            <button key={u} type="button"
+              disabled={isDailyShortcut}
+              onClick={() => onUnit(unit === u ? "" : u)}
+              className={`text-xs px-2.5 py-1 rounded border transition disabled:opacity-40 ${
+                unit === u && !isDailyShortcut
+                  ? "bg-slate-700 text-white border-slate-700"
+                  : "bg-white text-slate-600 border-slate-300 hover:border-violet-400"
+              }`}>{u}</button>
+          ))}
+        </div>
+        {formatted && (
+          <p className="text-[11px] text-violet-700 font-medium bg-violet-50 rounded px-2 py-0.5 inline-block">
+            {formatted}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BehaviourModifiers({ selected, onChange }: { selected: string[]; onChange: (v: string[]) => void }) {
+  function toggle(opt: string) {
+    onChange(selected.includes(opt) ? selected.filter((s) => s !== opt) : [...selected, opt]);
+  }
+  return (
+    <div>
+      <label className="label">Behaviour modifiers</label>
+      <div className="flex flex-wrap gap-1.5 mt-1">
+        {BEHAVIOUR_MODIFIERS.map((opt) => (
+          <button key={opt} type="button" onClick={() => toggle(opt)}
+            className={`text-xs px-2.5 py-1 rounded-full border transition ${
+              selected.includes(opt)
+                ? "bg-amber-500 text-white border-amber-500"
+                : "bg-white text-slate-600 border-slate-300 hover:border-amber-400"
+            }`}>{opt}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function WhoChips({ label, selected, onChange, other, onOther }: {
+  label: string;
+  selected: string[]; onChange: (v: string[]) => void;
+  other: string; onOther: (v: string) => void;
+}) {
+  function toggle(opt: string) {
+    onChange(selected.includes(opt) ? selected.filter((s) => s !== opt) : [...selected, opt]);
+  }
+  return (
+    <div>
+      <label className="label">{label}</label>
+      <div className="flex flex-wrap gap-1.5 mt-1 items-center">
+        {WHO_CHIPS.map((opt) => (
+          <button key={opt} type="button" onClick={() => toggle(opt)}
+            className={`text-xs px-2.5 py-1 rounded-full border transition ${
+              selected.includes(opt)
+                ? "bg-violet-600 text-white border-violet-600"
+                : "bg-white text-slate-600 border-slate-300 hover:border-violet-400"
+            }`}>{opt}</button>
+        ))}
+        <input className="input flex-1 min-w-[120px] text-xs py-1" placeholder="Other (specify)"
+          value={other} onChange={(e) => onOther(e.target.value)} />
+      </div>
+    </div>
+  );
+}
+
+function HoursChip({ value, custom, onValue, onCustom }: {
+  value: string; custom: string;
+  onValue: (v: string) => void;
+  onCustom: (v: string) => void;
+}) {
+  return (
+    <div>
+      <label className="label">Support hours / week</label>
+      <div className="flex gap-1.5 items-center flex-wrap mt-1">
+        {HOURS_CHIPS.map((h) => (
+          <button key={h} type="button" onClick={() => onValue(value === h ? "" : h)}
+            className={`text-xs px-2.5 py-1 rounded-full border transition ${
+              value === h
+                ? "bg-violet-600 text-white border-violet-600"
+                : "bg-white text-slate-600 border-slate-300 hover:border-violet-400"
+            }`}>{h} hrs</button>
+        ))}
+        <input type="text" className="input w-20 text-xs py-1" placeholder="exact"
+          value={custom} onChange={(e) => onCustom(e.target.value)} />
+      </div>
+    </div>
+  );
+}
+
+const RECENCY_COUNT_CHIPS = ["1", "2–3", "4–5"];
+
+function RecencyInput({
+  number, unit, sinceInjury, onPatch,
+}: {
+  number: string; unit: string; sinceInjury: boolean;
+  onPatch: (p: Partial<Pick<CommonSubdomainEntry, "recencyNumber" | "recencyUnit" | "recencySinceInjury">>) => void;
+}) {
+  const isDaily = number === "Daily";
+  const isPresetCount = RECENCY_COUNT_CHIPS.includes(number) || isDaily;
+  const disableUnit = isDaily || sinceInjury;
+  const disableCount = sinceInjury;
+
+  const preview = sinceInjury
+    ? "since the injury"
+    : isDaily
+    ? "daily"
+    : number && unit
+    ? `${number} ${number === "1" ? unit.replace(/s$/, "") : unit} ago`
+    : null;
+
+  return (
+    <div>
+      <label className="label">Recency (last performed)</label>
+      <div className="space-y-2 mt-1">
+        <div className="flex gap-1.5 items-center flex-wrap">
+          {RECENCY_COUNT_CHIPS.map((c) => (
+            <button key={c} type="button"
+              disabled={disableCount}
+              onClick={() => onPatch({ recencyNumber: number === c ? "" : c })}
+              className={`text-xs px-2.5 py-1 rounded border transition disabled:opacity-40 ${
+                number === c && !sinceInjury
+                  ? "bg-violet-600 text-white border-violet-600"
+                  : "bg-white text-slate-600 border-slate-300 hover:border-violet-400"
+              }`}>{c}</button>
+          ))}
+          <button type="button"
+            disabled={disableCount}
+            onClick={() => onPatch({ recencyNumber: isDaily ? "" : "Daily", recencyUnit: "" })}
+            className={`text-xs px-2.5 py-1 rounded border transition disabled:opacity-40 ${
+              isDaily && !sinceInjury
+                ? "bg-violet-600 text-white border-violet-600"
+                : "bg-white text-slate-600 border-slate-300 hover:border-violet-400"
+            }`}>Daily</button>
+          <input
+            type="text"
+            className="input w-16 text-xs py-1"
+            placeholder="other"
+            disabled={disableCount}
+            value={isPresetCount || sinceInjury ? "" : number}
+            onChange={(e) => onPatch({ recencyNumber: e.target.value })}
+          />
+          {/* Since injury — exclusive chip */}
+          <button type="button"
+            onClick={() => sinceInjury
+              ? onPatch({ recencySinceInjury: false })
+              : onPatch({ recencySinceInjury: true, recencyNumber: "", recencyUnit: "" })
+            }
+            className={`text-xs px-2.5 py-1 rounded border transition ${
+              sinceInjury
+                ? "bg-slate-700 text-white border-slate-700"
+                : "bg-white text-slate-600 border-slate-300 hover:border-slate-500"
+            }`}>Since injury</button>
+        </div>
+        <div className="flex gap-1.5 flex-wrap">
+          {RECENCY_UNITS.map((u) => (
+            <button key={u} type="button"
+              disabled={disableUnit}
+              onClick={() => onPatch({ recencyUnit: unit === u ? "" : u })}
+              className={`text-xs px-2.5 py-1 rounded border transition disabled:opacity-40 ${
+                unit === u && !disableUnit
+                  ? "bg-slate-700 text-white border-slate-700"
+                  : "bg-white text-slate-600 border-slate-300 hover:border-slate-500"
+              }`}>{u}</button>
+          ))}
+        </div>
+        {preview && (
+          <p className="text-[11px] text-violet-700 font-medium bg-violet-50 rounded px-2 py-0.5 inline-block">
+            {preview}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PreInjuryChip({ value, notes, onChange, onNotes }: {
+  value: string; notes: string;
+  onChange: (v: string) => void;
+  onNotes: (v: string) => void;
+}) {
+  return (
+    <div>
+      <label className="label">Pre-injury comparison</label>
+      <div className="flex gap-1.5 mt-1 flex-wrap">
+        {PRE_INJURY_CHIPS.map((opt) => (
+          <button key={opt.value} type="button" onClick={() => onChange(value === opt.value ? "" : opt.value)}
+            className={`text-xs px-2.5 py-1 rounded-full border transition ${
+              value === opt.value
+                ? "bg-slate-600 text-white border-slate-600"
+                : "bg-white text-slate-600 border-slate-300 hover:border-slate-500"
+            }`}>{opt.label}</button>
+        ))}
+      </div>
+      {value && (
+        <input className="input mt-1.5 text-xs" placeholder="Notes (optional)"
+          value={notes} onChange={(e) => onNotes(e.target.value)} />
+      )}
+    </div>
+  );
+}
+
+// ── Common subdomain fields (rewritten) ───────────────────────────────────────
+
+function CommonFields({
+  data, onPatch, extraTop, extraBottom,
+}: {
+  data: CommonSubdomainEntry;
+  onPatch: (p: Partial<CommonSubdomainEntry>) => void;
+  extraTop?: React.ReactNode;
+  extraBottom?: React.ReactNode;
+}) {
+  const ml = data.managementLevel ?? "";
+  const needsPrompting  = ml === "needs_prompting";
+  const needsAssistance = ml === "needs_assistance" || ml === "dependent";
+
+  return (
+    <div className="space-y-3">
+
+      {/* Negative overrides — always visible */}
+      <div className="flex gap-4">
+        <FlagRow checked={!!data.doesNotPerform} label="Does not perform"
+          onChange={(v) => onPatch({ doesNotPerform: v, noIssues: v ? false : data.noIssues })} />
+        <FlagRow checked={!!data.noIssues} label="No issues"
+          onChange={(v) => onPatch({ noIssues: v, doesNotPerform: v ? false : data.doesNotPerform })} />
+      </div>
+
+      {!data.doesNotPerform && !data.noIssues && (
+        <>
+          {extraTop}
+
+          {/* 1. Frequency */}
+          <FrequencyInput
+            unit={data.frequencyUnit ?? ""}
+            count={data.frequencyCount ?? ""}
+            onUnit={(v) => onPatch({ frequencyUnit: v })}
+            onCount={(v) => onPatch({ frequencyCount: v })} />
+
+          {/* 2. Behaviour modifiers */}
+          <BehaviourModifiers
+            selected={data.behaviourModifiers ?? []}
+            onChange={(v) => onPatch({ behaviourModifiers: v })} />
+
+          {/* 3. How do they manage this activity */}
+          <ManagementLevel value={ml} onChange={(v) => onPatch({ managementLevel: v })} />
+
+          {/* 4a. Conditional: prompting */}
+          {needsPrompting && (
+            <div className="pl-3 border-l-2 border-orange-300 space-y-3">
+              <WhoChips label="Who prompts"
+                selected={data.promptingWhoChips ?? []}
+                onChange={(v) => onPatch({ promptingWhoChips: v })}
+                other={data.promptingWhoOther ?? ""}
+                onOther={(v) => onPatch({ promptingWhoOther: v })} />
+              <FrequencyInput label="Prompting frequency"
+                unit={data.promptingFrequencyUnit ?? ""}
+                count={data.promptingFrequencyCount ?? ""}
+                onUnit={(v) => onPatch({ promptingFrequencyUnit: v })}
+                onCount={(v) => onPatch({ promptingFrequencyCount: v })} />
+            </div>
+          )}
+
+          {/* 4b. Conditional: assistance / dependent */}
+          {needsAssistance && (
+            <div className="pl-3 border-l-2 border-red-300 space-y-3">
+              <WhoChips label="Who assists"
+                selected={data.assistWhoChips ?? []}
+                onChange={(v) => onPatch({ assistWhoChips: v })}
+                other={data.assistWhoOther ?? ""}
+                onOther={(v) => onPatch({ assistWhoOther: v })} />
+              <HoursChip
+                value={data.supportHoursChip ?? ""}
+                custom={data.supportHoursCustom ?? ""}
+                onValue={(v) => onPatch({ supportHoursChip: v })}
+                onCustom={(v) => onPatch({ supportHoursCustom: v })} />
+            </div>
+          )}
+
+          {/* Recency */}
+          <RecencyInput
+            number={data.recencyNumber ?? ""}
+            unit={data.recencyUnit ?? ""}
+            sinceInjury={!!data.recencySinceInjury}
+            onPatch={onPatch} />
+
+          {/* Pre-injury */}
+          <PreInjuryChip
+            value={data.preInjuryComparison ?? ""}
+            notes={data.preInjuryComparisonNotes ?? ""}
+            onChange={(v) => onPatch({ preInjuryComparison: v as CommonSubdomainEntry["preInjuryComparison"] })}
+            onNotes={(v) => onPatch({ preInjuryComparisonNotes: v })} />
+
+          {extraBottom}
+
+          {/* Optional notes */}
+          <Txt value={data.optionalFreeText ?? ""}
+            onChange={(v) => onPatch({ optionalFreeText: v })}
+            placeholder="Additional notes (optional)" small />
+
+          {/* Evidence snippets */}
+          <Snippets snippets={data.evidenceSnippets ?? []} onChange={(s) => onPatch({ evidenceSnippets: s })} />
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Accordion section (with status dot) ──────────────────────────────────────
 
 function AccordionSection({
-  id: _id, title, isOpen, onToggle, badge, children,
+  id: _id, title, isOpen, onToggle, status, children,
 }: {
   id: string; title: string; isOpen: boolean;
-  onToggle: () => void; badge?: string;
+  onToggle: () => void;
+  status?: SubdomainStatus;
   children: React.ReactNode;
 }) {
+  const dot =
+    status === "complete" ? "bg-emerald-500" :
+    status === "partial"  ? "bg-amber-400" :
+    "bg-slate-200";
+
   return (
     <div className="border border-slate-200 rounded-lg overflow-hidden">
       <button
@@ -349,10 +698,8 @@ function AccordionSection({
         onClick={onToggle}
       >
         <div className="flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
           <span>{title}</span>
-          {badge && (
-            <span className="text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-semibold">{badge}</span>
-          )}
         </div>
         <span className="text-slate-400 text-xs">{isOpen ? "▲" : "▼"}</span>
       </button>
@@ -364,26 +711,23 @@ function AccordionSection({
 // ── Self-care Panel ───────────────────────────────────────────────────────────
 
 const SELF_CARE_SUBDOMAINS = [
-  { key: "bathing", label: "Bathing" },
-  { key: "grooming", label: "Grooming" },
-  { key: "cooking", label: "Cooking" },
-  { key: "householdChores", label: "Household Chores" },
-  { key: "shopping", label: "Shopping" },
-  { key: "other", label: "Other" },
+  { key: "bathing",         label: "Bathing / Showering" },
+  { key: "grooming",        label: "Grooming / Personal hygiene" },
+  { key: "cooking",         label: "Cooking / Meal preparation" },
+  { key: "householdChores", label: "Household chores" },
+  { key: "shopping",        label: "Shopping" },
+  { key: "other",           label: "Other self-care" },
 ];
 
-function SelfCarePanel({
-  table, catIdx, onUpdate, open, onToggle,
-}: PanelProps) {
+function SelfCarePanel({ table, catIdx, onUpdate, open, onToggle }: PanelProps) {
   return (
     <div className="space-y-2">
       {SELF_CARE_SUBDOMAINS.map(({ key, label }) => {
         const data = getSD<CommonSubdomainEntry>(table, catIdx, key);
-        const patch = (p: Partial<CommonSubdomainEntry>) =>
-          updateSD(table!, catIdx, key, p, onUpdate);
+        const patch = (p: Partial<CommonSubdomainEntry>) => updateSD(table!, catIdx, key, p, onUpdate);
         return (
           <AccordionSection key={key} id={key} title={label}
-            isOpen={open.has(key)} onToggle={() => onToggle(key)}>
+            status={computeStatus(data)} isOpen={open.has(key)} onToggle={() => onToggle(key)}>
             <CommonFields data={data} onPatch={patch} />
           </AccordionSection>
         );
@@ -395,65 +739,74 @@ function SelfCarePanel({
 // ── Social & Recreational Panel ───────────────────────────────────────────────
 
 const SOCIAL_SUBDOMAINS = [
-  { key: "socialOutings", label: "Social Outings" },
-  { key: "hobbies", label: "Hobbies" },
-  { key: "exercise", label: "Exercise" },
-  { key: "culturalActivities", label: "Cultural Activities" },
-  { key: "socialParticipation", label: "Social Participation Level" },
+  { key: "socialOutings",      label: "Social outings" },
+  { key: "hobbies",            label: "Hobbies" },
+  { key: "exercise",           label: "Exercise / Sport" },
+  { key: "culturalActivities", label: "Cultural / Religious activities" },
+  { key: "socialParticipation", label: "Social participation" },
 ];
 
-function SocialRecreationalPanel({
-  table, catIdx, onUpdate, open, onToggle,
-}: PanelProps) {
-  const topData = getSD<{ doesNotGoOut?: boolean; noHobbies?: boolean }>(table, catIdx, "_flags");
-  const patchFlags = (p: Partial<{ doesNotGoOut?: boolean; noHobbies?: boolean }>) =>
-    updateSD(table!, catIdx, "_flags", p, onUpdate);
+function SocialRecreationalPanel({ table, catIdx, onUpdate, open, onToggle }: PanelProps) {
+  const flags = getSD<{ doesNotGoOut?: boolean; noHobbies?: boolean }>(table, catIdx, "_flags");
+  const patchFlags = (p: object) => updateSD(table!, catIdx, "_flags", p, onUpdate);
 
   return (
     <div className="space-y-2">
       <div className="flex gap-4 pb-1">
-        <FlagRow checked={!!topData.doesNotGoOut} label="Does not go out"
+        <FlagRow checked={!!flags.doesNotGoOut} label="Does not go out"
           onChange={(v) => patchFlags({ doesNotGoOut: v })} />
-        <FlagRow checked={!!topData.noHobbies} label="No hobbies or activities"
+        <FlagRow checked={!!flags.noHobbies} label="No hobbies or activities"
           onChange={(v) => patchFlags({ noHobbies: v })} />
       </div>
+
       {SOCIAL_SUBDOMAINS.map(({ key, label }) => {
         const data = getSD<SocialSubdomainEntry>(table, catIdx, key);
-        const patch = (p: Partial<SocialSubdomainEntry>) =>
-          updateSD(table!, catIdx, key, p, onUpdate);
+        const patch = (p: Partial<SocialSubdomainEntry>) => updateSD(table!, catIdx, key, p, onUpdate);
         return (
           <AccordionSection key={key} id={key} title={label}
-            isOpen={open.has(key)} onToggle={() => onToggle(key)}>
+            status={computeStatus(data)} isOpen={open.has(key)} onToggle={() => onToggle(key)}>
             <CommonFields
               data={data}
               onPatch={patch}
               extraTop={
-                <div className="grid grid-cols-2 gap-3">
-                  <SF label="Initiation">
-                    <Sel value={data.initiation ?? ""} options={INITIATION_OPTIONS}
-                      onChange={(v) => patch({ initiation: v as SocialSubdomainEntry["initiation"] })} />
-                  </SF>
-                  <SF label="Involvement Level">
-                    <Sel value={data.involvementLevel ?? ""} options={INVOLVEMENT_OPTIONS}
-                      onChange={(v) => patch({ involvementLevel: v as SocialSubdomainEntry["involvementLevel"] })} />
-                  </SF>
+                <div className="space-y-3">
+                  <Chips label="Activity types" options={ACTIVITY_TYPE_CHIPS}
+                    selected={data.activityTypes ?? []} onChange={(v) => patch({ activityTypes: v })} />
+                  <div className="grid grid-cols-2 gap-3">
+                    <ChipSelect label="Initiation" options={INITIATION_CHIPS}
+                      value={data.initiation ?? ""} onChange={(v) => patch({ initiation: v as SocialSubdomainEntry["initiation"] })} />
+                    <ChipSelect label="Involvement" options={INVOLVEMENT_CHIPS}
+                      value={data.involvementLevel ?? ""} onChange={(v) => patch({ involvementLevel: v as SocialSubdomainEntry["involvementLevel"] })} />
+                  </div>
+                  <ChipSelect label="Social engagement" options={ENGAGEMENT_CHIPS}
+                    value={data.socialEngagementType ?? ""} onChange={(v) => patch({ socialEngagementType: v })} />
+                  <ChipSelect label="Motivation" options={MOTIVATION_CHIPS}
+                    value={data.motivationLevel ?? ""} onChange={(v) => patch({ motivationLevel: v })} />
                 </div>
               }
               extraBottom={
-                <div>
-                  <FlagRow
-                    checked={!!data.supportPersonRequired}
-                    label="Support person required"
-                    onChange={(v) => patch({ supportPersonRequired: v })}
-                  />
-                  {data.supportPersonRequired && (
-                    <div className="mt-2">
-                      <SF label="Support person details">
+                <div className="space-y-3">
+                  <div>
+                    <FlagRow checked={!!data.avoidanceBehaviour} label="Avoidance behaviour present"
+                      onChange={(v) => patch({ avoidanceBehaviour: v })} />
+                    {data.avoidanceBehaviour && (
+                      <div className="mt-2 pl-3 border-l-2 border-amber-300">
+                        <Chips label="Avoidance reasons" options={AVOIDANCE_REASON_CHIPS}
+                          selected={data.avoidanceReasons ?? []} onChange={(v) => patch({ avoidanceReasons: v })} />
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <FlagRow checked={!!data.supportPersonRequired} label="Support person required"
+                      onChange={(v) => patch({ supportPersonRequired: v })} />
+                    {data.supportPersonRequired && (
+                      <div className="mt-2 pl-3 border-l-2 border-violet-300">
                         <Txt value={data.supportPersonDetails ?? ""}
-                          onChange={(v) => patch({ supportPersonDetails: v })} />
-                      </SF>
-                    </div>
-                  )}
+                          onChange={(v) => patch({ supportPersonDetails: v })}
+                          placeholder="Who / what role?" small />
+                      </div>
+                    )}
+                  </div>
                 </div>
               }
             />
@@ -467,15 +820,21 @@ function SocialRecreationalPanel({
 // ── Travel Panel ──────────────────────────────────────────────────────────────
 
 const TRAVEL_SUBDOMAINS = [
-  { key: "localTravel", label: "Local Travel" },
-  { key: "longDistance", label: "Long-distance Travel" },
-  { key: "driving", label: "Driving" },
-  { key: "publicTransport", label: "Public Transport" },
+  { key: "localTravel",    label: "Local travel" },
+  { key: "longDistance",   label: "Long-distance travel" },
+  { key: "driving",        label: "Driving" },
+  { key: "publicTransport", label: "Public transport" },
 ];
 
-function TravelPanel({
-  table, catIdx, onUpdate, open, onToggle,
-}: PanelProps) {
+type TravelSD = CommonSubdomainEntry & {
+  travelMode?: string[];
+  drivingStatus?: string;
+  safetyIssues?: boolean;
+  safetyDescription?: string;
+  distanceCapacity?: string;
+};
+
+function TravelPanel({ table, catIdx, onUpdate, open, onToggle }: PanelProps) {
   const flags = getSD<{ doesNotTravel?: boolean; cannotLeaveResidence?: boolean }>(table, catIdx, "_flags");
   const patchFlags = (p: object) => updateSD(table!, catIdx, "_flags", p, onUpdate);
 
@@ -487,53 +846,41 @@ function TravelPanel({
         <FlagRow checked={!!flags.cannotLeaveResidence} label="Cannot leave residence"
           onChange={(v) => patchFlags({ cannotLeaveResidence: v })} />
       </div>
+
       {TRAVEL_SUBDOMAINS.map(({ key, label }) => {
-        const data = getSD<TravelSubdomainEntry>(table, catIdx, key);
-        const patch = (p: Partial<TravelSubdomainEntry>) =>
-          updateSD(table!, catIdx, key, p, onUpdate);
+        const data = getSD<TravelSD>(table, catIdx, key);
+        const patch = (p: Partial<TravelSD>) => updateSD(table!, catIdx, key, p, onUpdate);
         return (
           <AccordionSection key={key} id={key} title={label}
-            isOpen={open.has(key)} onToggle={() => onToggle(key)}>
-            <div className="space-y-3">
-              <SF label="Independence Level">
-                <Sel value={data.independenceLevel ?? ""} options={INDEPENDENCE_OPTIONS}
-                  onChange={(v) => patch({ independenceLevel: v as TravelSubdomainEntry["independenceLevel"] })} />
-              </SF>
-              <div className="grid grid-cols-2 gap-3">
-                <SF label="Support Requirement">
-                  <Sel value={data.supportType ?? ""} options={SUPPORT_OPTIONS}
-                    onChange={(v) => patch({ supportType: v as TravelSubdomainEntry["supportType"] })} />
-                </SF>
-                <SF label="Hours per week">
-                  <Txt value={data.supportHoursPerWeek ?? ""} onChange={(v) => patch({ supportHoursPerWeek: v })} />
-                </SF>
-              </div>
-              <SF label="Ability Context">
-                <Sel value={data.abilityContext ?? ""} options={ABILITY_OPTIONS}
-                  onChange={(v) => patch({ abilityContext: v as TravelSubdomainEntry["abilityContext"] })} />
-              </SF>
-              <SF label="Distance Capacity">
-                <Txt value={data.distanceCapacity ?? ""} onChange={(v) => patch({ distanceCapacity: v })}
-                  placeholder="e.g. within 2km, unable beyond suburb" />
-              </SF>
-              <SF label="Recency (last travel event)">
-                <Txt value={data.recency ?? ""} onChange={(v) => patch({ recency: v })}
-                  placeholder="e.g. 3 months ago" />
-              </SF>
-              <div className="grid grid-cols-2 gap-3">
-                <SF label="Pre-injury Comparison">
-                  <Sel value={data.preInjuryComparison ?? ""} options={PRE_INJURY_OPTIONS}
-                    onChange={(v) => patch({ preInjuryComparison: v as TravelSubdomainEntry["preInjuryComparison"] })} />
-                </SF>
-                <SF label="Notes">
-                  <Txt value={data.preInjuryComparisonNotes ?? ""} onChange={(v) => patch({ preInjuryComparisonNotes: v })} />
-                </SF>
-              </div>
-              <Snippets
-                snippets={data.evidenceSnippets ?? []}
-                onChange={(s) => patch({ evidenceSnippets: s })}
-              />
-            </div>
+            status={computeStatus(data)} isOpen={open.has(key)} onToggle={() => onToggle(key)}>
+            <CommonFields
+              data={data}
+              onPatch={(p) => patch(p as Partial<TravelSD>)}
+              extraTop={
+                <div className="space-y-3">
+                  <Chips label="Travel mode" options={TRAVEL_MODE_CHIPS}
+                    selected={data.travelMode ?? []} onChange={(v) => patch({ travelMode: v })} />
+                  <ChipSelect label="Driving status" options={DRIVING_STATUS_CHIPS}
+                    value={data.drivingStatus ?? ""} onChange={(v) => patch({ drivingStatus: v })} />
+                  <SF label="Distance capacity">
+                    <Txt value={data.distanceCapacity ?? ""} onChange={(v) => patch({ distanceCapacity: v })}
+                      placeholder="e.g. within 2km, unable beyond suburb" small />
+                  </SF>
+                </div>
+              }
+              extraBottom={
+                <div>
+                  <FlagRow checked={!!data.safetyIssues} label="Safety issues when travelling"
+                    onChange={(v) => patch({ safetyIssues: v })} />
+                  {data.safetyIssues && (
+                    <div className="mt-2 pl-3 border-l-2 border-red-300">
+                      <Txt value={data.safetyDescription ?? ""} onChange={(v) => patch({ safetyDescription: v })}
+                        placeholder="Describe safety concerns" small />
+                    </div>
+                  )}
+                </div>
+              }
+            />
           </AccordionSection>
         );
       })}
@@ -541,7 +888,7 @@ function TravelPanel({
   );
 }
 
-// ── Social Functioning Panel (entity-based) ───────────────────────────────────
+// ── Social Functioning Panel ──────────────────────────────────────────────────
 
 function RelationshipEntitySection({
   label: _label, data, onChange, children,
@@ -553,18 +900,18 @@ function RelationshipEntitySection({
 }) {
   return (
     <div className="space-y-3">
-      <SF label="Relationship Status">
+      <SF label="Status">
         <Txt value={data.status ?? ""} onChange={(v) => onChange({ status: v })}
-          placeholder="e.g. together, separated, no contact" />
+          placeholder="e.g. together, separated, no contact" small />
       </SF>
       <div className="grid grid-cols-2 gap-3">
         <SF label="Quality">
           <Sel value={data.quality ?? ""} options={RELATIONSHIP_QUALITY_OPTIONS}
             onChange={(v) => onChange({ quality: v as RelationshipEntry["quality"] })} />
         </SF>
-        <SF label="Contact Frequency">
+        <SF label="Contact frequency">
           <Txt value={data.contactFrequency ?? ""} onChange={(v) => onChange({ contactFrequency: v })}
-            placeholder="e.g. daily, weekly" />
+            placeholder="e.g. daily, weekly" small />
         </SF>
       </div>
       <SF label="Dependency">
@@ -572,17 +919,12 @@ function RelationshipEntitySection({
           onChange={(v) => onChange({ dependency: v as RelationshipEntry["dependency"] })} />
       </SF>
       {children}
-      <Snippets
-        snippets={data.evidenceSnippets ?? []}
-        onChange={(s) => onChange({ evidenceSnippets: s })}
-      />
+      <Snippets snippets={data.evidenceSnippets ?? []} onChange={(s) => onChange({ evidenceSnippets: s })} />
     </div>
   );
 }
 
-function SocialFunctioningPanel({
-  table, catIdx, onUpdate, open, onToggle,
-}: PanelProps) {
+function SocialFunctioningPanel({ table, catIdx, onUpdate, open, onToggle }: PanelProps) {
   const sf = getSD<SocialFunctioningData>(table, catIdx, "_sf");
   const patchSf = (p: Partial<SocialFunctioningData>) =>
     updateSD(table!, catIdx, "_sf", p, onUpdate);
@@ -597,95 +939,78 @@ function SocialFunctioningPanel({
 
   const entities: Array<{
     key: "partner" | "parents" | "siblings" | "friends";
-    label: string;
-    negateKey: keyof SocialFunctioningData;
-    negateLabel: string;
+    label: string; negateKey: keyof SocialFunctioningData;
   }> = [
-    { key: "partner", label: "Partner", negateKey: "noPartner", negateLabel: "No partner" },
-    { key: "parents", label: "Parents", negateKey: "parentsDeceased", negateLabel: "Parents deceased" },
-    { key: "siblings", label: "Siblings", negateKey: "noSiblings", negateLabel: "No siblings" },
-    { key: "friends", label: "Friends (close)", negateKey: "noCloseFriends", negateLabel: "No close friends" },
+    { key: "partner",  label: "Partner",        negateKey: "noPartner" },
+    { key: "parents",  label: "Parents",         negateKey: "parentsDeceased" },
+    { key: "siblings", label: "Siblings",        negateKey: "noSiblings" },
+    { key: "friends",  label: "Friends (close)", negateKey: "noCloseFriends" },
   ];
 
   const children = (sf.children ?? {}) as ChildrenEntry;
-  const patchChildren = (p: Partial<ChildrenEntry>) =>
-    patchSf({ children: { ...children, ...p } });
+  const patchChildren = (p: Partial<ChildrenEntry>) => patchSf({ children: { ...children, ...p } });
 
   return (
     <div className="space-y-2">
-      {/* Global flags */}
-      <div className="card bg-slate-50 space-y-2 p-3">
-        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Global Flags</p>
+      <div className="bg-slate-50 rounded-lg p-3 space-y-2">
+        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Flags</p>
         <div className="grid grid-cols-2 gap-1.5">
-          <FlagRow checked={!!sf.noPartner} label="No partner"
-            onChange={(v) => patchSf({ noPartner: v })} />
-          <FlagRow checked={!!sf.noChildren} label="No children"
-            onChange={(v) => patchSf({ noChildren: v })} />
-          <FlagRow checked={!!sf.parentsDeceased} label="Parents deceased"
-            onChange={(v) => patchSf({ parentsDeceased: v })} />
-          <FlagRow checked={!!sf.noSiblings} label="No siblings"
-            onChange={(v) => patchSf({ noSiblings: v })} />
-          <FlagRow checked={!!sf.noCloseFriends} label="No close friends"
-            onChange={(v) => patchSf({ noCloseFriends: v })} />
+          <FlagRow checked={!!sf.noPartner}     label="No partner"        onChange={(v) => patchSf({ noPartner: v })} />
+          <FlagRow checked={!!sf.noChildren}    label="No children"       onChange={(v) => patchSf({ noChildren: v })} />
+          <FlagRow checked={!!sf.parentsDeceased} label="Parents deceased" onChange={(v) => patchSf({ parentsDeceased: v })} />
+          <FlagRow checked={!!sf.noSiblings}    label="No siblings"       onChange={(v) => patchSf({ noSiblings: v })} />
+          <FlagRow checked={!!sf.noCloseFriends} label="No close friends" onChange={(v) => patchSf({ noCloseFriends: v })} />
+        </div>
+        <div className="pt-1">
+          <FlagRow checked={!!sf.domesticViolenceHistory} label="History of domestic violence"
+            onChange={(v) => patchSf({ domesticViolenceHistory: v })} />
         </div>
       </div>
 
-      {/* Living arrangement */}
-      <AccordionSection id="living" title="Living Arrangement"
+      <AccordionSection id="living" title="Living arrangement"
         isOpen={open.has("living")} onToggle={() => onToggle("living")}>
         <div className="space-y-3">
-          <SF label="Living Situation">
+          <SF label="Situation">
             <Sel value={sf.livingArrangement ?? ""} options={LIVING_ARRANGEMENT_OPTIONS}
               onChange={(v) => patchSf({ livingArrangement: v as SocialFunctioningData["livingArrangement"] })} />
           </SF>
-          <SF label="Details">
-            <Txt value={sf.livingArrangementDetails ?? ""} onChange={(v) => patchSf({ livingArrangementDetails: v })}
-              placeholder='e.g. "Lives with 2 children aged 8 and 10"' />
-          </SF>
+          <Txt value={sf.livingArrangementDetails ?? ""} onChange={(v) => patchSf({ livingArrangementDetails: v })}
+            placeholder='e.g. "Lives with 2 children aged 8 and 10"' small />
         </div>
       </AccordionSection>
 
-      {/* Children entity */}
       {!sf.noChildren && (
         <AccordionSection id="children" title="Children"
           isOpen={open.has("children")} onToggle={() => onToggle("children")}>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <SF label="Number of children">
+              <SF label="Number">
                 <input type="number" className="input" min={0}
                   value={children.numberOfChildren ?? ""}
                   onChange={(e) => patchChildren({ numberOfChildren: Number(e.target.value) })} />
               </SF>
               <SF label="Ages">
                 <Txt value={children.ages ?? ""} onChange={(v) => patchChildren({ ages: v })}
-                  placeholder="e.g. 8, 10, 15" />
+                  placeholder="e.g. 8, 10, 15" small />
               </SF>
             </div>
-            <SF label="Care Responsibility">
+            <SF label="Care responsibility">
               <Sel value={children.careResponsibility ?? ""} options={CARE_RESPONSIBILITY_OPTIONS}
                 onChange={(v) => patchChildren({ careResponsibility: v as ChildrenEntry["careResponsibility"] })} />
             </SF>
-            <RelationshipEntitySection
-              label="Children"
-              data={children}
-              onChange={(p) => patchChildren(p)}
-            />
+            <RelationshipEntitySection label="Children" data={children} onChange={(p) => patchChildren(p)} />
           </div>
         </AccordionSection>
       )}
 
-      {/* Other relationship entities */}
-      {entities.map(({ key, label, negateKey, negateLabel: _negateLabel }) => {
+      {entities.map(({ key, label, negateKey }) => {
         if (sf[negateKey]) return null;
         const data = (sf[key] ?? {}) as RelationshipEntry;
         return (
           <AccordionSection key={key} id={key} title={label}
             isOpen={open.has(key)} onToggle={() => onToggle(key)}>
-            <RelationshipEntitySection
-              label={label}
-              data={data}
-              onChange={(p) => patchEntity(key, p)}
-            />
+            <RelationshipEntitySection label={label} data={data}
+              onChange={(p) => patchEntity(key, p)} />
           </AccordionSection>
         );
       })}
@@ -696,15 +1021,22 @@ function SocialFunctioningPanel({
 // ── Concentration Panel ───────────────────────────────────────────────────────
 
 const CONCENTRATION_SUBDOMAINS = [
-  { key: "reading", label: "Reading" },
-  { key: "taskCompletion", label: "Task Completion" },
-  { key: "followingInstructions", label: "Following Instructions" },
-  { key: "conversationFocus", label: "Conversation Focus" },
+  { key: "reading",               label: "Reading" },
+  { key: "taskCompletion",        label: "Task completion" },
+  { key: "followingInstructions", label: "Following instructions" },
+  { key: "conversationFocus",     label: "Conversation / focus" },
 ];
 
-function ConcentrationPanel({
-  table, catIdx, onUpdate, open, onToggle,
-}: PanelProps) {
+type ConcentrationSD = CommonSubdomainEntry & {
+  durationCapacity?: string;
+  fatigueOnset?: string;
+  memoryIssues?: boolean;
+  memoryIssueType?: string[];
+  studyAbility?: boolean;
+  studySupport?: string;
+};
+
+function ConcentrationPanel({ table, catIdx, onUpdate, open, onToggle }: PanelProps) {
   const flags = getSD<{ cannotSustain?: boolean; severeImpairment?: boolean }>(table, catIdx, "_flags");
   const patchFlags = (p: object) => updateSD(table!, catIdx, "_flags", p, onUpdate);
 
@@ -713,53 +1045,56 @@ function ConcentrationPanel({
       <div className="flex gap-4 pb-1">
         <FlagRow checked={!!flags.cannotSustain} label="Cannot sustain attention"
           onChange={(v) => patchFlags({ cannotSustain: v })} />
-        <FlagRow checked={!!flags.severeImpairment} label="Severe concentration impairment"
+        <FlagRow checked={!!flags.severeImpairment} label="Severe impairment"
           onChange={(v) => patchFlags({ severeImpairment: v })} />
       </div>
+
       {CONCENTRATION_SUBDOMAINS.map(({ key, label }) => {
-        const data = getSD<ConcentrationSubdomainEntry>(table, catIdx, key);
-        const patch = (p: Partial<ConcentrationSubdomainEntry>) =>
-          updateSD(table!, catIdx, key, p, onUpdate);
+        const data = getSD<ConcentrationSD>(table, catIdx, key);
+        const patch = (p: Partial<ConcentrationSD>) => updateSD(table!, catIdx, key, p, onUpdate);
         return (
           <AccordionSection key={key} id={key} title={label}
-            isOpen={open.has(key)} onToggle={() => onToggle(key)}>
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <SF label="Duration Capacity">
-                  <Txt value={data.durationCapacity ?? ""} onChange={(v) => patch({ durationCapacity: v })}
-                    placeholder="e.g. 10 minutes" />
-                </SF>
-                <SF label="Fatigue Onset">
-                  <Txt value={data.fatigueOnset ?? ""} onChange={(v) => patch({ fatigueOnset: v })}
-                    placeholder="e.g. after 5 minutes" />
-                </SF>
-              </div>
-              <SF label="Difficulty Level">
-                <Sel value={data.difficultyLevel ?? ""} options={DIFFICULTY_OPTIONS}
-                  onChange={(v) => patch({ difficultyLevel: v as ConcentrationSubdomainEntry["difficultyLevel"] })} />
-              </SF>
-              <SF label="Support Required">
-                <Txt value={data.supportRequired ?? ""} onChange={(v) => patch({ supportRequired: v })}
-                  placeholder="e.g. verbal prompting" />
-              </SF>
-              <SF label="Recency">
-                <Txt value={data.recency ?? ""} onChange={(v) => patch({ recency: v })}
-                  placeholder="e.g. last able to read a book 2 years ago" />
-              </SF>
-              <div className="grid grid-cols-2 gap-3">
-                <SF label="Pre-injury Comparison">
-                  <Sel value={data.preInjuryComparison ?? ""} options={PRE_INJURY_OPTIONS}
-                    onChange={(v) => patch({ preInjuryComparison: v as ConcentrationSubdomainEntry["preInjuryComparison"] })} />
-                </SF>
-                <SF label="Notes">
-                  <Txt value={data.preInjuryComparisonNotes ?? ""} onChange={(v) => patch({ preInjuryComparisonNotes: v })} />
-                </SF>
-              </div>
-              <Snippets
-                snippets={data.evidenceSnippets ?? []}
-                onChange={(s) => patch({ evidenceSnippets: s })}
-              />
-            </div>
+            status={computeStatus(data)} isOpen={open.has(key)} onToggle={() => onToggle(key)}>
+            <CommonFields
+              data={data}
+              onPatch={(p) => patch(p as Partial<ConcentrationSD>)}
+              extraTop={
+                <div className="grid grid-cols-2 gap-3">
+                  <SF label="Duration capacity">
+                    <Txt value={data.durationCapacity ?? ""} onChange={(v) => patch({ durationCapacity: v })}
+                      placeholder="e.g. 10 min" small />
+                  </SF>
+                  <SF label="Fatigue onset">
+                    <Txt value={data.fatigueOnset ?? ""} onChange={(v) => patch({ fatigueOnset: v })}
+                      placeholder="e.g. after 5 min" small />
+                  </SF>
+                </div>
+              }
+              extraBottom={
+                <div className="space-y-3">
+                  <div>
+                    <FlagRow checked={!!data.memoryIssues} label="Memory issues present"
+                      onChange={(v) => patch({ memoryIssues: v })} />
+                    {data.memoryIssues && (
+                      <div className="mt-2 pl-3 border-l-2 border-amber-300">
+                        <Chips label="Memory issue types" options={MEMORY_ISSUE_CHIPS}
+                          selected={data.memoryIssueType ?? []} onChange={(v) => patch({ memoryIssueType: v })} />
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <FlagRow checked={!!data.studyAbility} label="Able to study / undertake training"
+                      onChange={(v) => patch({ studyAbility: v })} />
+                    {data.studyAbility && (
+                      <div className="mt-2 pl-3 border-l-2 border-emerald-300">
+                        <Txt value={data.studySupport ?? ""} onChange={(v) => patch({ studySupport: v })}
+                          placeholder="Support needed for study" small />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              }
+            />
           </AccordionSection>
         );
       })}
@@ -770,15 +1105,13 @@ function ConcentrationPanel({
 // ── Employability Panel ───────────────────────────────────────────────────────
 
 const EMPLOYABILITY_SUBDOMAINS = [
-  { key: "currentWork", label: "Current Work" },
-  { key: "workCapacity", label: "Work Capacity" },
+  { key: "currentWork",  label: "Current work" },
+  { key: "workCapacity", label: "Work capacity" },
   { key: "volunteering", label: "Volunteering" },
-  { key: "jobSeeking", label: "Job-seeking" },
+  { key: "jobSeeking",   label: "Job-seeking" },
 ];
 
-function EmployabilityPanel({
-  table, catIdx, onUpdate, open, onToggle,
-}: PanelProps) {
+function EmployabilityPanel({ table, catIdx, onUpdate, open, onToggle }: PanelProps) {
   const flags = getSD<{ notWorking?: boolean; notSeekingWork?: boolean }>(table, catIdx, "_flags");
   const patchFlags = (p: object) => updateSD(table!, catIdx, "_flags", p, onUpdate);
 
@@ -790,6 +1123,7 @@ function EmployabilityPanel({
         <FlagRow checked={!!flags.notSeekingWork} label="Not seeking work"
           onChange={(v) => patchFlags({ notSeekingWork: v })} />
       </div>
+
       {EMPLOYABILITY_SUBDOMAINS.map(({ key, label }) => {
         const data = getSD<EmployabilitySubdomainEntry>(table, catIdx, key);
         const patch = (p: Partial<EmployabilitySubdomainEntry>) =>
@@ -799,40 +1133,45 @@ function EmployabilityPanel({
             isOpen={open.has(key)} onToggle={() => onToggle(key)}>
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
-                <SF label="Employment Status">
+                <SF label="Employment status">
                   <Sel value={data.employmentStatus ?? ""} options={EMPLOYMENT_STATUS_OPTIONS}
                     onChange={(v) => patch({ employmentStatus: v as EmployabilitySubdomainEntry["employmentStatus"] })} />
                 </SF>
-                <SF label="Hours per week">
+                <SF label="Hours / week">
                   <Txt value={data.hoursPerWeek ?? ""} onChange={(v) => patch({ hoursPerWeek: v })}
-                    placeholder="e.g. 20 hrs" />
+                    placeholder="e.g. 20" small />
                 </SF>
               </div>
               <SF label="Consistency">
                 <Sel value={data.consistency ?? ""} options={CONSISTENCY_OPTIONS}
                   onChange={(v) => patch({ consistency: v as EmployabilitySubdomainEntry["consistency"] })} />
               </SF>
-              <SF label="Barriers to Work">
+              <SF label="Job type / history">
+                <Txt value={data.jobTypeHistory ?? ""} onChange={(v) => patch({ jobTypeHistory: v })}
+                  placeholder="e.g. labourer, admin, nursing" small />
+              </SF>
+              <SF label="Work attempts since injury">
+                <Txt value={data.workAttemptsSinceInjury ?? ""} onChange={(v) => patch({ workAttemptsSinceInjury: v })}
+                  placeholder="e.g. returned 2022, resigned due to pain" small />
+              </SF>
+              <Chips label="Barriers to work" options={BARRIERS_CHIPS}
+                selected={data.barrierTypes ?? []} onChange={(v) => patch({ barrierTypes: v })} />
+              {(data.barrierTypes?.length ?? 0) > 0 && (
                 <Txt value={data.barriers ?? ""} onChange={(v) => patch({ barriers: v })}
-                  placeholder="e.g. pain on prolonged sitting, anxiety" />
-              </SF>
-              <SF label="Last Employment (recency)">
+                  placeholder="Additional barrier detail" small />
+              )}
+              <FlagRow checked={!!data.inconsistentHistoryFlag} label="Inconsistent work history reported"
+                onChange={(v) => patch({ inconsistentHistoryFlag: v })} />
+              <SF label="Last employment (recency)">
                 <Txt value={data.lastEmployment ?? ""} onChange={(v) => patch({ lastEmployment: v })}
-                  placeholder="e.g. 2 years ago, Jan 2022" />
+                  placeholder="e.g. 2 years ago, Jan 2022" small />
               </SF>
-              <div className="grid grid-cols-2 gap-3">
-                <SF label="Pre-injury Comparison">
-                  <Sel value={data.preInjuryComparison ?? ""} options={PRE_INJURY_OPTIONS}
-                    onChange={(v) => patch({ preInjuryComparison: v as EmployabilitySubdomainEntry["preInjuryComparison"] })} />
-                </SF>
-                <SF label="Notes">
-                  <Txt value={data.preInjuryComparisonNotes ?? ""} onChange={(v) => patch({ preInjuryComparisonNotes: v })} />
-                </SF>
-              </div>
-              <Snippets
-                snippets={data.evidenceSnippets ?? []}
-                onChange={(s) => patch({ evidenceSnippets: s })}
-              />
+              <PreInjuryChip
+                value={data.preInjuryComparison ?? ""}
+                notes={data.preInjuryComparisonNotes ?? ""}
+                onChange={(v) => patch({ preInjuryComparison: v as EmployabilitySubdomainEntry["preInjuryComparison"] })}
+                onNotes={(v) => patch({ preInjuryComparisonNotes: v })} />
+              <Snippets snippets={data.evidenceSnippets ?? []} onChange={(s) => patch({ evidenceSnippets: s })} />
             </div>
           </AccordionSection>
         );
@@ -851,93 +1190,16 @@ type PanelProps = {
   onToggle: (key: string) => void;
 };
 
-// ── Auto-sentence generation ──────────────────────────────────────────────────
+// ── Auto-sentence generation (delegated to narrativeEngine) ──────────────────
 
 function generateAutoFindings(
   table: PIRSTableModel | undefined,
   catIdx: number,
   categoryKey: PirsCategoryKey,
-  _clientName: string
+  subjectGender: string | null | undefined
 ): string {
   if (!table) return "";
-
-  if (categoryKey === "selfCare") {
-    const parts: string[] = [];
-    for (const { key, label } of SELF_CARE_SUBDOMAINS) {
-      const d = getSD<CommonSubdomainEntry>(table, catIdx, key);
-      if (d.doesNotPerform) { parts.push(`${label}: does not perform.`); continue; }
-      if (d.noIssues) continue;
-      const bits: string[] = [];
-      if (d.independenceLevel) bits.push(d.independenceLevel.replace(/_/g, " "));
-      if (d.frequency) bits.push(d.frequency);
-      if (d.supportType && d.supportType !== "none") bits.push(`${d.supportType} support`);
-      if (bits.length) parts.push(`${label}: ${bits.join(", ")}.`);
-    }
-    return parts.join(" ");
-  }
-
-  if (categoryKey === "socialRecreational") {
-    const parts: string[] = [];
-    for (const { key, label } of SOCIAL_SUBDOMAINS) {
-      const d = getSD<SocialSubdomainEntry>(table, catIdx, key);
-      if (d.doesNotPerform) { parts.push(`${label}: does not participate.`); continue; }
-      if (d.noIssues) continue;
-      const bits: string[] = [];
-      if (d.initiation) bits.push(d.initiation.replace(/_/g, " "));
-      if (d.involvementLevel) bits.push(d.involvementLevel.replace(/_/g, " "));
-      if (d.frequency) bits.push(d.frequency);
-      if (bits.length) parts.push(`${label}: ${bits.join(", ")}.`);
-    }
-    return parts.join(" ");
-  }
-
-  if (categoryKey === "travel") {
-    const parts: string[] = [];
-    for (const { key, label } of TRAVEL_SUBDOMAINS) {
-      const d = getSD<TravelSubdomainEntry>(table, catIdx, key);
-      if (d.doesNotTravel) { parts.push(`${label}: does not travel.`); continue; }
-      const bits: string[] = [];
-      if (d.abilityContext) bits.push(d.abilityContext.replace(/_/g, " "));
-      if (d.distanceCapacity) bits.push(`capacity: ${d.distanceCapacity}`);
-      if (bits.length) parts.push(`${label}: ${bits.join(", ")}.`);
-    }
-    return parts.join(" ");
-  }
-
-  if (categoryKey === "socialFunction") {
-    const sf = getSD<SocialFunctioningData>(table, catIdx, "_sf");
-    const bits: string[] = [];
-    if (sf.livingArrangement) bits.push(`Lives ${sf.livingArrangement.replace(/_/g, " ")}${sf.livingArrangementDetails ? ` (${sf.livingArrangementDetails})` : ""}`);
-    if (sf.noPartner) bits.push("no partner");
-    if (sf.noChildren) bits.push("no children");
-    if (sf.partner?.quality && sf.partner.quality !== "good") bits.push(`partner relationship: ${sf.partner.quality.replace(/_/g, " ")}`);
-    return bits.join(". ");
-  }
-
-  if (categoryKey === "concentration") {
-    const parts: string[] = [];
-    for (const { key, label } of CONCENTRATION_SUBDOMAINS) {
-      const d = getSD<ConcentrationSubdomainEntry>(table, catIdx, key);
-      if (d.difficultyLevel && d.difficultyLevel !== "none") {
-        const bits: string[] = [`${d.difficultyLevel} difficulty`];
-        if (d.durationCapacity) bits.push(`duration ${d.durationCapacity}`);
-        parts.push(`${label}: ${bits.join(", ")}.`);
-      }
-    }
-    return parts.join(" ");
-  }
-
-  if (categoryKey === "adaptation") {
-    const cw = getSD<EmployabilitySubdomainEntry>(table, catIdx, "currentWork");
-    const bits: string[] = [];
-    if (cw.employmentStatus) bits.push(cw.employmentStatus.replace(/_/g, " "));
-    if (cw.hoursPerWeek) bits.push(`${cw.hoursPerWeek} hrs/week`);
-    if (cw.consistency) bits.push(cw.consistency);
-    if (cw.barriers) bits.push(`barriers: ${cw.barriers}`);
-    return bits.join(", ");
-  }
-
-  return "";
+  return generateCategoryNarrative(table, catIdx, categoryKey, buildSubject(subjectGender));
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
@@ -947,13 +1209,13 @@ export function PIRSCategoryEntry({
   categoryIndex,
   table,
   onUpdateTable,
-  clientName,
+  subjectGender,
 }: {
   categoryKey: PirsCategoryKey;
   categoryIndex: number;
   table: PIRSTableModel | undefined;
   onUpdateTable: (t: PIRSTableModel) => void;
-  clientName: string;
+  subjectGender?: string | null;
 }) {
   const [openSubdomains, setOpenSubdomains] = useState<Set<string>>(new Set());
   const [focusMode, setFocusMode] = useState(false);
@@ -967,17 +1229,15 @@ export function PIRSCategoryEntry({
     });
   }
 
-  function collapseAll() {
-    setOpenSubdomains(new Set());
-  }
+  function collapseAll() { setOpenSubdomains(new Set()); }
 
-  const findings = getFinding(table, categoryIndex);
-  const isManual = isFindingManual(table, categoryIndex);
+  const findings  = getFinding(table, categoryIndex);
+  const isManual  = isFindingManual(table, categoryIndex);
 
   const autoFindings = useMemo(
-    () => generateAutoFindings(table, categoryIndex, categoryKey, clientName),
+    () => generateAutoFindings(table, categoryIndex, categoryKey, subjectGender),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [table, categoryIndex, categoryKey, clientName]
+    [table, categoryIndex, categoryKey, subjectGender]
   );
 
   function handleFindingsChange(val: string) {
@@ -990,7 +1250,6 @@ export function PIRSCategoryEntry({
     updateFindings(table, categoryIndex, autoFindings, false, onUpdateTable);
   }
 
-  // Class selector helper
   const classValue = table?.classes[categoryIndex] ?? 1;
   function setClass(v: number) {
     if (!table) return;
@@ -1017,45 +1276,51 @@ export function PIRSCategoryEntry({
 
   return (
     <div className="space-y-4">
+
       {/* Controls bar */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <label className="text-xs text-slate-500">Class</label>
-          <select
-            className="input py-0.5 w-16 text-sm"
-            value={classValue}
-            onChange={(e) => setClass(Number(e.target.value))}
-          >
-            {[1, 2, 3, 4, 5].map((v) => <option key={v} value={v}>{v}</option>)}
-          </select>
+          <div className="flex gap-1">
+            {[1, 2, 3, 4, 5].map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setClass(v)}
+                className={`w-8 h-8 text-xs font-bold rounded border transition ${
+                  v === classValue
+                    ? v >= 4 ? "bg-red-600 text-white border-red-600"
+                      : v >= 3 ? "bg-amber-500 text-white border-amber-500"
+                      : "bg-violet-600 text-white border-violet-600"
+                    : "bg-white text-slate-600 border-slate-300 hover:border-violet-400"
+                }`}
+              >{v}</button>
+            ))}
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
-            <input
-              type="checkbox"
-              className="w-3 h-3 accent-violet-600"
-              checked={focusMode}
-              onChange={(e) => setFocusMode(e.target.checked)}
-            />
-            Focus Mode
+          <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
+            <input type="checkbox" className="w-3 h-3 accent-violet-600"
+              checked={focusMode} onChange={(e) => setFocusMode(e.target.checked)} />
+            Focus mode
           </label>
           <button type="button"
             className="text-[11px] px-2 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-100"
             onClick={collapseAll}>
-            Collapse All
+            Collapse all
           </button>
         </div>
       </div>
 
       {/* Category panel */}
-      {categoryKey === "selfCare" && <SelfCarePanel {...panelProps} />}
+      {categoryKey === "selfCare"           && <SelfCarePanel           {...panelProps} />}
       {categoryKey === "socialRecreational" && <SocialRecreationalPanel {...panelProps} />}
-      {categoryKey === "travel" && <TravelPanel {...panelProps} />}
-      {categoryKey === "socialFunction" && <SocialFunctioningPanel {...panelProps} />}
-      {categoryKey === "concentration" && <ConcentrationPanel {...panelProps} />}
-      {categoryKey === "adaptation" && <EmployabilityPanel {...panelProps} />}
+      {categoryKey === "travel"             && <TravelPanel             {...panelProps} />}
+      {categoryKey === "socialFunction"     && <SocialFunctioningPanel  {...panelProps} />}
+      {categoryKey === "concentration"      && <ConcentrationPanel      {...panelProps} />}
+      {categoryKey === "adaptation"         && <EmployabilityPanel      {...panelProps} />}
 
-      {/* Central Findings Panel */}
+      {/* Findings */}
       <div className="border-t pt-4 space-y-2">
         <div className="flex items-center justify-between">
           <label className="label mb-0">Findings</label>
@@ -1082,7 +1347,7 @@ export function PIRSCategoryEntry({
         />
         {!isManual && autoFindings && !findings && (
           <p className="text-[11px] text-slate-400 italic">
-            Fill subdomains above to generate findings automatically.
+            Fill subdomains above to auto-generate findings.
           </p>
         )}
       </div>

@@ -162,10 +162,11 @@ function SaveIndicator({ status, dirty }: { status: SaveStatus; dirty: boolean }
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function App({ client, goHome, onSave }: {
+export default function App({ client, goHome, onSave, initialSectionIndex = 0 }: {
   client: Client | null;
   goHome: () => void;
   onSave?: (updated: Client) => void;
+  initialSectionIndex?: number;
 }) {
   const initReport = client?.report ?? defaultReport();
 
@@ -177,7 +178,7 @@ export default function App({ client, goHome, onSave }: {
     initReport.previousAssessorPirs ?? []
   );
 
-  const [activeSectionIndex, setActiveSectionIndex] = useState(0);
+  const [activeSectionIndex, setActiveSectionIndex] = useState(initialSectionIndex);
   const [activePirsCategory, setActivePirsCategory] = useState<PirsCategoryKey>("selfCare");
   const [saveStatus,         setSaveStatus]         = useState<SaveStatus>("idle");
   const [isDirty,            setIsDirty]            = useState(false);
@@ -412,6 +413,12 @@ export default function App({ client, goHome, onSave }: {
 
           {/* Section tabs — file label style */}
           <div className="flex gap-0.5 ml-3 self-stretch items-end">
+            <button
+              onClick={goHome}
+              className="px-3 h-8 text-xs font-medium rounded-t border-t border-x transition border-transparent text-slate-400 hover:text-slate-700 hover:bg-slate-50"
+            >
+              Demographics
+            </button>
             {schema.sections.map((section: any, index: number) => (
               <button
                 key={section.id}
@@ -539,7 +546,7 @@ export default function App({ client, goHome, onSave }: {
                     categoryIndex={activeCategoryIndex}
                     table={currentPirsTable}
                     onUpdateTable={(updated) => updatePirsTable(updated.id, updated)}
-                    clientName={formatFullName(client?.identity)}
+                    subjectGender={client?.identity?.gender}
                   />
                 </div>
 

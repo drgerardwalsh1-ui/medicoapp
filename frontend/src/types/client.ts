@@ -1,6 +1,39 @@
 import type { PIRSTableModel } from "./types";
 export type { PIRSTableModel } from "./types";
 
+export type {
+  HouseholdRelationships,
+  HouseholdMember,
+  PartnerDetails,
+  ExtendedFamily,
+  SupportBlock,
+  FrequencyStruct,
+  FrequencyUnit,
+  RelationshipStatus,
+  RelationshipType,
+  CohabitationStatus,
+  LivingArrangement,
+  HouseholdSupportType,
+  ContactLevel,
+  ParentsAlive,
+} from "./household";
+
+export {
+  defaultHouseholdRelationships,
+  RELATIONSHIP_STATUS_OPTIONS,
+  COHABITATION_STATUS_OPTIONS,
+  RELATIONSHIP_TYPE_GROUPS,
+  LIVING_ARRANGEMENT_OPTIONS,
+  HOUSEHOLD_SUPPORT_TYPE_OPTIONS,
+  isPartnerType,
+  isChildType,
+  isParentType,
+  isCarer,
+  requiresFreeText,
+  livesWithClaimant,
+  membersWhoSupport,
+} from "./household";
+
 export type UUID = string;
 
 // ── Identity ──────────────────────────────────────────────────────────────────
@@ -22,7 +55,6 @@ export type Identity = {
 export type Administrative = {
   employer: string | null;
   occupation: string | null;
-  relationshipStatus: string | null;
   referrer: {
     name: string | null;
     org: string | null;
@@ -37,6 +69,7 @@ export type InjuryData = {
   yearsSinceInjury: number | null;
   injuryType: string | null;
   injuryTypeOther?: string | null;
+  employerAtInjury?: string | null;
   claimNumber: string | null;
   insurerName: string | null;
   insurerReference: string | null;
@@ -107,6 +140,9 @@ export type Client = {
   appointments: Appointment[];
   report: Report;
   assessmentChecklist: AssessmentChecklist;
+  // Structured household and relationship data — single source of truth.
+  // All PIRS and report relationship references must derive from this field.
+  householdRelationships?: import("./household").HouseholdRelationships;
   created_at: string;
   updated_at: string;
 };
@@ -129,7 +165,6 @@ export function defaultAdministrative(): Administrative {
   return {
     employer: null,
     occupation: null,
-    relationshipStatus: null,
     referrer: { name: null, org: null },
   };
 }
@@ -191,6 +226,9 @@ export function defaultClient(): Client {
     updated_at: now,
   };
 }
+
+// householdRelationships deliberately absent from defaultClient() —
+// it is optional and starts undefined (no household data entered yet).
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
@@ -263,7 +301,6 @@ export function parseClientBlob(id: string, raw: unknown): Client {
     administrative: {
       employer: (admin.employer as string | null) ?? null,
       occupation: (admin.occupation as string | null) ?? null,
-      relationshipStatus: (admin.relationshipStatus as string | null) ?? null,
       referrer: {
         name: (ref.name as string | null) ?? null,
         org: (ref.org as string | null) ?? null,
@@ -276,6 +313,7 @@ export function parseClientBlob(id: string, raw: unknown): Client {
         yearsSinceInjury: (injRaw.yearsSinceInjury as number | null) ?? null,
         injuryType: (injRaw.injuryType as string | null) ?? null,
         injuryTypeOther: (injRaw.injuryTypeOther as string | null) ?? null,
+        employerAtInjury: (injRaw.employerAtInjury as string | null) ?? null,
         claimNumber: (injRaw.claimNumber as string | null) ?? null,
         insurerName: (injRaw.insurerName as string | null) ?? null,
         insurerReference: (injRaw.insurerReference as string | null) ?? null,
@@ -283,6 +321,10 @@ export function parseClientBlob(id: string, raw: unknown): Client {
       } : null,
     },
     appointments: Array.isArray(b.appointments) ? (b.appointments as Appointment[]) : [],
+    // householdRelationships: pass through as-is — structured JSON, validated by TypeScript
+    householdRelationships: (b.householdRelationships && typeof b.householdRelationships === "object")
+      ? (b.householdRelationships as import("./household").HouseholdRelationships)
+      : undefined,
     report: {
       fields: (rawReport.fields && typeof rawReport.fields === "object" ? rawReport.fields : {}) as Record<string, unknown>,
       pirsTables: Array.isArray(rawReport.pirsTables) ? (rawReport.pirsTables as PIRSTableModel[]) : [],

@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { PIC_SCHEMA } from "../schemas/reportSchema";
 import {
   TauriAPI,
   isTauri,
@@ -20,14 +21,37 @@ import {
   calcAge,
   calcAgeAtDate,
   calcYearsSince,
+  defaultHouseholdRelationships,
+  RELATIONSHIP_STATUS_OPTIONS,
+  COHABITATION_STATUS_OPTIONS,
+  LIVING_ARRANGEMENT_OPTIONS,
+  HOUSEHOLD_SUPPORT_TYPE_OPTIONS,
+  RELATIONSHIP_TYPE_GROUPS,
   type Client,
   type Appointment,
   type InjuryData,
+  type HouseholdRelationships,
+  type HouseholdMember,
+  type RelationshipStatus,
+  type CohabitationStatus,
+  type RelationshipType,
+  type LivingArrangement,
 } from "../types/client";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const TITLE_OPTIONS = ["Mr", "Mrs", "Ms", "Miss", "Dr", "Prof", "Other"];
+const GENDER_PRESETS = ["Male", "Female", "Non-binary", "Prefer not to say"];
+const DURATION_MINS = [15, 30, 45, 60, 75, 90, 105, 120];
+function durationLabel(m: number): string {
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  return rem === 0 ? `${h} hr` : `${h} hr ${rem} min`;
+}
+function apptDurationMins(appt: Appointment): number {
+  return Math.round((new Date(appt.end).getTime() - new Date(appt.start).getTime()) / 60_000);
+}
 const HAND_OPTIONS = [
   { value: "right", label: "Right" },
   { value: "left", label: "Left" },
@@ -58,7 +82,15 @@ export default function ClientHome({
   openReport,
   registerSaveHandler,
   registerVersionHistoryHandler,
-}: any) {
+}: {
+  client: any;
+  isNew: boolean;
+  onSave?: (c: any) => void;
+  onCancel?: () => void;
+  openReport?: (sectionIndex?: number) => void;
+  registerSaveHandler?: (fn: (() => void) | null) => void;
+  registerVersionHistoryHandler?: (fn: (() => void) | null) => void;
+}) {
 
   // ── Initial state ──────────────────────────────────────────────────────────
   const initClient: Client = client
@@ -129,50 +161,98 @@ export default function ClientHome({
     [inj?.dateOfInjury]
   );
 
-  // ── Primary appointment ────────────────────────────────────────────────────
-  const apptDisplay = useMemo(() => {
-    const appts = data.appointments ?? [];
-    if (appts.length === 0) return null;
-    const now = Date.now();
-    const future = appts.filter((a) => new Date(a.start).getTime() >= now);
-    const target =
-      future.length > 0
-        ? future.reduce((n, a) => (new Date(a.start) < new Date(n.start) ? a : n))
-        : appts.reduce((l, a) => (new Date(a.start) > new Date(l.start) ? a : l));
-    const d = new Date(target.start);
+  // ── Appointment helpers ────────────────────────────────────────────────────
+  function apptToDisplay(appt: Appointment) {
+    const d = new Date(appt.start);
     return {
-      id: target.id,
-      raw: target,
-      date: [
-        d.getFullYear(),
-        String(d.getMonth() + 1).padStart(2, "0"),
-        String(d.getDate()).padStart(2, "0"),
-      ].join("-"),
+      date: [d.getFullYear(), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0")].join("-"),
       time: `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,
-      isFuture: future.length > 0,
+      isFuture: d.getTime() >= Date.now(),
     };
-  }, [data.appointments]);
+  }
 
-  function upsertAppointment(date: string, time: string) {
+  function updateAppointment(id: string, date: string, time: string) {
     if (!date) return;
     const effectiveTime = time || "09:00";
     const start = new Date(`${date}T${effectiveTime}:00`);
     if (isNaN(start.getTime())) return;
     const end = new Date(start.getTime() + 60 * 60_000);
-    const existing = apptDisplay?.raw;
-    const appt: Appointment = {
-      id: existing?.id ?? crypto.randomUUID(),
-      start: start.toISOString(),
-      end: end.toISOString(),
-      type: existing?.type ?? "assessment",
-    };
     setData((prev) => ({
       ...prev,
-      appointments: existing
-        ? prev.appointments.map((a) => (a.id === existing.id ? appt : a))
-        : [...prev.appointments, appt],
+      appointments: prev.appointments.map((a) =>
+        a.id === id ? { ...a, start: start.toISOString(), end: end.toISOString() } : a
+      ),
     }));
     setIsDirty(true);
+  }
+
+  function addAppointment() {
+    const now = new Date();
+    now.setMinutes(0, 0, 0);
+    now.setHours(9);
+    const end = new Date(now.getTime() + 60 * 60_000);
+    const appt: Appointment = {
+      id: crypto.randomUUID(),
+      start: now.toISOString(),
+      end: end.toISOString(),
+      type: "assessment",
+    };
+    setData((prev) => ({ ...prev, appointments: [...prev.appointments, appt] }));
+    setIsDirty(true);
+  }
+
+  function deleteAppointment(id: string) {
+    setData((prev) => ({ ...prev, appointments: prev.appointments.filter((a) => a.id !== id) }));
+    setIsDirty(true);
+  }
+
+  function setAppointmentDuration(id: string, mins: number) {
+    setData((prev) => ({
+      ...prev,
+      appointments: prev.appointments.map((a) => {
+        if (a.id !== id) return a;
+        const end = new Date(new Date(a.start).getTime() + mins * 60_000);
+        return { ...a, end: end.toISOString() };
+      }),
+    }));
+    setIsDirty(true);
+  }
+
+  // ── Household helpers ──────────────────────────────────────────────────────
+  const hr = data.householdRelationships ?? defaultHouseholdRelationships();
+
+  function updateHousehold(patch: Partial<HouseholdRelationships>) {
+    setData((prev) => ({
+      ...prev,
+      householdRelationships: {
+        householdMembers: [],
+        ...prev.householdRelationships,
+        ...patch,
+      },
+    }));
+    setIsDirty(true);
+  }
+
+  function addMember() {
+    const newMember: HouseholdMember = {
+      id: crypto.randomUUID(),
+      relationshipToClaimant: "Other",
+      livesWithClaimant: "Lives with claimant full-time",
+      providesSupport: false,
+    };
+    updateHousehold({ householdMembers: [...hr.householdMembers, newMember] });
+  }
+
+  function updateMember(id: string, patch: Partial<HouseholdMember>) {
+    updateHousehold({
+      householdMembers: hr.householdMembers.map((m) =>
+        m.id === id ? { ...m, ...patch } : m
+      ),
+    });
+  }
+
+  function deleteMember(id: string) {
+    updateHousehold({ householdMembers: hr.householdMembers.filter((m) => m.id !== id) });
   }
 
   // ── Update helpers ─────────────────────────────────────────────────────────
@@ -377,6 +457,7 @@ export default function ClientHome({
         } : null,
       },
       appointments: data.appointments,
+      householdRelationships: data.householdRelationships,
       assessmentChecklist: data.assessmentChecklist ?? defaultAssessmentChecklist(),
       report: data.report ?? defaultReport(),
     };
@@ -621,20 +702,56 @@ export default function ClientHome({
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
+  const sectionTabs = PIC_SCHEMA.sections.map((s, i) => ({ id: s.id, title: s.title, index: i }));
+
   return (
-    <div className="bg-slate-100 min-h-full py-8 px-6">
+    <div className="bg-slate-100 min-h-full">
+
+      {/* ── Tab bar (shown once saved) ── */}
+      {isSaved && openReport && (
+        <div className="sticky top-0 z-10 bg-white border-b border-slate-200 shadow-sm">
+          <div className="px-4 flex items-center gap-3 h-10 border-b border-slate-100">
+            <button onClick={onCancel} className="text-sm text-slate-500 hover:text-slate-900 shrink-0">
+              ← Home
+            </button>
+            <span className="text-sm font-semibold text-slate-700 shrink-0 truncate max-w-[200px]">
+              {formatFullName(ident) || "Client"}
+            </span>
+            <SaveStatusIndicator status={saveStatus} dirty={isDirty} />
+          </div>
+          <div className="px-4 flex gap-0.5 items-end h-9">
+            {/* Demographics tab — active */}
+            <div className="px-3 h-8 flex items-center text-xs font-medium rounded-t border-t border-x bg-slate-100 border-slate-200 text-violet-700 select-none">
+              Demographics
+            </div>
+            {sectionTabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => openReport(tab.index)}
+                className="px-3 h-8 text-xs font-medium rounded-t border-t border-x transition border-transparent text-slate-400 hover:text-slate-700 hover:bg-slate-50"
+              >
+                {tab.title}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+    <div className={`${isSaved && openReport ? "pt-6" : "pt-8"} pb-8 px-6`}>
     <div className="max-w-3xl mx-auto space-y-6">
 
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <button onClick={onCancel} className="text-sm text-slate-500 hover:text-slate-900">
-          ← Back
-        </button>
-        <span className="text-sm font-semibold text-slate-700">
-          {formatFullName(ident) || "New Client"}
-        </span>
-        <SaveStatusIndicator status={saveStatus} dirty={isDirty} />
-      </div>
+      {/* Header — shown when not using tab bar (new client or no openReport) */}
+      {(!isSaved || !openReport) && (
+        <div className="flex justify-between items-center">
+          <button onClick={onCancel} className="text-sm text-slate-500 hover:text-slate-900">
+            ← Back
+          </button>
+          <span className="text-sm font-semibold text-slate-700">
+            {formatFullName(ident) || "New Client"}
+          </span>
+          <SaveStatusIndicator status={saveStatus} dirty={isDirty} />
+        </div>
+      )}
 
       {/* ── IDENTITY ── */}
       <div className="card space-y-4">
@@ -678,9 +795,26 @@ export default function ClientHome({
         <div className="grid grid-cols-3 gap-3">
           <div>
             <label className="label">Gender</label>
-            <input className="input" value={ident.gender || ""}
-              placeholder="e.g. Male, Female, Non-binary"
-              onChange={(e) => updateIdentity("gender", e.target.value || null)} />
+            <select
+              className="input"
+              value={GENDER_PRESETS.includes(ident.gender ?? "") ? (ident.gender ?? "") : (ident.gender ? "Other" : "")}
+              onChange={(e) => {
+                if (e.target.value === "Other") updateIdentity("gender", "");
+                else updateIdentity("gender", e.target.value || null);
+              }}
+            >
+              <option value="">—</option>
+              {GENDER_PRESETS.map((g) => <option key={g} value={g}>{g}</option>)}
+              <option value="Other">Other</option>
+            </select>
+            {!GENDER_PRESETS.includes(ident.gender ?? "") && (ident.gender !== null && ident.gender !== undefined) && (
+              <input
+                className="input mt-1"
+                placeholder="Specify gender"
+                value={ident.gender}
+                onChange={(e) => updateIdentity("gender", e.target.value || null)}
+              />
+            )}
           </div>
           <div>
             <label className="label">Date of Birth</label>
@@ -702,18 +836,12 @@ export default function ClientHome({
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="label">Relationship Status</label>
-            <input className="input" value={admin.relationshipStatus || ""}
-              placeholder="e.g. Married, Single"
-              onChange={(e) => updateAdministrative("relationshipStatus", e.target.value || null)} />
-          </div>
-          <div>
             <label className="label">Occupation</label>
             <input className="input" value={admin.occupation || ""}
               onChange={(e) => updateAdministrative("occupation", e.target.value || null)} />
           </div>
           <div>
-            <label className="label">Employer</label>
+            <label className="label">Current Employer</label>
             <input className="input" value={admin.employer || ""}
               onChange={(e) => updateAdministrative("employer", e.target.value || null)} />
           </div>
@@ -780,6 +908,11 @@ export default function ClientHome({
             </div>
           )}
           <div>
+            <label className="label">Employer at Time of Injury</label>
+            <input className="input" value={inj?.employerAtInjury || ""}
+              onChange={(e) => updateInjury("employerAtInjury", e.target.value || null)} />
+          </div>
+          <div>
             <label className="label">Claim Number</label>
             <input className="input" value={inj?.claimNumber || ""}
               onChange={(e) => updateInjury("claimNumber", e.target.value || null)} />
@@ -830,47 +963,243 @@ export default function ClientHome({
         </div>
       </div>
 
-      {/* ── APPOINTMENT ── */}
+      {/* ── HOUSEHOLD & RELATIONSHIPS ── */}
       <div className="card space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="section-title mb-0">Appointment</h2>
-          {apptDisplay && (
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-              apptDisplay.isFuture
-                ? "bg-violet-100 text-violet-700"
-                : "bg-slate-100 text-slate-500"
-            }`}>
-              {apptDisplay.isFuture ? "Upcoming" : "Past"}
-            </span>
-          )}
-        </div>
+        <h2 className="section-title">Household &amp; Relationships</h2>
+
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="label">Date</label>
-            <input
-              type="date"
-              className="input"
-              value={apptDisplay?.date ?? ""}
-              onChange={(e) =>
-                upsertAppointment(e.target.value, apptDisplay?.time ?? "")
-              }
-            />
+            <label className="label">Relationship at Time of Injury</label>
+            <select className="input" value={hr.relationshipAtInjury ?? ""}
+              onChange={(e) => updateHousehold({ relationshipAtInjury: (e.target.value as RelationshipStatus) || undefined })}>
+              <option value="">—</option>
+              {RELATIONSHIP_STATUS_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+            {hr.relationshipAtInjury === "Other" && (
+              <input className="input mt-1" placeholder="Specify"
+                value={hr.relationshipAtInjuryOther ?? ""}
+                onChange={(e) => updateHousehold({ relationshipAtInjuryOther: e.target.value || undefined })} />
+            )}
           </div>
           <div>
-            <label className="label">Time (24h)</label>
-            <TimeSelect
-              value={apptDisplay?.time ?? ""}
-              onChange={(t) =>
-                upsertAppointment(apptDisplay?.date ?? "", t)
-              }
-            />
+            <label className="label">Current Relationship Status</label>
+            <select className="input" value={hr.currentRelationship ?? ""}
+              onChange={(e) => updateHousehold({ currentRelationship: (e.target.value as RelationshipStatus) || undefined })}>
+              <option value="">—</option>
+              {RELATIONSHIP_STATUS_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+            {hr.currentRelationship === "Other" && (
+              <input className="input mt-1" placeholder="Specify"
+                value={hr.currentRelationshipOther ?? ""}
+                onChange={(e) => updateHousehold({ currentRelationshipOther: e.target.value || undefined })} />
+            )}
           </div>
         </div>
-        {data.appointments.length > 1 && (
-          <p className="text-xs text-slate-400">
-            {data.appointments.length} appointments total — showing{" "}
-            {apptDisplay?.isFuture ? "next upcoming" : "most recent"}. Manage others in Calendar.
-          </p>
+
+        {/* Partner block — shown when in a partnered relationship */}
+        {(hr.currentRelationship === "Married" || hr.currentRelationship === "De facto") && (
+          <div className="border border-slate-200 rounded-lg p-3 space-y-3">
+            <h3 className="text-sm font-semibold text-slate-700">Partner</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Cohabitation</label>
+                <select className="input" value={hr.partnerDetails?.cohabitationStatus ?? ""}
+                  onChange={(e) => updateHousehold({
+                    partnerDetails: {
+                      exists: true, providesSupport: false,
+                      ...hr.partnerDetails,
+                      cohabitationStatus: (e.target.value as CohabitationStatus) || undefined,
+                    },
+                  })}>
+                  <option value="">—</option>
+                  {COHABITATION_STATUS_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Years Together</label>
+                <input type="number" min={0} className="input"
+                  value={hr.partnerDetails?.yearsTogether ?? ""}
+                  onChange={(e) => updateHousehold({
+                    partnerDetails: {
+                      exists: true, providesSupport: false,
+                      ...hr.partnerDetails,
+                      yearsTogether: e.target.value ? Number(e.target.value) : null,
+                    },
+                  })} />
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+              <input type="checkbox" className="w-4 h-4 accent-violet-600"
+                checked={!!hr.partnerDetails?.providesSupport}
+                onChange={(e) => updateHousehold({
+                  partnerDetails: {
+                    exists: true, providesSupport: false,
+                    ...hr.partnerDetails,
+                    providesSupport: e.target.checked,
+                  },
+                })} />
+              Partner provides support
+            </label>
+            {hr.partnerDetails?.providesSupport && (
+              <div className="pl-3 border-l-2 border-violet-300 space-y-2">
+                <label className="label">Support types</label>
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {HOUSEHOLD_SUPPORT_TYPE_OPTIONS.map((st) => {
+                    const cur = hr.partnerDetails?.support?.supportType ?? [];
+                    const isSel = cur.includes(st);
+                    return (
+                      <button key={st} type="button"
+                        onClick={() => updateHousehold({
+                          partnerDetails: {
+                            exists: true, providesSupport: true,
+                            ...hr.partnerDetails,
+                            support: {
+                              ...hr.partnerDetails?.support,
+                              supportType: isSel ? cur.filter((x) => x !== st) : [...cur, st],
+                            },
+                          },
+                        })}
+                        className={`text-xs px-2.5 py-1 rounded-full border transition ${isSel ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-300 hover:border-violet-400"}`}>
+                        {st}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Household members */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-700">Household Members</h3>
+            <button type="button" onClick={addMember}
+              className="text-xs text-violet-600 hover:text-violet-800 font-medium">+ Add</button>
+          </div>
+          {hr.householdMembers.length === 0 ? (
+            <p className="text-sm text-slate-400 italic">No members added.</p>
+          ) : (
+            <div className="space-y-3">
+              {hr.householdMembers.map((m) => (
+                <div key={m.id} className="border border-slate-200 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <select className="input text-xs flex-1" value={m.relationshipToClaimant}
+                      onChange={(e) => updateMember(m.id, { relationshipToClaimant: e.target.value as RelationshipType })}>
+                      {RELATIONSHIP_TYPE_GROUPS.map((g) => (
+                        <optgroup key={g.group} label={g.group}>
+                          {g.types.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </optgroup>
+                      ))}
+                    </select>
+                    <button type="button" onClick={() => deleteMember(m.id)}
+                      className="text-slate-400 hover:text-red-500 px-1 text-base leading-none shrink-0">×</button>
+                  </div>
+                  {m.relationshipToClaimant === "Other" && (
+                    <input className="input text-xs" placeholder="Specify relationship"
+                      value={m.relationshipOther ?? ""}
+                      onChange={(e) => updateMember(m.id, { relationshipOther: e.target.value || undefined })} />
+                  )}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="label">Age</label>
+                      <input type="number" min={0} className="input text-xs"
+                        value={m.age ?? ""}
+                        onChange={(e) => updateMember(m.id, { age: e.target.value ? Number(e.target.value) : null })} />
+                    </div>
+                    <div>
+                      <label className="label">Living arrangement</label>
+                      <select className="input text-xs" value={m.livesWithClaimant}
+                        onChange={(e) => updateMember(m.id, { livesWithClaimant: e.target.value as LivingArrangement })}>
+                        {LIVING_ARRANGEMENT_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                    <input type="checkbox" className="w-3.5 h-3.5 accent-violet-600"
+                      checked={m.providesSupport}
+                      onChange={(e) => updateMember(m.id, { providesSupport: e.target.checked })} />
+                    Provides support to claimant
+                  </label>
+                  {m.providesSupport && (
+                    <div className="pl-3 border-l-2 border-violet-300 space-y-1">
+                      <label className="label">Support types</label>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {HOUSEHOLD_SUPPORT_TYPE_OPTIONS.map((st) => {
+                          const cur = m.support?.supportType ?? [];
+                          const isSel = cur.includes(st);
+                          return (
+                            <button key={st} type="button"
+                              onClick={() => updateMember(m.id, {
+                                support: {
+                                  ...m.support,
+                                  supportType: isSel ? cur.filter((x) => x !== st) : [...cur, st],
+                                },
+                              })}
+                              className={`text-xs px-2.5 py-1 rounded-full border transition ${isSel ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-300 hover:border-violet-400"}`}>
+                              {st}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── APPOINTMENTS ── */}
+      <div className="card space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="section-title mb-0">Appointments</h2>
+          <button type="button" onClick={addAppointment}
+            className="text-xs text-violet-600 hover:text-violet-800 font-medium">
+            + Add
+          </button>
+        </div>
+        {data.appointments.length === 0 ? (
+          <p className="text-sm text-slate-400 italic">No appointments yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {[...data.appointments]
+              .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+              .map((appt) => {
+                const { date, time, isFuture } = apptToDisplay(appt);
+                return (
+                  <div key={appt.id}
+                    className={`flex items-center gap-2 p-2 rounded border ${
+                      isFuture ? "border-violet-200 bg-violet-50" : "border-slate-200 bg-slate-50"
+                    }`}>
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${
+                      isFuture ? "bg-violet-200 text-violet-700" : "bg-slate-200 text-slate-500"
+                    }`}>
+                      {isFuture ? "Upcoming" : "Past"}
+                    </span>
+                    <input type="date" className="input text-xs py-1 flex-1"
+                      value={date}
+                      onChange={(e) => updateAppointment(appt.id, e.target.value, time)} />
+                    <TimeSelect value={time}
+                      onChange={(t) => updateAppointment(appt.id, date, t)} />
+                    <select
+                      className="input text-xs py-1 shrink-0"
+                      value={DURATION_MINS.includes(apptDurationMins(appt)) ? apptDurationMins(appt) : 60}
+                      onChange={(e) => setAppointmentDuration(appt.id, Number(e.target.value))}
+                    >
+                      {DURATION_MINS.map((m) => (
+                        <option key={m} value={m}>{durationLabel(m)}</option>
+                      ))}
+                    </select>
+                    <button type="button" onClick={() => deleteAppointment(appt.id)}
+                      className="text-slate-400 hover:text-red-500 px-1 shrink-0 text-base leading-none">
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+          </div>
         )}
       </div>
 
@@ -1100,6 +1429,7 @@ export default function ClientHome({
       )}
 
     </div>
+    </div>
 
     {/* ── VERSION HISTORY MODAL ── */}
     {showVersionHistory && (
@@ -1189,7 +1519,6 @@ export default function ClientHome({
                         ["Hand Dominance", d.handDominance],
                       ]} />
                       <PreviewSection title="Personal & Occupational" rows={[
-                        ["Relationship Status", parsed.administrative.relationshipStatus],
                         ["Occupation", parsed.administrative.occupation],
                         ["Employer", parsed.administrative.employer],
                       ]} />
@@ -1236,7 +1565,7 @@ export default function ClientHome({
   );
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
 const HOURS_24 = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0"));
 const MINUTES_5 = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, "0"));

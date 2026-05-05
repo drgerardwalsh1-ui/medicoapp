@@ -12,31 +12,39 @@ import {
 interface Props {
   appointment: AppointmentWithClient;
   onNavigate: (clientId: string) => void;
-  onDragStart: (e: React.DragEvent, a: AppointmentWithClient) => void;
+  onBodyPointerDown: (e: React.PointerEvent, a: AppointmentWithClient) => void;
   onResizeStart: (e: React.PointerEvent, a: AppointmentWithClient) => void;
+  startOverride?: string;
   endOverride?: string;
+  isGhost?: boolean;
 }
 
 const AppointmentBlock = memo(function AppointmentBlock({
   appointment,
   onNavigate,
-  onDragStart,
+  onBodyPointerDown,
   onResizeStart,
+  startOverride,
   endOverride,
+  isGhost,
 }: Props) {
+  const effectiveStart = startOverride ?? appointment.start;
   const effectiveEnd = endOverride ?? appointment.end;
   const status = getClientStatus(appointment.client);
   const style = statusStyle(status);
-  const top = appointmentTopPx(appointment.start);
-  const height = appointmentHeightPx(appointment.start, effectiveEnd);
+  const top = appointmentTopPx(effectiveStart);
+  const height = appointmentHeightPx(effectiveStart, effectiveEnd);
   const isShort = height < 38;
   const hasMissingDocs = status === "missing";
   const label = formatFullName(appointment.client?.identity) || "Unknown";
 
   return (
     <div
-      draggable
-      onDragStart={(e) => onDragStart(e, appointment)}
+      onPointerDown={(e) => {
+        // Only handle primary button, ignore resize handle (bottom strip)
+        if (e.button !== 0) return;
+        onBodyPointerDown(e, appointment);
+      }}
       onClick={(e) => {
         e.stopPropagation();
         onNavigate(appointment.client.id);
@@ -48,18 +56,19 @@ const AppointmentBlock = memo(function AppointmentBlock({
         left: "2px",
         right: "2px",
         zIndex: 10,
-        cursor: "pointer",
+        cursor: isGhost ? "grabbing" : "grab",
+        opacity: isGhost ? 0.85 : 1,
       }}
       className={[
         "rounded border overflow-hidden select-none",
         style.bg,
         style.border,
         style.text,
-        "hover:brightness-95 active:brightness-90 transition-[filter,height] duration-75",
+        "hover:brightness-95 active:brightness-90 transition-[filter,height,opacity] duration-75",
       ].join(" ")}
       title={[
         label,
-        `${formatTime(appointment.start)} – ${formatTime(effectiveEnd)}`,
+        `${formatTime(effectiveStart)} – ${formatTime(effectiveEnd)}`,
         hasMissingDocs ? "⚠ Documents not uploaded" : "",
       ]
         .filter(Boolean)
@@ -84,7 +93,7 @@ const AppointmentBlock = memo(function AppointmentBlock({
               )}
             </div>
             <div className="text-xs opacity-80 leading-tight">
-              {formatTime(appointment.start)}–{formatTime(effectiveEnd)}
+              {formatTime(effectiveStart)}–{formatTime(effectiveEnd)}
             </div>
             {appointment.type && height >= 56 && (
               <div className="text-xs opacity-70 capitalize leading-tight mt-0.5">

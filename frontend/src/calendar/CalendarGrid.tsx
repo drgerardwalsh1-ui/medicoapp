@@ -8,6 +8,7 @@ import {
   TOTAL_GRID_HEIGHT,
   isSameDay,
   pixelsToDateTime,
+  appointmentTopPx,
 } from "./calendarUtils";
 import type { AppointmentWithClient } from "./useCalendar";
 
@@ -19,6 +20,16 @@ interface Props {
   onUpdateAppointment: (updated: AppointmentWithClient) => Promise<void>;
 }
 
+type Interaction = {
+  type: "drag" | "resize";
+  appointment: AppointmentWithClient;
+  pointerId: number;
+  offsetY: number;       // grid-y of click minus appt top (drag only)
+  previewStart: string;
+  previewEnd: string;
+  previewDayIndex: number;
+};
+
 export default function CalendarGrid({
   weekDates,
   appointmentsByDay,
@@ -26,20 +37,18 @@ export default function CalendarGrid({
   onSlotClick,
   onUpdateAppointment,
 }: Props) {
-  // The flex row of all 7 day columns — receives pointer capture for resize
   const columnsRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // Drag: ref (not state) so drag start/end never triggers re-render
-  const dragRef = useRef<{
-    appointment: AppointmentWithClient;
-    offsetY: number;
-  } | null>(null);
+  const [interaction, setInteraction] = useState<Interaction | null>(null);
 
-  // Resize: state so the appointment block re-renders with live preview
-  const [resizeState, setResizeState] = useState<{
+  // Pending: pointer down on an appointment body, not yet dragging
+  const pendingRef = useRef<{
     appointment: AppointmentWithClient;
-    previewEnd: string;
     pointerId: number;
+    startX: number;
+    startY: number;
+    offsetY: number;
   } | null>(null);
 
   // Current-time indicator
@@ -47,7 +56,7 @@ export default function CalendarGrid({
   const currentTimeTopPx = useMemo(() => {
     const mins = (now.getHours() - START_HOUR) * 60 + now.getMinutes();
     return Math.max(0, Math.min((mins / 60) * HOUR_HEIGHT, TOTAL_GRID_HEIGHT));
-  }, []); // Only computed once per mount; good enough for a session
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const todayIndex = useMemo(
     () => weekDates.findIndex((d) => isSameDay(d, new Date())),
@@ -55,120 +64,169 @@ export default function CalendarGrid({
   );
 
   // Auto-scroll to current time on first render
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (scrollContainerRef.current) {
-      const target = Math.max(0, currentTimeTopPx - 80);
-      scrollContainerRef.current.scrollTop = target;
+      scrollContainerRef.current.scrollTop = Math.max(0, currentTimeTopPx - 80);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Drag ────────────────────────────────────────────────────────────────────
+  // ── Helpers ──────────────────────────────────────────────────────────────────
 
-  const handleDragStart = useCallback(
-    (e: React.DragEvent, appointment: AppointmentWithClient) => {
-      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      dragRef.current = { appointment, offsetY: e.clientY - rect.top };
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", appointment.id);
+  function getGridY(clientY: number): number {
+    if (!columnsRef.current) return 0;
+    return clientY - columnsRef.current.getBoundingClientRect().top;
+  }
+
+  function getDayIndex(clientX: number): number {
+    if (!columnsRef.current) return 0;
+    const rect = columnsRef.current.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const colWidth = rect.width / weekDates.length;
+    return Math.max(0, Math.min(weekDates.length - 1, Math.floor(x / colWidth)));
+  }
+
+  // ── Appointment body pointer down → queue pending drag ────────────────────
+
+  const handleAppointmentBodyDown = useCallback(
+    (e: React.PointerEvent, appointment: AppointmentWithClient) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      const gridY = getGridY(e.clientY);
+      const apptTopY = appointmentTopPx(appointment.start);
+      pendingRef.current = {
+        appointment,
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        offsetY: gridY - apptTopY,
+      };
     },
-    []
+    [] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-  }, []);
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent, dayIndex: number) => {
-      e.preventDefault();
-      const drag = dragRef.current;
-      if (!drag) return;
-
-      const col = e.currentTarget as HTMLElement;
-      const rect = col.getBoundingClientRect();
-      const rawY = e.clientY - rect.top - drag.offsetY;
-
-      const newStart = pixelsToDateTime(Math.max(0, rawY), weekDates[dayIndex]);
-      const duration =
-        new Date(drag.appointment.end).getTime() -
-        new Date(drag.appointment.start).getTime();
-      const newEnd = new Date(newStart.getTime() + duration);
-
-      onUpdateAppointment({
-        ...drag.appointment,
-        start: newStart.toISOString(),
-        end: newEnd.toISOString(),
-      });
-      dragRef.current = null;
-    },
-    [weekDates, onUpdateAppointment]
-  );
-
-  const handleDragEnd = useCallback(() => {
-    dragRef.current = null;
-  }, []);
-
-  // ── Resize ──────────────────────────────────────────────────────────────────
-  // Pointer capture on columnsRef routes all pointer events here even when
-  // the cursor leaves the element during a fast resize gesture.
+  // ── Resize start (from resize handle pointer down) ────────────────────────
 
   const handleResizeStart = useCallback(
     (e: React.PointerEvent, appointment: AppointmentWithClient) => {
       e.stopPropagation();
       e.preventDefault();
       columnsRef.current?.setPointerCapture(e.pointerId);
-      setResizeState({
+      setInteraction({
+        type: "resize",
         appointment,
-        previewEnd: appointment.end,
         pointerId: e.pointerId,
+        offsetY: 0,
+        previewStart: appointment.start,
+        previewEnd: appointment.end,
+        previewDayIndex: weekDates.findIndex((d) =>
+          isSameDay(d, new Date(appointment.start))
+        ),
       });
     },
-    []
+    [weekDates]
   );
+
+  // ── Pointer move: activate drag OR update active interaction ──────────────
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
-      if (!resizeState || !columnsRef.current) return;
+      // Activate drag from pending if threshold exceeded
+      const pending = pendingRef.current;
+      if (pending && !interaction) {
+        const dx = Math.abs(e.clientX - pending.startX);
+        const dy = Math.abs(e.clientY - pending.startY);
+        if (dx > 4 || dy > 4) {
+          columnsRef.current?.setPointerCapture(pending.pointerId);
+          const dayIdx = getDayIndex(e.clientX);
+          const gridY = getGridY(e.clientY);
+          const rawY = gridY - pending.offsetY;
+          const newStart = pixelsToDateTime(Math.max(0, rawY), weekDates[dayIdx]);
+          const duration =
+            new Date(pending.appointment.end).getTime() -
+            new Date(pending.appointment.start).getTime();
+          const newEnd = new Date(newStart.getTime() + duration);
+          setInteraction({
+            type: "drag",
+            appointment: pending.appointment,
+            pointerId: pending.pointerId,
+            offsetY: pending.offsetY,
+            previewStart: newStart.toISOString(),
+            previewEnd: newEnd.toISOString(),
+            previewDayIndex: dayIdx,
+          });
+          pendingRef.current = null;
+        }
+        return;
+      }
 
-      const apptStart = new Date(resizeState.appointment.start);
-      const dayIndex = weekDates.findIndex((d) => isSameDay(d, apptStart));
-      if (dayIndex < 0) return;
+      if (!interaction) return;
 
-      // getBoundingClientRect().top already accounts for scroll offset
-      const gridTop = columnsRef.current.getBoundingClientRect().top;
-      const rawY = e.clientY - gridTop;
-
-      const newEnd = pixelsToDateTime(Math.max(0, rawY), weekDates[dayIndex]);
-      const minEnd = new Date(apptStart.getTime() + 15 * 60_000);
-      if (newEnd > minEnd) {
-        setResizeState((prev) =>
-          prev ? { ...prev, previewEnd: newEnd.toISOString() } : null
+      if (interaction.type === "drag") {
+        const dayIdx = getDayIndex(e.clientX);
+        const gridY = getGridY(e.clientY);
+        const rawY = gridY - interaction.offsetY;
+        const newStart = pixelsToDateTime(Math.max(0, rawY), weekDates[dayIdx]);
+        const duration =
+          new Date(interaction.appointment.end).getTime() -
+          new Date(interaction.appointment.start).getTime();
+        const newEnd = new Date(newStart.getTime() + duration);
+        setInteraction((prev) =>
+          prev
+            ? {
+                ...prev,
+                previewStart: newStart.toISOString(),
+                previewEnd: newEnd.toISOString(),
+                previewDayIndex: dayIdx,
+              }
+            : null
         );
       }
+
+      if (interaction.type === "resize") {
+        const apptDay =
+          weekDates.find((d) => isSameDay(d, new Date(interaction.appointment.start))) ??
+          weekDates[0];
+        const gridY = getGridY(e.clientY);
+        const newEnd = pixelsToDateTime(Math.max(0, gridY), apptDay);
+        const minEnd = new Date(
+          new Date(interaction.appointment.start).getTime() + 15 * 60_000
+        );
+        if (newEnd > minEnd) {
+          setInteraction((prev) =>
+            prev ? { ...prev, previewEnd: newEnd.toISOString() } : null
+          );
+        }
+      }
     },
-    [resizeState, weekDates]
+    [interaction, weekDates] // eslint-disable-line react-hooks/exhaustive-deps
   );
+
+  // ── Pointer up: commit interaction ────────────────────────────────────────
 
   const handlePointerUp = useCallback(
     (e: React.PointerEvent) => {
-      if (!resizeState) return;
+      pendingRef.current = null;
+      if (!interaction) return;
       columnsRef.current?.releasePointerCapture(e.pointerId);
       onUpdateAppointment({
-        ...resizeState.appointment,
-        end: resizeState.previewEnd,
+        ...interaction.appointment,
+        start: interaction.previewStart,
+        end: interaction.previewEnd,
       });
-      setResizeState(null);
+      setInteraction(null);
     },
-    [resizeState, onUpdateAppointment]
+    [interaction, onUpdateAppointment]
   );
 
-  // ── Empty-slot click ────────────────────────────────────────────────────────
+  const handlePointerCancel = useCallback(() => {
+    pendingRef.current = null;
+    setInteraction(null);
+  }, []);
+
+  // ── Empty slot click → create new appointment ─────────────────────────────
 
   const handleColumnClick = useCallback(
     (e: React.MouseEvent, dayIndex: number) => {
-      // Ignore clicks that landed on an appointment block
       if ((e.target as HTMLElement).closest("[data-appt]")) return;
       const col = e.currentTarget as HTMLElement;
       const rect = col.getBoundingClientRect();
@@ -178,13 +236,20 @@ export default function CalendarGrid({
     [weekDates, onSlotClick]
   );
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Drag state for rendering ──────────────────────────────────────────────
+
+  const isDragging = interaction?.type === "drag";
+  const draggingId = isDragging ? interaction!.appointment.id : null;
+  const previewDayIndex = isDragging ? interaction!.previewDayIndex : -1;
+  const previewStart = isDragging ? interaction!.previewStart : null;
+  const previewEnd = isDragging ? interaction!.previewEnd : null;
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="flex flex-col h-full select-none bg-white">
-      {/* Day-header row — sticky */}
+      {/* Day-header row */}
       <div className="flex border-b border-slate-200 bg-white shrink-0 z-20">
-        {/* Spacer aligned with time-label column */}
         <div style={{ width: TIME_LABEL_WIDTH }} className="shrink-0" />
         {weekDates.map((d, i) => {
           const isToday = i === todayIndex;
@@ -239,21 +304,29 @@ export default function CalendarGrid({
               </span>
             </div>
           ))}
-          {/* Bottom cap so last label isn't cut off */}
           <div style={{ height: HOUR_HEIGHT }} />
         </div>
 
-        {/* Day columns */}
+        {/* Day columns — capture pointer events for drag + resize */}
         <div
           ref={columnsRef}
           className="flex flex-1"
-          style={{ height: TOTAL_GRID_HEIGHT, position: "relative", minWidth: 0 }}
+          style={{
+            height: TOTAL_GRID_HEIGHT,
+            position: "relative",
+            minWidth: 0,
+            touchAction: interaction ? "none" : "auto",
+          }}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
         >
           {weekDates.map((_d, dayIndex) => {
             const isToday = dayIndex === todayIndex;
-            const dayAppts = appointmentsByDay[dayIndex] ?? [];
+            // During drag: remove dragged appt from its original day
+            const dayAppts = (appointmentsByDay[dayIndex] ?? []).filter(
+              (a) => a.id !== draggingId
+            );
 
             return (
               <div
@@ -261,14 +334,7 @@ export default function CalendarGrid({
                 className={`flex-1 relative border-l border-slate-200 ${
                   isToday ? "bg-blue-50/20" : ""
                 }`}
-                style={{
-                  height: TOTAL_GRID_HEIGHT,
-                  minWidth: 0,
-                  cursor: "crosshair",
-                }}
-                onDragOver={handleDragOver}
-                onDrop={(e) => handleDrop(e, dayIndex)}
-                onDragEnd={handleDragEnd}
+                style={{ height: TOTAL_GRID_HEIGHT, minWidth: 0, cursor: "crosshair" }}
                 onClick={(e) => handleColumnClick(e, dayIndex)}
               >
                 {/* Hour lines */}
@@ -299,7 +365,7 @@ export default function CalendarGrid({
                   />
                 ))}
 
-                {/* Current-time line (today only) */}
+                {/* Current-time line */}
                 {isToday && (
                   <div
                     style={{
@@ -322,16 +388,32 @@ export default function CalendarGrid({
                     <AppointmentBlock
                       appointment={appt}
                       onNavigate={onNavigate}
-                      onDragStart={handleDragStart}
+                      onBodyPointerDown={handleAppointmentBodyDown}
                       onResizeStart={handleResizeStart}
                       endOverride={
-                        resizeState?.appointment.id === appt.id
-                          ? resizeState.previewEnd
+                        interaction?.type === "resize" &&
+                        interaction.appointment.id === appt.id
+                          ? interaction.previewEnd
                           : undefined
                       }
                     />
                   </div>
                 ))}
+
+                {/* Drag ghost: show dragged appointment at preview position */}
+                {isDragging && dayIndex === previewDayIndex && previewStart && previewEnd && (
+                  <div data-appt="true" style={{ zIndex: 20, position: "absolute", inset: 0, pointerEvents: "none" }}>
+                    <AppointmentBlock
+                      appointment={interaction!.appointment}
+                      onNavigate={() => {}}
+                      onBodyPointerDown={() => {}}
+                      onResizeStart={() => {}}
+                      startOverride={previewStart}
+                      endOverride={previewEnd}
+                      isGhost
+                    />
+                  </div>
+                )}
               </div>
             );
           })}
@@ -340,3 +422,4 @@ export default function CalendarGrid({
     </div>
   );
 }
+

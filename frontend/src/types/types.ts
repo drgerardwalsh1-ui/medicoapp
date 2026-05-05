@@ -46,18 +46,58 @@ export type CategoryStructuredFields = {
 // ── Per-category subdomain data (stored as typed-but-opaque in ReasonEntry) ──
 
 export type CommonSubdomainEntry = {
+  // ── Negative overrides ────────────────────────────────────────────────────
   doesNotPerform?: boolean;
   noIssues?: boolean;
+
+  // ── Primary management control (replaces independenceLevel + prompting + support) ──
+  managementLevel?: string; // "independent" | "independent_difficulty" | "needs_prompting" | "needs_assistance" | "dependent"
+
+  // ── Behaviour modifiers (multi-select) ────────────────────────────────────
+  behaviourModifiers?: string[];
+
+  // ── Hybrid frequency control ──────────────────────────────────────────────
+  frequencyUnit?: string;   // "Day" | "Week" | "Fortnight" | "Month"
+  frequencyCount?: string;  // "1" | "2–3" | "4–5" | "Daily" or custom
+
+  // ── Conditional: prompting ────────────────────────────────────────────────
+  promptingWhoChips?: string[];
+  promptingWhoOther?: string;
+  promptingFrequencyUnit?: string;
+  promptingFrequencyCount?: string;
+
+  // ── Conditional: assistance / dependent ──────────────────────────────────
+  assistWhoChips?: string[];
+  assistWhoOther?: string;
+  supportHoursChip?: string;   // "<5" | "5–10" | "10–20" | ">20"
+  supportHoursCustom?: string;
+
+  // ── Recency (numeric + unit + sinceInjury) ────────────────────────────────
+  recencyNumber?: string;        // e.g. "3"
+  recencyUnit?: string;          // "days" | "weeks" | "months" | "years"
+  recencySinceInjury?: boolean;  // when true: "has not [verb] since the injury"
+
+  // Legacy recency (retained for backward compat — not rendered in new UI)
+  recencyValue?: string;    // "Today" | "This week" | "This month" | "1–3 months" | ">3 months" | "Never"
+  recencyOverride?: string;
+
+  // ── Pre-injury comparison ─────────────────────────────────────────────────
+  preInjuryComparison?: PreInjuryComparisonLevel;
+  preInjuryComparisonNotes?: string;
+
+  // ── Free text / evidence ─────────────────────────────────────────────────
+  optionalFreeText?: string;
+  evidenceSnippets?: string[];
+
+  // ── Legacy (kept for type compat, not rendered in UI) ─────────────────────
   frequency?: string;
   independenceLevel?: IndependenceLevel;
+  promptingRequired?: boolean;
   prompting?: PromptingLevel;
   promptingWho?: string;
   supportType?: SupportType;
   supportHoursPerWeek?: string;
   recency?: string;
-  preInjuryComparison?: PreInjuryComparisonLevel;
-  preInjuryComparisonNotes?: string;
-  evidenceSnippets?: string[];
 };
 
 export type SocialSubdomainEntry = CommonSubdomainEntry & {
@@ -65,6 +105,12 @@ export type SocialSubdomainEntry = CommonSubdomainEntry & {
   involvementLevel?: InvolvementLevel;
   supportPersonRequired?: boolean;
   supportPersonDetails?: string;
+  activityTypes?: string[];
+  participationFrequency?: string;
+  avoidanceBehaviour?: boolean;
+  avoidanceReasons?: string[];
+  motivationLevel?: string;
+  socialEngagementType?: string;
 };
 
 export type TravelSubdomainEntry = {
@@ -78,6 +124,11 @@ export type TravelSubdomainEntry = {
   recency?: string;
   preInjuryComparison?: PreInjuryComparisonLevel;
   preInjuryComparisonNotes?: string;
+  travelMode?: string[];
+  frequencyOfTravel?: string;
+  drivingStatus?: string;
+  safetyIssues?: boolean;
+  safetyDescription?: string;
   evidenceSnippets?: string[];
 };
 
@@ -103,6 +154,7 @@ export type SocialFunctioningData = {
   noCloseFriends?: boolean;
   livingArrangement?: LivingArrangement;
   livingArrangementDetails?: string;
+  domesticViolenceHistory?: boolean;
   partner?: RelationshipEntry;
   children?: ChildrenEntry;
   parents?: RelationshipEntry;
@@ -120,6 +172,10 @@ export type ConcentrationSubdomainEntry = {
   recency?: string;
   preInjuryComparison?: PreInjuryComparisonLevel;
   preInjuryComparisonNotes?: string;
+  studyAbility?: boolean;
+  studySupport?: string;
+  memoryIssues?: boolean;
+  memoryIssueType?: string[];
   evidenceSnippets?: string[];
 };
 
@@ -133,6 +189,10 @@ export type EmployabilitySubdomainEntry = {
   lastEmployment?: string;
   preInjuryComparison?: PreInjuryComparisonLevel;
   preInjuryComparisonNotes?: string;
+  jobTypeHistory?: string;
+  workAttemptsSinceInjury?: string;
+  inconsistentHistoryFlag?: boolean;
+  barrierTypes?: string[];
   evidenceSnippets?: string[];
 };
 

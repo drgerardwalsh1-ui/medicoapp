@@ -200,7 +200,7 @@ interface PatientProfile {
   preInjuryFunctioningNarrative: Attributed<string> | null;
   preExistingConditions:         Attributed<string[]>;
   /**
-   * Narrative: relevant medical and social history prior to the index event.
+   * Narrative: relevant medical and social history before the index event.
    * Used in report generation — distinct from preInjuryFunctioningNarrative
    * which focuses on functional capacity.
    */
