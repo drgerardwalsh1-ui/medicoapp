@@ -1,20 +1,21 @@
 import { useState, useMemo } from "react";
+import { FrequencyInput } from "./FrequencyInput";
 import type {
   PIRSTableModel,
   ReasonEntry,
   PirsCategoryKey,
   CommonSubdomainEntry,
   SocialSubdomainEntry,
-  SocialFunctioningData,
   EmployabilitySubdomainEntry,
-  RelationshipEntry,
-  ChildrenEntry,
 } from "../types/types";
 import {
   buildSubject,
   generateCategoryNarrative,
-  formatFrequency,
 } from "../engine/narrativeEngine";
+import RelationshipManager, {
+  type Relationship,
+  deriveLivingArrangement,
+} from "./RelationshipManager";
 
 // ── Infrastructure ────────────────────────────────────────────────────────────
 
@@ -59,10 +60,7 @@ function isFindingManual(table: PIRSTableModel | undefined, catIdx: number) {
   return (table?.reasons?.[catIdx] as ReasonEntry | undefined)?.findingsManuallyEdited ?? false;
 }
 
-// ── Frequency helpers ─────────────────────────────────────────────────────────
-
-const FREQ_UNITS = ["Day", "Week", "Fortnight", "Month"];
-const FREQ_QUICK = ["1", "2–3", "4–5", "Daily"];
+// ── Frequency helpers (UI delegated to shared FrequencyInput component) ───────
 
 // ── Subdomain status ──────────────────────────────────────────────────────────
 
@@ -77,16 +75,6 @@ function computeStatus(data: CommonSubdomainEntry): SubdomainStatus {
   );
   return hasPartial ? "partial" : "empty";
 }
-
-// ── Management level display ──────────────────────────────────────────────────
-
-const MGMT_DISPLAY: Record<string, string> = {
-  independent: "independent",
-  independent_difficulty: "independent with difficulty",
-  needs_prompting: "requires prompting",
-  needs_assistance: "requires assistance",
-  dependent: "dependent",
-};
 
 // ── Option constants ──────────────────────────────────────────────────────────
 
@@ -137,19 +125,6 @@ const BARRIERS_CHIPS = [
   "Physical capacity", "Transport", "Childcare", "Employer reluctance",
 ];
 
-const RELATIONSHIP_QUALITY_OPTIONS = [
-  { value: "", label: "— select —" },
-  { value: "good", label: "Good" },
-  { value: "strained", label: "Strained" },
-  { value: "conflict", label: "Conflict" },
-  { value: "no_relationship", label: "No relationship" },
-];
-const DEPENDENCY_OPTIONS = [
-  { value: "", label: "— select —" },
-  { value: "independent",   label: "Independent" },
-  { value: "provides_care", label: "Provides care" },
-  { value: "receives_care", label: "Receives care" },
-];
 const EMPLOYMENT_STATUS_OPTIONS = [
   { value: "", label: "— select —" },
   { value: "full_time",   label: "Full time" },
@@ -166,21 +141,6 @@ const CONSISTENCY_OPTIONS = [
   { value: "reduced",    label: "Reduced" },
   { value: "erratic",    label: "Erratic" },
 ];
-const LIVING_ARRANGEMENT_OPTIONS = [
-  { value: "", label: "— select —" },
-  { value: "alone",         label: "Lives alone" },
-  { value: "with_partner",  label: "Lives with partner" },
-  { value: "with_children", label: "Lives with children" },
-  { value: "with_parents",  label: "Lives with parents" },
-  { value: "with_others",   label: "Lives with others" },
-];
-const CARE_RESPONSIBILITY_OPTIONS = [
-  { value: "", label: "— select —" },
-  { value: "full",   label: "Full care" },
-  { value: "shared", label: "Shared care" },
-  { value: "others", label: "Others care for children" },
-];
-
 // ── Primitive UI components ───────────────────────────────────────────────────
 
 function SF({ label, children }: { label: string; children: React.ReactNode }) {
@@ -332,59 +292,7 @@ function ManagementLevel({ value, onChange }: { value: string; onChange: (v: str
   );
 }
 
-function FrequencyInput({ label = "Frequency", unit, count, onUnit, onCount }: {
-  label?: string;
-  unit: string; count: string;
-  onUnit: (v: string) => void;
-  onCount: (v: string) => void;
-}) {
-  const isDailyShortcut = count === "Daily";
-  const formatted = formatFrequency(unit, count);
-  const isQuick = FREQ_QUICK.includes(count);
-
-  return (
-    <div>
-      <label className="label">{label}</label>
-      <div className="space-y-2 mt-1">
-        {/* Count first, then unit */}
-        <div className="flex gap-1.5 items-center flex-wrap">
-          {FREQ_QUICK.map((c) => (
-            <button key={c} type="button" onClick={() => onCount(count === c ? "" : c)}
-              className={`text-xs px-2.5 py-1 rounded border transition ${
-                count === c
-                  ? "bg-violet-600 text-white border-violet-600"
-                  : "bg-white text-slate-600 border-slate-300 hover:border-violet-400"
-              }`}>{c}</button>
-          ))}
-          <input
-            type="text"
-            className="input w-16 text-xs py-1"
-            placeholder="other"
-            value={isQuick ? "" : count}
-            onChange={(e) => onCount(e.target.value)}
-          />
-        </div>
-        <div className="flex gap-1.5 flex-wrap">
-          {FREQ_UNITS.map((u) => (
-            <button key={u} type="button"
-              disabled={isDailyShortcut}
-              onClick={() => onUnit(unit === u ? "" : u)}
-              className={`text-xs px-2.5 py-1 rounded border transition disabled:opacity-40 ${
-                unit === u && !isDailyShortcut
-                  ? "bg-slate-700 text-white border-slate-700"
-                  : "bg-white text-slate-600 border-slate-300 hover:border-violet-400"
-              }`}>{u}</button>
-          ))}
-        </div>
-        {formatted && (
-          <p className="text-[11px] text-violet-700 font-medium bg-violet-50 rounded px-2 py-0.5 inline-block">
-            {formatted}
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
+// FrequencyInput is imported from the shared component above.
 
 function BehaviourModifiers({ selected, onChange }: { selected: string[]; onChange: (v: string[]) => void }) {
   function toggle(opt: string) {
@@ -889,131 +797,66 @@ function TravelPanel({ table, catIdx, onUpdate, open, onToggle }: PanelProps) {
 }
 
 // ── Social Functioning Panel ──────────────────────────────────────────────────
+// Single source of truth: embeds the full RelationshipManager.
+// No duplicate relationship rendering or formatting.
+// Accommodation type is stored here (PIRS level), NOT in RelationshipAttributes.
 
-function RelationshipEntitySection({
-  label: _label, data, onChange, children,
-}: {
-  label: string;
-  data: RelationshipEntry;
-  onChange: (p: Partial<RelationshipEntry>) => void;
-  children?: React.ReactNode;
-}) {
+const ACCOMMODATION_OPTIONS = ["House", "Apartment", "Unit", "Caravan", "Tent", "Other"] as const;
+
+function SocialFunctioningPanel({ table, catIdx, onUpdate, relationships, onRelationshipsChange }: PanelProps) {
+  const derived = deriveLivingArrangement(relationships ?? []);
+  const rels = relationships ?? [];
+
+  // Accommodation data lives in the PIRS table subdomain store, not per-relationship.
+  const accData = getSD<{ accommodationType?: string[]; accommodationOtherText?: string }>(
+    table, catIdx, "_accommodation"
+  );
+  function patchAcc(p: Partial<{ accommodationType: string[]; accommodationOtherText: string }>) {
+    updateSD(table, catIdx, "_accommodation", p, onUpdate);
+  }
+
   return (
     <div className="space-y-3">
-      <SF label="Status">
-        <Txt value={data.status ?? ""} onChange={(v) => onChange({ status: v })}
-          placeholder="e.g. together, separated, no contact" small />
-      </SF>
-      <div className="grid grid-cols-2 gap-3">
-        <SF label="Quality">
-          <Sel value={data.quality ?? ""} options={RELATIONSHIP_QUALITY_OPTIONS}
-            onChange={(v) => onChange({ quality: v as RelationshipEntry["quality"] })} />
-        </SF>
-        <SF label="Contact frequency">
-          <Txt value={data.contactFrequency ?? ""} onChange={(v) => onChange({ contactFrequency: v })}
-            placeholder="e.g. daily, weekly" small />
-        </SF>
-      </div>
-      <SF label="Dependency">
-        <Sel value={data.dependency ?? ""} options={DEPENDENCY_OPTIONS}
-          onChange={(v) => onChange({ dependency: v as RelationshipEntry["dependency"] })} />
-      </SF>
-      {children}
-      <Snippets snippets={data.evidenceSnippets ?? []} onChange={(s) => onChange({ evidenceSnippets: s })} />
-    </div>
-  );
-}
 
-function SocialFunctioningPanel({ table, catIdx, onUpdate, open, onToggle }: PanelProps) {
-  const sf = getSD<SocialFunctioningData>(table, catIdx, "_sf");
-  const patchSf = (p: Partial<SocialFunctioningData>) =>
-    updateSD(table!, catIdx, "_sf", p, onUpdate);
-
-  const patchEntity = <K extends keyof SocialFunctioningData>(
-    entity: K,
-    patch: Partial<SocialFunctioningData[K] & object>
-  ) => {
-    const existing = (sf[entity] ?? {}) as object;
-    patchSf({ [entity]: { ...existing, ...patch } } as Partial<SocialFunctioningData>);
-  };
-
-  const entities: Array<{
-    key: "partner" | "parents" | "siblings" | "friends";
-    label: string; negateKey: keyof SocialFunctioningData;
-  }> = [
-    { key: "partner",  label: "Partner",        negateKey: "noPartner" },
-    { key: "parents",  label: "Parents",         negateKey: "parentsDeceased" },
-    { key: "siblings", label: "Siblings",        negateKey: "noSiblings" },
-    { key: "friends",  label: "Friends (close)", negateKey: "noCloseFriends" },
-  ];
-
-  const children = (sf.children ?? {}) as ChildrenEntry;
-  const patchChildren = (p: Partial<ChildrenEntry>) => patchSf({ children: { ...children, ...p } });
-
-  return (
-    <div className="space-y-2">
-      <div className="bg-slate-50 rounded-lg p-3 space-y-2">
-        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Flags</p>
-        <div className="grid grid-cols-2 gap-1.5">
-          <FlagRow checked={!!sf.noPartner}     label="No partner"        onChange={(v) => patchSf({ noPartner: v })} />
-          <FlagRow checked={!!sf.noChildren}    label="No children"       onChange={(v) => patchSf({ noChildren: v })} />
-          <FlagRow checked={!!sf.parentsDeceased} label="Parents deceased" onChange={(v) => patchSf({ parentsDeceased: v })} />
-          <FlagRow checked={!!sf.noSiblings}    label="No siblings"       onChange={(v) => patchSf({ noSiblings: v })} />
-          <FlagRow checked={!!sf.noCloseFriends} label="No close friends" onChange={(v) => patchSf({ noCloseFriends: v })} />
+      {/* Accommodation type — multi-select, stored at PIRS level */}
+      <div>
+        <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Accommodation type</p>
+        <div className="flex flex-wrap gap-1.5">
+          {ACCOMMODATION_OPTIONS.map((opt) => {
+            const active = (accData.accommodationType ?? []).includes(opt);
+            return (
+              <button key={opt} type="button"
+                onClick={() => {
+                  const cur = accData.accommodationType ?? [];
+                  patchAcc({ accommodationType: active ? cur.filter((o) => o !== opt) : [...cur, opt] });
+                }}
+                className={`text-xs px-2.5 py-1 rounded-full border transition ${
+                  active
+                    ? "bg-violet-600 text-white border-violet-600"
+                    : "bg-white text-slate-600 border-slate-300 hover:border-violet-400"
+                }`}>{opt}</button>
+            );
+          })}
         </div>
-        <div className="pt-1">
-          <FlagRow checked={!!sf.domesticViolenceHistory} label="History of domestic violence"
-            onChange={(v) => patchSf({ domesticViolenceHistory: v })} />
-        </div>
+        {(accData.accommodationType ?? []).includes("Other") && (
+          <input className="input text-xs py-0.5 w-full mt-1.5"
+            placeholder="Specify accommodation type…"
+            value={accData.accommodationOtherText ?? ""}
+            onChange={(e) => patchAcc({ accommodationOtherText: e.target.value })} />
+        )}
       </div>
 
-      <AccordionSection id="living" title="Living arrangement"
-        isOpen={open.has("living")} onToggle={() => onToggle("living")}>
-        <div className="space-y-3">
-          <SF label="Situation">
-            <Sel value={sf.livingArrangement ?? ""} options={LIVING_ARRANGEMENT_OPTIONS}
-              onChange={(v) => patchSf({ livingArrangement: v as SocialFunctioningData["livingArrangement"] })} />
-          </SF>
-          <Txt value={sf.livingArrangementDetails ?? ""} onChange={(v) => patchSf({ livingArrangementDetails: v })}
-            placeholder='e.g. "Lives with 2 children aged 8 and 10"' small />
-        </div>
-      </AccordionSection>
+      {/* Living arrangement — derived from relationships, read-only */}
+      <div className="flex items-center gap-2 px-1">
+        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Living arrangement</p>
+        <span className="text-xs px-2 py-0.5 rounded bg-violet-100 text-violet-700">{derived}</span>
+      </div>
 
-      {!sf.noChildren && (
-        <AccordionSection id="children" title="Children"
-          isOpen={open.has("children")} onToggle={() => onToggle("children")}>
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <SF label="Number">
-                <input type="number" className="input" min={0}
-                  value={children.numberOfChildren ?? ""}
-                  onChange={(e) => patchChildren({ numberOfChildren: Number(e.target.value) })} />
-              </SF>
-              <SF label="Ages">
-                <Txt value={children.ages ?? ""} onChange={(v) => patchChildren({ ages: v })}
-                  placeholder="e.g. 8, 10, 15" small />
-              </SF>
-            </div>
-            <SF label="Care responsibility">
-              <Sel value={children.careResponsibility ?? ""} options={CARE_RESPONSIBILITY_OPTIONS}
-                onChange={(v) => patchChildren({ careResponsibility: v as ChildrenEntry["careResponsibility"] })} />
-            </SF>
-            <RelationshipEntitySection label="Children" data={children} onChange={(p) => patchChildren(p)} />
-          </div>
-        </AccordionSection>
-      )}
-
-      {entities.map(({ key, label, negateKey }) => {
-        if (sf[negateKey]) return null;
-        const data = (sf[key] ?? {}) as RelationshipEntry;
-        return (
-          <AccordionSection key={key} id={key} title={label}
-            isOpen={open.has(key)} onToggle={() => onToggle(key)}>
-            <RelationshipEntitySection label={label} data={data}
-              onChange={(p) => patchEntity(key, p)} />
-          </AccordionSection>
-        );
-      })}
+      {/* Full RelationshipManager — identical to ClientHome */}
+      <RelationshipManager
+        value={rels}
+        onChange={onRelationshipsChange ?? (() => {})}
+      />
     </div>
   );
 }
@@ -1188,6 +1031,8 @@ type PanelProps = {
   onUpdate: (t: PIRSTableModel) => void;
   open: Set<string>;
   onToggle: (key: string) => void;
+  relationships?: Relationship[];
+  onRelationshipsChange?: (rels: Relationship[]) => void;
 };
 
 // ── Auto-sentence generation (delegated to narrativeEngine) ──────────────────
@@ -1210,12 +1055,16 @@ export function PIRSCategoryEntry({
   table,
   onUpdateTable,
   subjectGender,
+  relationships,
+  onRelationshipsChange,
 }: {
   categoryKey: PirsCategoryKey;
   categoryIndex: number;
   table: PIRSTableModel | undefined;
   onUpdateTable: (t: PIRSTableModel) => void;
   subjectGender?: string | null;
+  relationships?: Relationship[];
+  onRelationshipsChange?: (rels: Relationship[]) => void;
 }) {
   const [openSubdomains, setOpenSubdomains] = useState<Set<string>>(new Set());
   const [focusMode, setFocusMode] = useState(false);
@@ -1272,6 +1121,8 @@ export function PIRSCategoryEntry({
     onUpdate: onUpdateTable,
     open: openSubdomains,
     onToggle: toggleSubdomain,
+    relationships,
+    onRelationshipsChange,
   };
 
   return (

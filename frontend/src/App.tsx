@@ -25,6 +25,7 @@ import {
   type Client,
   type PreviousAssessorPIRS,
 } from "./types/client";
+import type { Relationship } from "./components/RelationshipManager";
 import type { PIRSTableModel } from "./types/types";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -177,6 +178,9 @@ export default function App({ client, goHome, onSave, initialSectionIndex = 0 }:
   const [previousAssessorPirs, setPreviousAssessorPirs] = useState<PreviousAssessorPIRS[]>(
     initReport.previousAssessorPirs ?? []
   );
+  const [relationships, setRelationships] = useState<Relationship[]>(
+    (client?.relationships ?? []) as Relationship[]
+  );
 
   const [activeSectionIndex, setActiveSectionIndex] = useState(initialSectionIndex);
   const [activePirsCategory, setActivePirsCategory] = useState<PirsCategoryKey>("selfCare");
@@ -249,6 +253,11 @@ export default function App({ client, goHome, onSave, initialSectionIndex = 0 }:
     setIsDirty(true);
   }
 
+  function handleRelationshipsChange(rels: Relationship[]) {
+    setRelationships(rels);
+    setIsDirty(true);
+  }
+
   // ── Save ──────────────────────────────────────────────────────────────────
 
   const handleSaveRef = useRef<(() => Promise<void>) | null>(null);
@@ -262,6 +271,7 @@ export default function App({ client, goHome, onSave, initialSectionIndex = 0 }:
       clinical:      client.clinical,
       appointments:  client.appointments ?? [],
       assessmentChecklist: client.assessmentChecklist,
+      relationships,
       report: {
         fields:              report,
         pirsTables,
@@ -274,7 +284,7 @@ export default function App({ client, goHome, onSave, initialSectionIndex = 0 }:
       if (isTauri) {
         await TauriAPI.updateClientDemographics(client.id, blob);
       }
-      onSave?.({ ...client, report: blob.report });
+      onSave?.({ ...client, report: blob.report, relationships });
       setSaveStatus("saved");
       setIsDirty(false);
       setTimeout(() => setSaveStatus("idle"), 2000);
@@ -282,7 +292,7 @@ export default function App({ client, goHome, onSave, initialSectionIndex = 0 }:
       console.error("[report-builder] save failed:", err);
       setSaveStatus("error");
     }
-  }, [client, report, pirsTables, previousAssessorPirs, onSave]);
+  }, [client, report, pirsTables, previousAssessorPirs, relationships, onSave]);
 
   handleSaveRef.current = handleSave;
 
@@ -547,6 +557,8 @@ export default function App({ client, goHome, onSave, initialSectionIndex = 0 }:
                     table={currentPirsTable}
                     onUpdateTable={(updated) => updatePirsTable(updated.id, updated)}
                     subjectGender={client?.identity?.gender}
+                    relationships={activePirsCategory === "socialFunction" ? relationships : undefined}
+                    onRelationshipsChange={activePirsCategory === "socialFunction" ? handleRelationshipsChange : undefined}
                   />
                 </div>
 

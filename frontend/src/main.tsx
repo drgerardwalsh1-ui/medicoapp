@@ -65,6 +65,8 @@ function Root() {
         : [...prev, updated];
     });
     setActiveClient(updated);
+    // After first save of a new client switch to "client" view so tabs appear immediately
+    setView((prev) => (prev === "create" ? "client" : prev));
   }
 
   function handleReset() {

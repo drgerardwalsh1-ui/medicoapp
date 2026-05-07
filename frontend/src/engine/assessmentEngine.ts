@@ -112,7 +112,7 @@ export function generateAssessmentText(client: Client): string {
     if (checklist.consentGiven === true) {
       s += ` ${fullName} provided consent to the assessment.`;
     } else if (checklist.consentGiven === false) {
-      s += ` Consent was not obtained prior to the assessment.`;
+      s += ` Consent was not obtained before the assessment.`;
     }
 
     if (checklist.purposeExplained) {

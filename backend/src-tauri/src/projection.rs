@@ -67,16 +67,6 @@ pub struct PIRSTableViewModel {
     pub created_at: String,
 }
 
-/// Pull a string from a `serde_json::Value` only when the value is a
-/// non-empty string. Returns `None` for missing keys, nulls, or blanks.
-fn json_str(v: &serde_json::Value, key: &str) -> Option<String> {
-    v.get(key)
-        .and_then(|x| x.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-}
-
 
 #[derive(Debug, Clone)]
 pub struct DriftReport {

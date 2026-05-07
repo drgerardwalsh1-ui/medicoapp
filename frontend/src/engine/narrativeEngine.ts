@@ -68,7 +68,7 @@ export function formatFrequency(unit: string, count: string): string {
     "1": "once", "2–3": "two to three times", "4–5": "four to five times",
   };
   const unitWords: Record<string, string> = {
-    "Day": "a day", "Week": "a week", "Fortnight": "a fortnight", "Month": "a month",
+    "Day": "a day", "Week": "a week", "Fortnight": "a fortnight", "Month": "a month", "Year": "a year",
   };
   const c = countWords[count] ?? (count ? `${count} times` : "");
   const u = unitWords[unit] ?? unit.toLowerCase();
@@ -260,34 +260,20 @@ export function sentencesForSubdomain(
   }
 
   // ── Sentence 4: Recency ──────────────────────────────────────────────────
-  if (data.recencySinceInjury) {
-    const pp = vocab.pastParticiple ?? vocab.pastSimple;
-    sentences.push(`${att()} ${have} not ${pp} since the injury.`);
-  } else if (data.recencyNumber === "Daily") {
-    sentences.push(`${att()} ${vf} daily.`);
-  } else if (data.recencyNumber && data.recencyUnit) {
-    const n = data.recencyNumber;
-    const count = parseInt(n, 10);
-    const unit = (!isNaN(count) && count === 1)
-      ? data.recencyUnit.replace(/s$/, "")
-      : data.recencyUnit;
-    sentences.push(`${att()} last ${vocab.pastSimple} ${n} ${unit} ago.`);
-  } else {
-    // Legacy recency fallback
-    const recencyRaw = data.recencyOverride || data.recencyValue;
-    if (recencyRaw) {
-      if (data.recencyValue === "Never" && !data.recencyOverride) {
-        const pic = data.preInjuryComparison;
-        if (pic === "same" || pic === "worse") {
-          sentences.push(`${att()} never ${vf}, including before the injury.`);
-          preInjuryHandled = true;
-        } else {
-          sentences.push(`${att()} never ${vf}.`);
-        }
+  const recencyRaw = data.recencyOverride || data.recencyValue;
+  if (recencyRaw) {
+    if (data.recencyValue === "Never" && !data.recencyOverride) {
+      // "Never" logic: use "never [verb]", incorporate pre-injury where applicable
+      const pic = data.preInjuryComparison;
+      if (pic === "same" || pic === "worse") {
+        sentences.push(`${att()} never ${vf}, including before the injury.`);
+        preInjuryHandled = true;
       } else {
-        const phrase = RECENCY_PHRASES[recencyRaw] ?? recencyRaw.toLowerCase();
-        sentences.push(`${att()} last ${vocab.pastSimple} ${phrase}.`);
+        sentences.push(`${att()} never ${vf}.`);
       }
+    } else {
+      const phrase = RECENCY_PHRASES[recencyRaw] ?? recencyRaw.toLowerCase();
+      sentences.push(`${att()} last ${vocab.pastSimple} ${phrase}.`);
     }
   }
 
@@ -296,11 +282,11 @@ export function sentencesForSubdomain(
     const pic      = data.preInjuryComparison;
     const picNotes = data.preInjuryComparisonNotes;
     if (pic === "better") {
-      sentences.push(`${att()} ${wasBe} able to ${vocab.infinitive} without difficulty prior to the injury.`);
+      sentences.push(`${att()} ${wasBe} able to ${vocab.infinitive} without difficulty before the injury.`);
     } else if (pic === "worse") {
       sentences.push(`${noun} ${vr()} that ${possessive} difficulty with ${vocab.gerund} pre-dated the injury.`);
     } else if (pic === "same") {
-      sentences.push(`${noun} ${vr()} that ${possessive} ability to ${vocab.infinitive} was no different prior to the injury.`);
+      sentences.push(`${noun} ${vr()} that ${possessive} ability to ${vocab.infinitive} was no different before the injury.`);
     }
     if (picNotes) {
       sentences.push(endSentence(`${noun} ${vr()} that ${picNotes}`));
@@ -698,9 +684,9 @@ export function generateCategoryNarrative(
         all.push(`${noun} ${vr()} that ${pronoun} ${wasBe} last employed ${d.lastEmployment}.`);
       }
       if (d.preInjuryComparison === "better") {
-        all.push(`${noun} ${vr()} that ${possessive} employment capacity was greater prior to the injury.`);
+        all.push(`${noun} ${vr()} that ${possessive} employment capacity was greater before the injury.`);
       } else if (d.preInjuryComparison === "worse") {
-        all.push(`${noun} ${vr()} that ${possessive} employment capacity ${wasBe} already impaired prior to the injury.`);
+        all.push(`${noun} ${vr()} that ${possessive} employment capacity ${wasBe} already impaired before the injury.`);
       }
       if (d.preInjuryComparisonNotes) {
         all.push(endSentence(`${noun} ${vr()} that ${d.preInjuryComparisonNotes}`));

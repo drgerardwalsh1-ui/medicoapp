@@ -143,6 +143,7 @@ export type Client = {
   // Structured household and relationship data — single source of truth.
   // All PIRS and report relationship references must derive from this field.
   householdRelationships?: import("./household").HouseholdRelationships;
+  relationships?: import("../components/RelationshipManager").Relationship[];
   created_at: string;
   updated_at: string;
 };
@@ -321,6 +322,9 @@ export function parseClientBlob(id: string, raw: unknown): Client {
       } : null,
     },
     appointments: Array.isArray(b.appointments) ? (b.appointments as Appointment[]) : [],
+    relationships: Array.isArray(b.relationships)
+      ? (b.relationships as import("../components/RelationshipManager").Relationship[])
+      : [],
     // householdRelationships: pass through as-is — structured JSON, validated by TypeScript
     householdRelationships: (b.householdRelationships && typeof b.householdRelationships === "object")
       ? (b.householdRelationships as import("./household").HouseholdRelationships)
