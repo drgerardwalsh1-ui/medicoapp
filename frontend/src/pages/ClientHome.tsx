@@ -9,6 +9,8 @@ import {
   type EventHistoryItem,
 } from "../api/tauriApi";
 import DocumentCard, { type IngestedDoc } from "../components/DocumentCard";
+import DSMAssessment from "../components/DSMAssessment";
+import type { DSMAssessmentData } from "../types/dsm";
 import RelationshipManager, {
   type Relationship,
   defaultRelationships,
@@ -130,6 +132,9 @@ export default function ClientHome({
   const [checklistExpanded, setChecklistExpanded] = useState(() =>
     isAppointmentToday(data.appointments ?? [])
   );
+
+  // "demographics" = default view; "dsm" = DSM-5-TR assessment engine
+  const [clientHomeView, setClientHomeView] = useState<"demographics" | "dsm">("demographics");
 
   // ── Derived aliases ────────────────────────────────────────────────────────
   const ident = data.identity;
@@ -305,6 +310,9 @@ export default function ClientHome({
       ...parsed,
       id: v.id,
       report: prev.report,
+      // Preserve in-memory DSM state — it may be ahead of the server projection
+      // because DSM changes are written to Tauri only on explicit Save.
+      dsmAssessment: prev.dsmAssessment ?? parsed.dsmAssessment,
       assessmentChecklist: {
         ...defaultAssessmentChecklist(),
         ...parsed.assessmentChecklist,
@@ -435,6 +443,7 @@ export default function ClientHome({
       appointments: data.appointments,
       relationships: data.relationships ?? [],
       householdRelationships: data.householdRelationships,
+      dsmAssessment: data.dsmAssessment,
       assessmentChecklist: data.assessmentChecklist ?? defaultAssessmentChecklist(),
       report: data.report ?? defaultReport(),
     };
@@ -698,9 +707,10 @@ export default function ClientHome({
   return (
     <div className="bg-slate-100 min-h-full">
 
-      {/* ── Tab bar (shown once saved) ── */}
+      {/* ── Tab bar (shown once saved) — matches App.tsx header layout ── */}
       {isSaved && openReport && (
         <div className="sticky top-0 z-10 bg-white border-b border-slate-200 shadow-sm">
+          {/* Row 1 — compact identity + actions */}
           <div className="px-4 flex items-center gap-3 h-10 border-b border-slate-100">
             <button onClick={onCancel} className="text-sm text-slate-500 hover:text-slate-900 shrink-0">
               ← Home
@@ -709,16 +719,51 @@ export default function ClientHome({
               {formatFullName(ident) || "Client"}
             </span>
             <SaveStatusIndicator status={saveStatus} dirty={isDirty} />
-          </div>
-          <div className="px-4 flex gap-0.5 items-end h-9">
-            {/* Demographics tab — active */}
-            <div className="px-3 h-8 flex items-center text-xs font-medium rounded-t border-t border-x bg-slate-100 border-slate-200 text-violet-700 select-none">
-              Demographics
+            <div className="ml-auto flex items-center gap-2 shrink-0">
+              {isTauri && historyItems.length > 0 && (
+                <button
+                  type="button"
+                  className="text-xs px-3 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50 text-slate-700"
+                  onClick={() => setShowVersionHistory(true)}
+                >
+                  Version History
+                </button>
+              )}
+              <button
+                className="text-xs px-3 py-1.5 rounded-md bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-50"
+                onClick={() => handleSaveRef.current?.()}
+                disabled={saveStatus === "saving"}
+              >
+                {saveStatus === "saving" ? "Saving…" : "Save"}
+              </button>
             </div>
+          </div>
+          {/* Row 2 — section tab pills */}
+          <div className="px-4 flex gap-0.5 items-end h-9">
+            <button
+              onClick={() => setClientHomeView("demographics")}
+              className={`px-3 h-8 text-xs font-medium rounded-t border-t border-x transition ${
+                clientHomeView === "demographics"
+                  ? "bg-slate-100 border-slate-200 text-violet-700 select-none"
+                  : "border-transparent text-slate-400 hover:text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              Demographics
+            </button>
+            <button
+              onClick={() => setClientHomeView("dsm")}
+              className={`px-3 h-8 text-xs font-medium rounded-t border-t border-x transition ${
+                clientHomeView === "dsm"
+                  ? "bg-slate-100 border-slate-200 text-violet-700 select-none"
+                  : "border-transparent text-slate-400 hover:text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              DSM Assessment
+            </button>
             {sectionTabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => openReport(tab.index)}
+                onClick={() => { setClientHomeView("demographics"); openReport(tab.index); }}
                 className="px-3 h-8 text-xs font-medium rounded-t border-t border-x transition border-transparent text-slate-400 hover:text-slate-700 hover:bg-slate-50"
               >
                 {tab.title}
@@ -728,7 +773,26 @@ export default function ClientHome({
         </div>
       )}
 
-    <div className={`${isSaved && openReport ? "pt-6" : "pt-8"} pb-8 px-6`}>
+    {/* DSM Assessment — full-height three-column layout */}
+    {clientHomeView === "dsm" && isSaved && (
+      <div className="flex flex-col" style={{ height: "calc(100vh - 79px)" }}>
+        <DSMAssessment
+          data={data.dsmAssessment}
+          onChange={(dsmData: DSMAssessmentData) => {
+            setData((prev) => {
+              const updated = { ...prev, dsmAssessment: dsmData };
+              // Propagate immediately so activeClient in main.tsx stays fresh —
+              // this survives view switches to App.tsx and back without a Save.
+              onSave?.(updated);
+              return updated;
+            });
+            setIsDirty(true);
+          }}
+        />
+      </div>
+    )}
+
+    <div className={`${clientHomeView === "dsm" && isSaved ? "hidden" : ""} ${isSaved && openReport ? "pt-6" : "pt-8"} pb-8 px-6`}>
     <div className="max-w-3xl mx-auto space-y-6">
 
       {/* Header — shown when not using tab bar (new client or no openReport) */}
@@ -1197,20 +1261,6 @@ export default function ClientHome({
             <button onClick={handleSave} className="btn-primary">
               Save
             </button>
-            {openReport && (
-              <button onClick={() => openReport()} className="btn-secondary">
-                Report Builder
-              </button>
-            )}
-            {isTauri && historyItems.length > 0 && (
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => setShowVersionHistory(true)}
-              >
-                Version History
-              </button>
-            )}
             {!chk.completed && isAppointmentToday(data.appointments ?? []) && (
               <span className="text-xs text-amber-600 font-medium ml-auto">
                 Assessment checklist incomplete

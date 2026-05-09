@@ -27,6 +27,9 @@ import {
 } from "./types/client";
 import type { Relationship } from "./components/RelationshipManager";
 import type { PIRSTableModel } from "./types/types";
+import DSMAssessment from "./components/DSMAssessment";
+import CurrentSymptoms from "./components/CurrentSymptoms";
+import type { DSMAssessmentData } from "./types/dsm";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -187,6 +190,12 @@ export default function App({ client, goHome, onSave, initialSectionIndex = 0 }:
   const [saveStatus,         setSaveStatus]         = useState<SaveStatus>("idle");
   const [isDirty,            setIsDirty]            = useState(false);
 
+  // DSM Assessment view — shares the same sticky header tab bar
+  const [inDSMView,  setInDSMView]  = useState(false);
+  const [dsmData,    setDsmData]    = useState<DSMAssessmentData | undefined>(
+    client?.dsmAssessment
+  );
+
   // ── Sorted PIRS for display ───────────────────────────────────────────────
 
   const displayPirsTables = useMemo(() => sortedPirsTables(pirsTables), [pirsTables]);
@@ -272,6 +281,7 @@ export default function App({ client, goHome, onSave, initialSectionIndex = 0 }:
       appointments:  client.appointments ?? [],
       assessmentChecklist: client.assessmentChecklist,
       relationships,
+      dsmAssessment: dsmData,
       report: {
         fields:              report,
         pirsTables,
@@ -284,7 +294,7 @@ export default function App({ client, goHome, onSave, initialSectionIndex = 0 }:
       if (isTauri) {
         await TauriAPI.updateClientDemographics(client.id, blob);
       }
-      onSave?.({ ...client, report: blob.report, relationships });
+      onSave?.({ ...client, report: blob.report, relationships, dsmAssessment: dsmData });
       setSaveStatus("saved");
       setIsDirty(false);
       setTimeout(() => setSaveStatus("idle"), 2000);
@@ -405,45 +415,27 @@ export default function App({ client, goHome, onSave, initialSectionIndex = 0 }:
   const activeCategoryIndex = pirsKeyToIndex(activePirsCategory);
   const currentPirsTable    = pirsTables.find((t) => t.name === "Current PIRS");
   const inPirs = activeSection?.id === "pirs";
+  const inSymptoms = activeSection?.id === "symptoms" && !inDSMView;
 
   return (
     <div className="h-screen flex flex-col bg-slate-100">
 
-      {/* HEADER — client name + section file tabs + actions */}
+      {/* HEADER — row 1: identity + actions; row 2: tab pills */}
       <div className="border-b bg-white shrink-0">
-        <div className="px-4 flex items-center gap-3 h-11 border-b border-slate-100">
+        {/* Row 1 — compact identity + actions */}
+        <div className="px-4 flex items-center gap-3 h-10 border-b border-slate-100">
           <button onClick={goHome} className="text-sm text-slate-500 hover:text-slate-900 shrink-0">
             ← Back
           </button>
-          <span className="text-sm font-semibold text-slate-800 shrink-0">{formatFullName(client?.identity)}</span>
+          <span className="text-sm font-semibold text-slate-800 shrink-0 truncate max-w-[200px]">
+            {formatFullName(client?.identity)}
+          </span>
           {client?.administrative?.referrer?.org && (
-            <span className="text-[11px] text-slate-400 bg-slate-100 rounded px-2 py-0.5 shrink-0">{client.administrative.referrer.org}</span>
+            <span className="text-[11px] text-slate-400 bg-slate-100 rounded px-2 py-0.5 shrink-0">
+              {client.administrative.referrer.org}
+            </span>
           )}
           <SaveIndicator status={saveStatus} dirty={isDirty} />
-
-          {/* Section tabs — file label style */}
-          <div className="flex gap-0.5 ml-3 self-stretch items-end">
-            <button
-              onClick={goHome}
-              className="px-3 h-8 text-xs font-medium rounded-t border-t border-x transition border-transparent text-slate-400 hover:text-slate-700 hover:bg-slate-50"
-            >
-              Demographics
-            </button>
-            {schema.sections.map((section: any, index: number) => (
-              <button
-                key={section.id}
-                onClick={() => setActiveSectionIndex(index)}
-                className={`px-3 h-8 text-xs font-medium rounded-t border-t border-x transition ${
-                  index === activeSectionIndex
-                    ? "bg-slate-100 border-slate-200 text-violet-700"
-                    : "border-transparent text-slate-400 hover:text-slate-700 hover:bg-slate-50"
-                }`}
-              >
-                {section.title}
-              </button>
-            ))}
-          </div>
-
           <div className="ml-auto flex items-center gap-2 shrink-0">
             <button
               className="text-xs px-3 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50 text-slate-700 disabled:opacity-40"
@@ -467,9 +459,69 @@ export default function App({ client, goHome, onSave, initialSectionIndex = 0 }:
             </button>
           </div>
         </div>
+        {/* Row 2 — section tab pills */}
+        <div className="px-4 flex gap-0.5 items-end h-9">
+          <button
+            onClick={goHome}
+            className="px-3 h-8 text-xs font-medium rounded-t border-t border-x transition border-transparent text-slate-400 hover:text-slate-700 hover:bg-slate-50"
+          >
+            Demographics
+          </button>
+          <button
+            onClick={() => setInDSMView(true)}
+            className={`px-3 h-8 text-xs font-medium rounded-t border-t border-x transition ${
+              inDSMView
+                ? "bg-slate-100 border-slate-200 text-violet-700"
+                : "border-transparent text-slate-400 hover:text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            DSM Assessment
+          </button>
+          {schema.sections.map((section: any, index: number) => (
+            <button
+              key={section.id}
+              onClick={() => { setActiveSectionIndex(index); setInDSMView(false); }}
+              className={`px-3 h-8 text-xs font-medium rounded-t border-t border-x transition ${
+                !inDSMView && index === activeSectionIndex
+                  ? "bg-slate-100 border-slate-200 text-violet-700"
+                  : "border-transparent text-slate-400 hover:text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              {section.title}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      {/* DSM Assessment — full-height, replaces report content when active */}
+      {inDSMView && (
+        <div className="flex-1 overflow-hidden">
+          <DSMAssessment
+            data={dsmData}
+            onChange={(updated: DSMAssessmentData) => {
+              setDsmData(updated);
+              setIsDirty(true);
+              onSave?.({ ...client!, dsmAssessment: updated });
+            }}
+          />
+        </div>
+      )}
+
+      {/* Current Symptoms — full-height three-column interview interface */}
+      {inSymptoms && (
+        <div className="flex-1 overflow-hidden">
+          <CurrentSymptoms
+            data={dsmData}
+            onChange={(updated: DSMAssessmentData) => {
+              setDsmData(updated);
+              setIsDirty(true);
+              onSave?.({ ...client!, dsmAssessment: updated });
+            }}
+          />
+        </div>
+      )}
+
+      <div className={`flex flex-1 overflow-hidden ${inDSMView || inSymptoms ? "hidden" : ""}`}>
 
         {/* LEFT SIDEBAR — PIRS category nav (only in PIRS section) */}
         {inPirs && (

@@ -1,5 +1,7 @@
 import type { PIRSTableModel } from "./types";
 export type { PIRSTableModel } from "./types";
+export type { DSMAssessmentData } from "./dsm";
+export { defaultDSMAssessmentData } from "./dsm";
 
 export type {
   HouseholdRelationships,
@@ -144,6 +146,9 @@ export type Client = {
   // All PIRS and report relationship references must derive from this field.
   householdRelationships?: import("./household").HouseholdRelationships;
   relationships?: import("../components/RelationshipManager").Relationship[];
+  // DSM-5-TR diagnostic assessment engine data.
+  // Symptoms are shared entities; criterion satisfaction is diagnosis-specific.
+  dsmAssessment?: import("./dsm").DSMAssessmentData;
   created_at: string;
   updated_at: string;
 };
@@ -328,6 +333,9 @@ export function parseClientBlob(id: string, raw: unknown): Client {
     // householdRelationships: pass through as-is — structured JSON, validated by TypeScript
     householdRelationships: (b.householdRelationships && typeof b.householdRelationships === "object")
       ? (b.householdRelationships as import("./household").HouseholdRelationships)
+      : undefined,
+    dsmAssessment: (b.dsmAssessment && typeof b.dsmAssessment === "object")
+      ? (b.dsmAssessment as import("./dsm").DSMAssessmentData)
       : undefined,
     report: {
       fields: (rawReport.fields && typeof rawReport.fields === "object" ? rawReport.fields : {}) as Record<string, unknown>,
