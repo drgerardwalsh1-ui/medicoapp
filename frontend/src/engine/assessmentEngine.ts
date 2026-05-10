@@ -1,5 +1,11 @@
 import type { Client } from "../types/client";
 import { formatFullName, calcAge, calcAgeAtDate, calcYearsSince } from "../types/client";
+import { Temporal } from "@js-temporal/polyfill";
+
+const MONTHS_LONG = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -14,12 +20,14 @@ function pronouns(gender: string) {
 
 function formatDateAU(iso: string): string {
   if (!iso) return "";
+  // Plain calendar date (e.g. dateOfInjury) — render directly without tz.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const [y, m, d] = iso.split("-").map((s) => parseInt(s, 10));
+    return `${d} ${MONTHS_LONG[m - 1]} ${y}`;
+  }
   try {
-    return new Date(iso).toLocaleDateString("en-AU", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    });
+    const d = Temporal.PlainDate.from(iso.slice(0, 10));
+    return `${d.day} ${MONTHS_LONG[d.month - 1]} ${d.year}`;
   } catch {
     return iso;
   }

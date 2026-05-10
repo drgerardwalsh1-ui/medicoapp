@@ -31,20 +31,34 @@ import {
   type Appointment,
   type InjuryData,
 } from "../types/client";
+import {
+  TimeService,
+  TIMEZONE_OPTIONS,
+  isValidTimeZone,
+  durationMinutes,
+  durationLabel as tsDurationLabel,
+  endUtcFromDuration,
+  formatTime24,
+  formatDateISO,
+  formatTimestamp as tsFormatTimestamp,
+  getViewerTimeZone,
+  useViewerTimeZone,
+  isFutureInstant,
+  compareInstants,
+  DURATION_MINUTE_OPTIONS,
+} from "../time";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const TITLE_OPTIONS = ["Mr", "Mrs", "Ms", "Miss", "Dr", "Prof", "Other"];
 const GENDER_PRESETS = ["Male", "Female", "Non-binary", "Prefer not to say"];
-const DURATION_MINS = [15, 30, 45, 60, 75, 90, 105, 120];
+const DURATION_MINS = DURATION_MINUTE_OPTIONS;
 function durationLabel(m: number): string {
-  if (m < 60) return `${m} min`;
-  const h = Math.floor(m / 60);
-  const rem = m % 60;
-  return rem === 0 ? `${h} hr` : `${h} hr ${rem} min`;
+  return tsDurationLabel(m);
 }
 function apptDurationMins(appt: Appointment): number {
-  return Math.round((new Date(appt.end).getTime() - new Date(appt.start).getTime()) / 60_000);
+  // Spec Part 8: duration is ALWAYS derived from end - start.
+  return durationMinutes(appt.startUtc, appt.endUtc);
 }
 const HAND_OPTIONS = [
   { value: "right", label: "Right" },
@@ -85,6 +99,10 @@ export default function ClientHome({
   registerSaveHandler?: (fn: (() => void) | null) => void;
   registerVersionHistoryHandler?: (fn: (() => void) | null) => void;
 }) {
+
+  // Subscribe to viewer-tz so timezone-derived display values refresh when
+  // the system tz changes mid-session (spec Part 6).
+  useViewerTimeZone();
 
   // ── Initial state ──────────────────────────────────────────────────────────
   const initClient: Client = client
@@ -162,30 +180,60 @@ export default function ClientHome({
   );
 
   // ── Appointment helpers ────────────────────────────────────────────────────
+  // Spec Parts 6 & 9: appointment-time fields shown in their *appointment*
+  // timezone (the authoritative scheduling tz), not the viewer's. The
+  // calendar — by contrast — positions in viewer-tz (handled in calendar/).
+  // Spec Part 5: every appointment has a timezone; it is never floating.
   function apptToDisplay(appt: Appointment) {
-    const d = new Date(appt.start);
-    const e = new Date(appt.end);
+    const tz = appt.appointmentTimeZone || getViewerTimeZone();
     return {
-      date: [d.getFullYear(), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0")].join("-"),
-      time: `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,
-      endTime: `${String(e.getHours()).padStart(2, "0")}:${String(e.getMinutes()).padStart(2, "0")}`,
-      isFuture: d.getTime() >= Date.now(),
+      date: formatDateISO(appt.startUtc, tz),
+      time: formatTime24(appt.startUtc, tz),
+      endTime: formatTime24(appt.endUtc, tz),
+      timeZone: tz,
+      isFuture: isFutureInstant(appt.startUtc),
     };
   }
 
-  function updateAppointment(id: string, date: string, time: string) {
+  // Spec Parts 7 + 10: time edits go through TimeService so DST gaps reject
+  // explicitly and the appointment-tz remains authoritative.
+  function rebuildStartUtc(plainDate: string, time: string, tz: string): string | null {
+    const [hh, mm] = time.split(":").map((s) => parseInt(s, 10));
+    if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+    try {
+      return TimeService.wallClockToUtcIso({
+        plainDate,
+        hour: hh,
+        minute: mm,
+        timeZone: tz,
+        disambiguation: "reject",
+      });
+    } catch (err) {
+      console.warn("[appointment] rejected ambiguous/non-existent time:", err);
+      alert(
+        "That time does not exist or is ambiguous in the chosen timezone (DST transition). Pick a different time."
+      );
+      return null;
+    }
+  }
+
+  function updateAppointmentStart(id: string, date: string, time: string) {
     if (!date) return;
-    const effectiveTime = time || "09:00";
-    const start = new Date(`${date}T${effectiveTime}:00`);
-    if (isNaN(start.getTime())) return;
-    // preserve existing duration when moving start time
     const appt = data.appointments.find((a) => a.id === id);
-    const durationMs = appt ? new Date(appt.end).getTime() - new Date(appt.start).getTime() : 60 * 60_000;
-    const end = new Date(start.getTime() + Math.max(durationMs, 0));
+    if (!appt) return;
+    const tz = appt.appointmentTimeZone || getViewerTimeZone();
+    const effectiveTime = time || "09:00";
+    const newStartUtc = rebuildStartUtc(date, effectiveTime, tz);
+    if (newStartUtc === null) return;
+    // Spec Part 8: changing start preserves duration → end shifts by same delta.
+    const dur = durationMinutes(appt.startUtc, appt.endUtc);
+    const newEndUtc = endUtcFromDuration(newStartUtc, Math.max(dur, 0));
     setData((prev) => ({
       ...prev,
       appointments: prev.appointments.map((a) =>
-        a.id === id ? { ...a, start: start.toISOString(), end: end.toISOString() } : a
+        a.id === id
+          ? { ...a, startUtc: newStartUtc, endUtc: newEndUtc }
+          : a
       ),
     }));
     setIsDirty(true);
@@ -193,27 +241,54 @@ export default function ClientHome({
 
   function updateAppointmentEnd(id: string, date: string, endTime: string) {
     if (!date || !endTime) return;
-    const end = new Date(`${date}T${endTime}:00`);
-    if (isNaN(end.getTime())) return;
+    const appt = data.appointments.find((a) => a.id === id);
+    if (!appt) return;
+    const tz = appt.appointmentTimeZone || getViewerTimeZone();
+    const newEndUtc = rebuildStartUtc(date, endTime, tz);
+    if (newEndUtc === null) return;
     setData((prev) => ({
       ...prev,
       appointments: prev.appointments.map((a) =>
-        a.id === id ? { ...a, end: end.toISOString() } : a
+        a.id === id ? { ...a, endUtc: newEndUtc } : a
+      ),
+    }));
+    setIsDirty(true);
+  }
+
+  function updateAppointmentTimeZone(id: string, tzId: string) {
+    if (!isValidTimeZone(tzId)) return;
+    setData((prev) => ({
+      ...prev,
+      appointments: prev.appointments.map((a) =>
+        a.id === id ? { ...a, appointmentTimeZone: tzId } : a
       ),
     }));
     setIsDirty(true);
   }
 
   function addAppointment() {
-    const now = new Date();
-    now.setMinutes(0, 0, 0);
-    now.setHours(9);
-    const end = new Date(now.getTime() + 60 * 60_000);
+    const tz = getViewerTimeZone();
+    const today = formatDateISO(TimeService.nowUtcIso(), tz);
+    // Default new appointment to 09:00 in viewer-tz on today's wall-clock date.
+    let startUtc: string;
+    try {
+      startUtc = TimeService.wallClockToUtcIso({
+        plainDate: today,
+        hour: 9,
+        minute: 0,
+        timeZone: tz,
+        disambiguation: "compatible",
+      });
+    } catch {
+      startUtc = TimeService.nowUtcIso();
+    }
+    const endUtc = endUtcFromDuration(startUtc, 60);
     const appt: Appointment = {
       id: crypto.randomUUID(),
-      start: now.toISOString(),
-      end: end.toISOString(),
       type: "assessment",
+      startUtc,
+      endUtc,
+      appointmentTimeZone: tz,
     };
     setData((prev) => ({ ...prev, appointments: [...prev.appointments, appt] }));
     setIsDirty(true);
@@ -224,13 +299,14 @@ export default function ClientHome({
     setIsDirty(true);
   }
 
+  // Spec Part 8: changing the duration dropdown updates END only.
   function setAppointmentDuration(id: string, mins: number) {
     setData((prev) => ({
       ...prev,
       appointments: prev.appointments.map((a) => {
         if (a.id !== id) return a;
-        const end = new Date(new Date(a.start).getTime() + mins * 60_000);
-        return { ...a, end: end.toISOString() };
+        const newEndUtc = endUtcFromDuration(a.startUtc, mins);
+        return { ...a, endUtc: newEndUtc };
       }),
     }));
     setIsDirty(true);
@@ -1044,10 +1120,13 @@ export default function ClientHome({
         ) : (
           <div className="space-y-2">
             {[...data.appointments]
-              .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+              .sort((a, b) => compareInstants(a.startUtc, b.startUtc))
               .map((appt) => {
-                const { date, time, endTime, isFuture } = apptToDisplay(appt);
-                const durMins = DURATION_MINS.includes(apptDurationMins(appt)) ? apptDurationMins(appt) : 60;
+                const { date, time, endTime, timeZone, isFuture } = apptToDisplay(appt);
+                const actualDur = apptDurationMins(appt);
+                // Spec Part 8: surface the actual duration even if it isn't
+                // one of the preset multiples — never silently coerce to 60.
+                const durIsPreset = (DURATION_MINS as readonly number[]).includes(actualDur);
                 return (
                   <div key={appt.id}
                     className={`p-2 rounded border space-y-1.5 ${
@@ -1062,11 +1141,11 @@ export default function ClientHome({
                       </span>
                       <input type="date" className="input text-xs py-1"
                         value={date}
-                        onChange={(e) => updateAppointment(appt.id, e.target.value, time)} />
+                        onChange={(e) => updateAppointmentStart(appt.id, e.target.value, time)} />
                       <div className="flex items-center gap-1 shrink-0">
                         <span className="text-[10px] text-slate-400 shrink-0">Start</span>
                         <TimeSelect value={time}
-                          onChange={(t) => updateAppointment(appt.id, date, t)} />
+                          onChange={(t) => updateAppointmentStart(appt.id, date, t)} />
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <span className="text-[10px] text-slate-400 shrink-0">End</span>
@@ -1074,14 +1153,37 @@ export default function ClientHome({
                           onChange={(t) => updateAppointmentEnd(appt.id, date, t)} />
                       </div>
                     </div>
-                    {/* Row 2: duration (compact) + delete */}
-                    <div className="flex items-center gap-2">
+                    {/* Row 2: timezone + duration (derived) + delete */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] text-slate-400 shrink-0">TZ</span>
+                      <select
+                        className="input text-xs py-0.5 shrink-0"
+                        style={{ maxWidth: 200 }}
+                        value={timeZone}
+                        onChange={(e) => updateAppointmentTimeZone(appt.id, e.target.value)}
+                      >
+                        {!TIMEZONE_OPTIONS.some((o) => o.id === timeZone) && (
+                          <option value={timeZone}>{timeZone}</option>
+                        )}
+                        {TIMEZONE_OPTIONS.map((opt) => (
+                          <option key={opt.id} value={opt.id}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="text-[10px] text-slate-400 shrink-0">Duration</span>
                       <select
                         className="input text-xs py-0.5 shrink-0"
                         style={{ maxWidth: 120 }}
-                        value={durMins}
-                        onChange={(e) => setAppointmentDuration(appt.id, Number(e.target.value))}
+                        value={durIsPreset ? actualDur : "__custom__"}
+                        onChange={(e) => {
+                          if (e.target.value === "__custom__") return;
+                          setAppointmentDuration(appt.id, Number(e.target.value));
+                        }}
                       >
+                        {!durIsPreset && (
+                          <option value="__custom__">{durationLabel(actualDur)}</option>
+                        )}
                         {DURATION_MINS.map((m) => (
                           <option key={m} value={m}>{durationLabel(m)}</option>
                         ))}
@@ -1500,16 +1602,8 @@ function SaveStatusIndicator({
 }
 
 function formatTimestamp(iso: string): string {
-  try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    return d.toLocaleString("en-AU", {
-      day: "2-digit", month: "2-digit", year: "numeric",
-      hour: "2-digit", minute: "2-digit", hour12: false,
-    });
-  } catch {
-    return iso;
-  }
+  // Spec Part 1: route every formatter through TimeService.
+  return tsFormatTimestamp(iso);
 }
 
 function prettyEventType(t: string): string {

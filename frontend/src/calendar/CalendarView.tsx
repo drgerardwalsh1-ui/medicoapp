@@ -6,6 +6,13 @@ import {
   formatMonthYear,
   formatDateRange,
 } from "./calendarUtils";
+import {
+  TIMEZONE_OPTIONS,
+  getViewerTimeZone,
+  TimeService,
+  formatDateISO,
+  formatTime24,
+} from "../time";
 
 interface CalendarViewProps {
   clients: Client[];
@@ -22,16 +29,10 @@ interface NewApptModalProps {
     clientId: string,
     start: Date,
     end: Date,
-    type: Appointment["type"]
+    type: Appointment["type"],
+    appointmentTimeZone: string
   ) => void;
   onCancel: () => void;
-}
-
-function toLocalInputValue(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
-    d.getHours()
-  )}:${pad(d.getMinutes())}`;
 }
 
 const DURATION_OPTIONS = [
@@ -43,15 +44,42 @@ const DURATION_OPTIONS = [
 
 function NewApptModal({ clients, initialStart, onSave, onCancel }: NewApptModalProps) {
   const [clientId, setClientId] = useState(clients[0]?.id ?? "");
-  const [startStr, setStartStr] = useState(toLocalInputValue(initialStart));
+  // Spec Part 5: new appointments default to viewer tz, but the user may
+  // independently change the appointment tz before saving.
+  const [appointmentTz, setAppointmentTz] = useState<string>(getViewerTimeZone());
+  const initialIso = initialStart.toISOString();
+  const [date, setDate] = useState<string>(() => formatDateISO(initialIso, appointmentTz));
+  const [time, setTime] = useState<string>(() => formatTime24(initialIso, appointmentTz));
   const [durationMins, setDurationMins] = useState(60);
   const [type, setType] = useState<Appointment["type"]>("assessment");
+  const [error, setError] = useState<string | null>(null);
 
   function handleSave() {
     if (!clientId) return;
-    const start = new Date(startStr);
+    const [hh, mm] = time.split(":").map((s) => parseInt(s, 10));
+    if (!Number.isFinite(hh) || !Number.isFinite(mm)) {
+      setError("Pick a valid start time.");
+      return;
+    }
+    let startUtc: string;
+    try {
+      // Spec Part 7: reject ambiguous / non-existent DST times.
+      startUtc = TimeService.wallClockToUtcIso({
+        plainDate: date,
+        hour: hh,
+        minute: mm,
+        timeZone: appointmentTz,
+        disambiguation: "reject",
+      });
+    } catch {
+      setError(
+        "That time does not exist or is ambiguous in the chosen timezone (DST transition). Pick a different time."
+      );
+      return;
+    }
+    const start = new Date(startUtc);
     const end = new Date(start.getTime() + durationMins * 60_000);
-    onSave(clientId, start, end, type);
+    onSave(clientId, start, end, type, appointmentTz);
   }
 
   return (
@@ -83,15 +111,46 @@ function NewApptModal({ clients, initialStart, onSave, onCancel }: NewApptModalP
           </select>
         </div>
 
-        {/* Start time */}
+        {/* Start date + time */}
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="label">Date</label>
+            <input
+              type="date"
+              className="input"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="label">Start</label>
+            <input
+              type="time"
+              step={60}
+              className="input"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Timezone */}
         <div>
-          <label className="label">Start</label>
-          <input
-            type="datetime-local"
+          <label className="label">Timezone</label>
+          <select
             className="input"
-            value={startStr}
-            onChange={(e) => setStartStr(e.target.value)}
-          />
+            value={appointmentTz}
+            onChange={(e) => setAppointmentTz(e.target.value)}
+          >
+            {!TIMEZONE_OPTIONS.some((o) => o.id === appointmentTz) && (
+              <option value={appointmentTz}>{appointmentTz}</option>
+            )}
+            {TIMEZONE_OPTIONS.map((opt) => (
+              <option key={opt.id} value={opt.id}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Duration */}
@@ -128,6 +187,8 @@ function NewApptModal({ clients, initialStart, onSave, onCancel }: NewApptModalP
             <option value="other">Other</option>
           </select>
         </div>
+
+        {error && <p className="text-xs text-red-600">{error}</p>}
 
         {/* Actions */}
         <div className="flex gap-3 pt-1">
@@ -197,9 +258,10 @@ export default function CalendarView({
     clientId: string,
     start: Date,
     end: Date,
-    type: Appointment["type"]
+    type: Appointment["type"],
+    appointmentTimeZone: string
   ) {
-    await createAppointment(clientId, start, end, type);
+    await createAppointment(clientId, start, end, type, appointmentTimeZone);
     setNewApptModal(null);
   }
 

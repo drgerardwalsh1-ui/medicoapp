@@ -1,4 +1,12 @@
 import type { PIRSTableModel } from "./types";
+import type { Appointment as CanonicalAppointment } from "../time";
+import {
+  ageNow,
+  ageOnDate,
+  yearsSince as yearsSinceTS,
+  viewerPlainDate,
+  todayPlainDate,
+} from "../time";
 export type { PIRSTableModel } from "./types";
 export type { DSMAssessmentData } from "./dsm";
 export { defaultDSMAssessmentData } from "./dsm";
@@ -83,13 +91,10 @@ export type Clinical = {
 };
 
 // ── Appointment ───────────────────────────────────────────────────────────────
-
-export type Appointment = {
-  id: UUID;
-  start: string;
-  end: string;
-  type: string;
-};
+// Canonical shape lives in src/time. Re-exported here so existing consumers
+// continue to import `{ Appointment }` from this module. The only stored
+// time fields are `startUtc`, `endUtc`, `appointmentTimeZone` (spec Part 2).
+export type Appointment = CanonicalAppointment;
 
 // ── Assessment checklist ──────────────────────────────────────────────────────
 
@@ -256,26 +261,35 @@ export function formatFullName(
 }
 
 export function isAppointmentToday(appointments: Appointment[]): boolean {
-  const today = new Date().toISOString().slice(0, 10);
-  return appointments.some((a) => a.start.slice(0, 10) === today);
+  const today = todayPlainDate();
+  return appointments.some((a) => viewerPlainDate(a.startUtc) === today);
 }
 
 export function calcAge(dob: string): number {
-  if (!dob) return 0;
-  const ms = Date.now() - new Date(dob).getTime();
-  return Math.max(0, Math.floor(ms / (365.25 * 24 * 60 * 60 * 1000)));
+  return ageNow(dob);
 }
 
 export function calcAgeAtDate(dob: string, atDate: string): number {
-  if (!dob || !atDate) return 0;
-  const ms = new Date(atDate).getTime() - new Date(dob).getTime();
-  return Math.max(0, Math.floor(ms / (365.25 * 24 * 60 * 60 * 1000)));
+  return ageOnDate(dob, atDate);
 }
 
 export function calcYearsSince(fromDate: string): number {
-  if (!fromDate) return 0;
-  const ms = Date.now() - new Date(fromDate).getTime();
-  return Math.max(0, Math.floor(ms / (365.25 * 24 * 60 * 60 * 1000)));
+  return yearsSinceTS(fromDate);
+}
+
+// Defensive parse-time validator — blob fields originate as opaque JSON,
+// so we still enforce the canonical appointment shape here. Anything else
+// is silently dropped (test-data only; spec Part 2 forbids floating times).
+function isValidAppointment(a: unknown): a is Appointment {
+  if (!a || typeof a !== "object") return false;
+  const o = a as Record<string, unknown>;
+  return (
+    typeof o.id === "string" &&
+    typeof o.type === "string" &&
+    typeof o.startUtc === "string" &&
+    typeof o.endUtc === "string" &&
+    typeof o.appointmentTimeZone === "string"
+  );
 }
 
 // ── Blob parsing ──────────────────────────────────────────────────────────────
@@ -326,7 +340,9 @@ export function parseClientBlob(id: string, raw: unknown): Client {
         insurerContactPerson: (injRaw.insurerContactPerson as string | null) ?? null,
       } : null,
     },
-    appointments: Array.isArray(b.appointments) ? (b.appointments as Appointment[]) : [],
+    appointments: Array.isArray(b.appointments)
+      ? (b.appointments as Appointment[]).filter(isValidAppointment)
+      : [],
     relationships: Array.isArray(b.relationships)
       ? (b.relationships as import("../components/RelationshipManager").Relationship[])
       : [],

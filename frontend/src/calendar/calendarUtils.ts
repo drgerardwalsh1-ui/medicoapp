@@ -1,12 +1,37 @@
+// Thin wrapper layer. All time/date logic lives in src/time (TimeService).
+// Spec Part 1 / Part 15: this file preserves its original public surface so
+// the existing calendar components are not rewritten — only their math is
+// re-routed through the centralized service.
+
 export type { Appointment } from "../types/client";
+import {
+  HOUR_HEIGHT as TS_HOUR_HEIGHT,
+  START_HOUR as TS_START_HOUR,
+  END_HOUR as TS_END_HOUR,
+  SNAP_MINUTES as TS_SNAP_MINUTES,
+  topPxFromInstant,
+  heightPxFromInstants,
+  pixelsToInstantIso,
+  isInstantOnViewerDay,
+  viewerPlainDate,
+  viewerWeekStartDate,
+  weekDates as tsWeekDates,
+  addDaysToPlainDate,
+  todayPlainDate,
+  formatTime24,
+  formatMonthYear as tsFormatMonthYear,
+  formatDateRange as tsFormatDateRange,
+  formatShortWeekday,
+  getViewerTimeZone,
+} from "../time";
 
 export type ClientStatus = "complete" | "in_progress" | "missing";
 
-// Grid layout constants
-export const HOUR_HEIGHT = 64;
-export const START_HOUR = 8;
-export const END_HOUR = 19;
-export const SNAP_MINUTES = 15;
+// Grid layout constants — re-exported from TimeService.
+export const HOUR_HEIGHT = TS_HOUR_HEIGHT;
+export const START_HOUR = TS_START_HOUR;
+export const END_HOUR = TS_END_HOUR;
+export const SNAP_MINUTES = TS_SNAP_MINUTES;
 export const TIME_LABEL_WIDTH = 56;
 
 export const HOURS = Array.from(
@@ -17,30 +42,53 @@ export const HOURS = Array.from(
 export const TOTAL_GRID_HEIGHT = (END_HOUR - START_HOUR) * HOUR_HEIGHT;
 
 // ── Week helpers ─────────────────────────────────────────────────────────────
+// Existing callers pass JS Date objects representing midnight wall-clock in
+// viewer-tz. Internally we delegate to TimeService for the actual maths.
+
+function plainDateFromJsDate(d: Date): string {
+  return [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, "0"),
+    String(d.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function jsDateFromPlainDate(plainDate: string): Date {
+  const [y, m, d] = plainDate.split("-").map(Number);
+  const out = new Date();
+  out.setFullYear(y, m - 1, d);
+  out.setHours(0, 0, 0, 0);
+  return out;
+}
 
 export function getWeekStart(date: Date): Date {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  return d;
+  const today = plainDateFromJsDate(date);
+  // Reuse TimeService week-start logic by routing through an instant.
+  // We construct a dummy instant for "midnight viewer-tz on `today`" only to
+  // pass to viewerWeekStartDate — equivalent to picking the Monday of the
+  // ISO week containing `today` in viewer-tz.
+  const tz = getViewerTimeZone();
+  const inst = wallClockMidnightInstant(today);
+  return jsDateFromPlainDate(viewerWeekStartDate(inst, tz));
 }
 
 export function getWeekDates(weekStart: Date): Date[] {
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekStart);
-    d.setDate(d.getDate() + i);
-    return d;
-  });
+  return tsWeekDates(plainDateFromJsDate(weekStart)).map(jsDateFromPlainDate);
+}
+
+export function addDays(date: Date, days: number): Date {
+  return jsDateFromPlainDate(addDaysToPlainDate(plainDateFromJsDate(date), days));
 }
 
 export function isSameDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
+  return plainDateFromJsDate(a) === plainDateFromJsDate(b);
+}
+
+// Helper used by getWeekStart above. Approximates midnight-in-viewer-tz as
+// the JS Date midnight in the system zone — only ever used to derive which
+// ISO week `plainDate` belongs to, so any sub-day offset is irrelevant.
+function wallClockMidnightInstant(plainDate: string): string {
+  return jsDateFromPlainDate(plainDate).toISOString();
 }
 
 // ── Status derivation ────────────────────────────────────────────────────────
@@ -67,46 +115,58 @@ export function statusStyle(status: ClientStatus): StatusStyle {
 }
 
 // ── Grid position math ───────────────────────────────────────────────────────
+// Spec Part 9: vertical placement uses viewer-tz; absolute UTC drives the
+// underlying instant. Existing callers pass `appt.startUtc` / `appt.endUtc`.
 
-export function appointmentTopPx(isoStart: string): number {
-  const d = new Date(isoStart);
-  const mins = (d.getHours() - START_HOUR) * 60 + d.getMinutes();
-  return Math.max(0, (mins / 60) * HOUR_HEIGHT);
+export function appointmentTopPx(startUtc: string): number {
+  return topPxFromInstant(startUtc);
 }
 
-export function appointmentHeightPx(isoStart: string, isoEnd: string): number {
-  const durationMs = new Date(isoEnd).getTime() - new Date(isoStart).getTime();
-  const durationMins = Math.max(durationMs / 60000, SNAP_MINUTES);
-  return (durationMins / 60) * HOUR_HEIGHT;
+export function appointmentHeightPx(startUtc: string, endUtc: string): number {
+  return heightPxFromInstants(startUtc, endUtc);
 }
 
+// Returns the corresponding instant as a JS Date — same signature as the
+// pre-refactor function so the calendar drag/resize handlers remain
+// untouched. Internally routed through TimeService so the math is now
+// viewer-tz aware (spec Part 9.1) and DST-safe.
 export function pixelsToDateTime(py: number, dayDate: Date): Date {
-  const rawMins = (py / HOUR_HEIGHT) * 60;
-  const snapped = Math.round(rawMins / SNAP_MINUTES) * SNAP_MINUTES;
-  const totalMins = START_HOUR * 60 + snapped;
-  const clamped = Math.max(START_HOUR * 60, Math.min((END_HOUR - 1) * 60, totalMins));
-  const result = new Date(dayDate);
-  result.setHours(Math.floor(clamped / 60), clamped % 60, 0, 0);
-  return result;
+  return new Date(pixelsToInstantIso(py, plainDateFromJsDate(dayDate)));
+}
+
+// ISO-instant variant used by handlers that already speak in instants.
+export function pixelsToInstantAtDay(py: number, dayDate: Date): string {
+  return pixelsToInstantIso(py, plainDateFromJsDate(dayDate));
+}
+
+// True iff `startUtc` falls on `day` in viewer-tz.
+export function isInstantOnDay(startUtc: string, day: Date): boolean {
+  return isInstantOnViewerDay(startUtc, plainDateFromJsDate(day));
+}
+
+// Bucket lookup helper for useCalendar.
+export function plainDateOfInstant(startUtc: string): string {
+  return viewerPlainDate(startUtc);
 }
 
 // ── Format helpers ───────────────────────────────────────────────────────────
 
-export function formatTime(iso: string): string {
-  const d = new Date(iso);
-  const h = String(d.getHours()).padStart(2, "0");
-  const m = String(d.getMinutes()).padStart(2, "0");
-  return `${h}:${m}`;
+export function formatTime(startUtc: string): string {
+  return formatTime24(startUtc);
 }
 
 export function formatMonthYear(d: Date): string {
-  return d.toLocaleDateString([], { month: "long", year: "numeric" });
+  return tsFormatMonthYear(plainDateFromJsDate(d));
 }
 
 export function formatDateRange(start: Date, end: Date): string {
-  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
-  if (start.getMonth() === end.getMonth()) {
-    return `${start.toLocaleDateString([], opts)} – ${end.getDate()}`;
-  }
-  return `${start.toLocaleDateString([], opts)} – ${end.toLocaleDateString([], opts)}`;
+  return tsFormatDateRange(plainDateFromJsDate(start), plainDateFromJsDate(end));
+}
+
+export function formatWeekday(d: Date): string {
+  return formatShortWeekday(plainDateFromJsDate(d));
+}
+
+export function todayPlainDateISO(): string {
+  return todayPlainDate();
 }

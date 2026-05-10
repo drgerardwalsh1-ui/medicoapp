@@ -218,8 +218,18 @@ function Root() {
     return { title: "" };
   }
 
+  // Aggregate every client's appointments so the AppLayout overrun-alert
+  // banner can warn about imminent meetings regardless of which page is
+  // currently open (spec Part 11).
+  const allAppointments = clients.flatMap((c) => c.appointments ?? []);
+
   return (
-    <AppLayout currentView={view} setView={navigate} topBarProps={topBarProps()}>
+    <AppLayout
+      currentView={view}
+      setView={navigate}
+      topBarProps={topBarProps()}
+      upcomingAppointments={allAppointments}
+    >
       {pageContent()}
     </AppLayout>
   );

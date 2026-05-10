@@ -25,6 +25,11 @@ import {
   type Client,
   type PreviousAssessorPIRS,
 } from "./types/client";
+import {
+  formatTimestamp as tsFormatTimestamp,
+  getViewerTimeZone,
+} from "./time";
+import { Temporal } from "@js-temporal/polyfill";
 import type { Relationship } from "./components/RelationshipManager";
 import type { PIRSTableModel } from "./types/types";
 import DSMAssessment from "./components/DSMAssessment";
@@ -40,16 +45,7 @@ function generateId(): string {
 }
 
 function formatTimestamp(iso: string): string {
-  try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    return d.toLocaleString("en-AU", {
-      day: "2-digit", month: "2-digit", year: "numeric",
-      hour: "2-digit", minute: "2-digit", hour12: false,
-    });
-  } catch {
-    return iso;
-  }
+  return tsFormatTimestamp(iso);
 }
 
 function prettyEventType(t: string): string {
@@ -135,10 +131,21 @@ const PIRS_DEFINITIONS: Record<PirsCategoryKey, PirsCategoryDef> = {
 
 function formatDateShort(iso: string): string {
   if (!iso) return "";
+  // Plain calendar date: render dd/mm/yyyy without any timezone reasoning.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const [y, m, d] = iso.split("-");
+    return `${d}/${m}/${y}`;
+  }
   try {
-    const d = new Date(iso);
-    return d.toLocaleDateString("en-AU", { day: "2-digit", month: "2-digit", year: "numeric" });
-  } catch { return iso; }
+    // Spec Part 9.7 — 24-hour, locale-independent. Use viewer-tz day boundaries.
+    const tz = getViewerTimeZone();
+    const z = Temporal.Instant.from(iso).toZonedDateTimeISO(tz);
+    const dd = String(z.day).padStart(2, "0");
+    const mm = String(z.month).padStart(2, "0");
+    return `${dd}/${mm}/${z.year}`;
+  } catch {
+    return iso;
+  }
 }
 
 // ── PIRS ordering ─────────────────────────────────────────────────────────────

@@ -1,39 +1,52 @@
 import { useState } from "react";
 import { formatFullName, type Client } from "../types/client";
+import {
+  formatTime24,
+  getViewerTimeZone,
+  isFutureInstant,
+  compareInstants,
+} from "../time";
+import { Temporal } from "@js-temporal/polyfill";
 
-function nextAppointmentStart(client: Client): number {
-  const appts = client.appointments as Array<{ start: string }> | undefined;
-  if (!Array.isArray(appts) || appts.length === 0) return Infinity;
-  const now = Date.now();
+function nextAppointmentStart(client: Client): string | null {
+  const appts = client.appointments;
+  if (!Array.isArray(appts) || appts.length === 0) return null;
   const upcoming = appts
-    .map((a) => new Date(a.start).getTime())
-    .filter((t) => t >= now)
-    .sort((a, b) => a - b);
-  return upcoming[0] ?? Infinity;
+    .filter((a) => isFutureInstant(a.startUtc))
+    .map((a) => a.startUtc)
+    .sort(compareInstants);
+  return upcoming[0] ?? null;
 }
+
+const SHORT_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const SHORT_MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
 
 function formatAppointmentDate(isoStart: string): string {
   try {
-    return new Date(isoStart).toLocaleDateString("en-AU", {
-      weekday: "short",
-      day: "numeric",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    const tz = getViewerTimeZone();
+    const z = Temporal.Instant.from(isoStart).toZonedDateTimeISO(tz);
+    const weekday = SHORT_WEEKDAYS[z.dayOfWeek - 1];
+    const month = SHORT_MONTHS[z.month - 1];
+    return `${weekday} ${z.day} ${month} ${formatTime24(isoStart, tz)}`;
   } catch {
     return isoStart;
   }
 }
 
 function nextAppointmentISO(client: Client): string | null {
-  const appts = client.appointments as Array<{ start: string }> | undefined;
-  if (!Array.isArray(appts) || appts.length === 0) return null;
-  const now = Date.now();
-  const upcoming = appts
-    .filter((a) => new Date(a.start).getTime() >= now)
-    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
-  return upcoming[0]?.start ?? null;
+  return nextAppointmentStart(client);
+}
+
+function compareNext(a: Client, b: Client): number {
+  const sa = nextAppointmentStart(a);
+  const sb = nextAppointmentStart(b);
+  if (sa === null && sb === null) return 0;
+  if (sa === null) return 1;
+  if (sb === null) return -1;
+  return compareInstants(sa, sb);
 }
 
 export default function Home({
@@ -48,21 +61,25 @@ export default function Home({
   const [selectedId, setSelectedId] = useState("");
 
   // Sort: clients with upcoming appointments first (soonest first), then the rest.
-  const sorted = [...clients].sort(
-    (a, b) => nextAppointmentStart(a) - nextAppointmentStart(b)
-  );
+  const sorted = [...clients].sort(compareNext);
 
-  const now = Date.now();
+  const nowMs = Temporal.Now.instant().epochMilliseconds;
   const msInDay = 24 * 60 * 60 * 1000;
 
+  function msUntilNext(c: Client): number {
+    const iso = nextAppointmentStart(c);
+    if (iso === null) return Infinity;
+    return Temporal.Instant.from(iso).epochMilliseconds - nowMs;
+  }
+
   const thisWeek = sorted.filter((c) => {
-    const t = nextAppointmentStart(c);
-    return t !== Infinity && t - now <= 7 * msInDay;
+    const t = msUntilNext(c);
+    return t !== Infinity && t <= 7 * msInDay;
   });
 
   const nextWeek = sorted.filter((c) => {
-    const t = nextAppointmentStart(c);
-    return t !== Infinity && t - now > 7 * msInDay && t - now <= 14 * msInDay;
+    const t = msUntilNext(c);
+    return t !== Infinity && t > 7 * msInDay && t <= 14 * msInDay;
   });
 
   function handleSelect(id: string) {

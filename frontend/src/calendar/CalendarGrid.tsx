@@ -2,14 +2,16 @@ import React, { useRef, useMemo, useCallback, useState, useEffect } from "react"
 import AppointmentBlock from "./AppointmentBlock";
 import {
   HOUR_HEIGHT,
-  START_HOUR,
   HOURS,
   TIME_LABEL_WIDTH,
   TOTAL_GRID_HEIGHT,
+  START_HOUR,
   isSameDay,
+  isInstantOnDay,
   pixelsToDateTime,
   appointmentTopPx,
 } from "./calendarUtils";
+import { nowMinutesSinceStartHour, durationMs, addMinutesToInstant, compareInstants } from "../time";
 import type { AppointmentWithClient } from "./useCalendar";
 
 interface Props {
@@ -51,10 +53,9 @@ export default function CalendarGrid({
     offsetY: number;
   } | null>(null);
 
-  // Current-time indicator
-  const now = new Date();
+  // Current-time indicator — viewer-tz wall-clock minutes since START_HOUR.
   const currentTimeTopPx = useMemo(() => {
-    const mins = (now.getHours() - START_HOUR) * 60 + now.getMinutes();
+    const mins = nowMinutesSinceStartHour();
     return Math.max(0, Math.min((mins / 60) * HOUR_HEIGHT, TOTAL_GRID_HEIGHT));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -92,7 +93,7 @@ export default function CalendarGrid({
       if (e.button !== 0) return;
       e.stopPropagation();
       const gridY = getGridY(e.clientY);
-      const apptTopY = appointmentTopPx(appointment.start);
+      const apptTopY = appointmentTopPx(appointment.startUtc);
       pendingRef.current = {
         appointment,
         pointerId: e.pointerId,
@@ -116,10 +117,10 @@ export default function CalendarGrid({
         appointment,
         pointerId: e.pointerId,
         offsetY: 0,
-        previewStart: appointment.start,
-        previewEnd: appointment.end,
+        previewStart: appointment.startUtc,
+        previewEnd: appointment.endUtc,
         previewDayIndex: weekDates.findIndex((d) =>
-          isSameDay(d, new Date(appointment.start))
+          isInstantOnDay(appointment.startUtc, d)
         ),
       });
     },
@@ -141,9 +142,10 @@ export default function CalendarGrid({
           const gridY = getGridY(e.clientY);
           const rawY = gridY - pending.offsetY;
           const newStart = pixelsToDateTime(Math.max(0, rawY), weekDates[dayIdx]);
-          const duration =
-            new Date(pending.appointment.end).getTime() -
-            new Date(pending.appointment.start).getTime();
+          const duration = durationMs(
+            pending.appointment.startUtc,
+            pending.appointment.endUtc
+          );
           const newEnd = new Date(newStart.getTime() + duration);
           setInteraction({
             type: "drag",
@@ -166,9 +168,10 @@ export default function CalendarGrid({
         const gridY = getGridY(e.clientY);
         const rawY = gridY - interaction.offsetY;
         const newStart = pixelsToDateTime(Math.max(0, rawY), weekDates[dayIdx]);
-        const duration =
-          new Date(interaction.appointment.end).getTime() -
-          new Date(interaction.appointment.start).getTime();
+        const duration = durationMs(
+          interaction.appointment.startUtc,
+          interaction.appointment.endUtc
+        );
         const newEnd = new Date(newStart.getTime() + duration);
         setInteraction((prev) =>
           prev
@@ -184,14 +187,12 @@ export default function CalendarGrid({
 
       if (interaction.type === "resize") {
         const apptDay =
-          weekDates.find((d) => isSameDay(d, new Date(interaction.appointment.start))) ??
+          weekDates.find((d) => isInstantOnDay(interaction.appointment.startUtc, d)) ??
           weekDates[0];
         const gridY = getGridY(e.clientY);
         const newEnd = pixelsToDateTime(Math.max(0, gridY), apptDay);
-        const minEnd = new Date(
-          new Date(interaction.appointment.start).getTime() + 15 * 60_000
-        );
-        if (newEnd > minEnd) {
+        const minEndIso = addMinutesToInstant(interaction.appointment.startUtc, 15);
+        if (compareInstants(newEnd.toISOString(), minEndIso) > 0) {
           setInteraction((prev) =>
             prev ? { ...prev, previewEnd: newEnd.toISOString() } : null
           );
@@ -208,10 +209,12 @@ export default function CalendarGrid({
       pendingRef.current = null;
       if (!interaction) return;
       columnsRef.current?.releasePointerCapture(e.pointerId);
+      // Spec Part 10: drag/resize moves the absolute UTC instant. Appointment
+      // timezone is preserved; viewer wall-clock label recomputes from UTC.
       onUpdateAppointment({
         ...interaction.appointment,
-        start: interaction.previewStart,
-        end: interaction.previewEnd,
+        startUtc: interaction.previewStart,
+        endUtc: interaction.previewEnd,
       });
       setInteraction(null);
     },

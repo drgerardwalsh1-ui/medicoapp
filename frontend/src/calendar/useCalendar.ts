@@ -10,7 +10,14 @@ import {
   getWeekStart,
   getWeekDates,
   isSameDay,
+  addDays,
+  plainDateOfInstant,
 } from "./calendarUtils";
+import {
+  endUtcFromDuration,
+  getViewerTimeZone,
+  TimeService,
+} from "../time";
 
 export type { CalendarEvent as AppointmentWithClient };
 
@@ -23,48 +30,43 @@ export function useCalendar(
   const weekDates = useMemo(() => getWeekDates(weekStart), [weekStart]);
 
   const allAppointments = useMemo<CalendarEvent[]>(
-    () => {
-      console.log("[calendar] clients", clients);
-      return clients.flatMap((c) => mapClientToCalendarEvents(c));
-    },
+    () => clients.flatMap((c) => mapClientToCalendarEvents(c)),
     [clients]
   );
 
-  const weekAppointments = useMemo<CalendarEvent[]>(
-    () =>
-      allAppointments.filter((a) =>
-        weekDates.some((d) => isSameDay(d, new Date(a.start)))
-      ),
-    [allAppointments, weekDates]
-  );
-
+  // Bucket appointments into day columns using viewer-tz wall-clock dates,
+  // not raw UTC slicing (spec Part 9.1).
   const appointmentsByDay = useMemo(() => {
     const map: Record<number, CalendarEvent[]> = {};
+    const dayKeys = weekDates.map((d) =>
+      [
+        d.getFullYear(),
+        String(d.getMonth() + 1).padStart(2, "0"),
+        String(d.getDate()).padStart(2, "0"),
+      ].join("-")
+    );
     for (let i = 0; i < 7; i++) map[i] = [];
-    weekAppointments.forEach((a) => {
-      weekDates.forEach((d, i) => {
-        if (isSameDay(d, new Date(a.start))) map[i].push(a);
-      });
+    allAppointments.forEach((a) => {
+      const apptDay = plainDateOfInstant(a.startUtc);
+      const idx = dayKeys.indexOf(apptDay);
+      if (idx >= 0) map[idx].push(a);
     });
     return map;
-  }, [weekAppointments, weekDates]);
+  }, [allAppointments, weekDates]);
+
+  const weekAppointments = useMemo<CalendarEvent[]>(
+    () => Object.values(appointmentsByDay).flat(),
+    [appointmentsByDay]
+  );
 
   // ── Navigation ────────────────────────────────────────────────────────────
 
   function prevWeek() {
-    setWeekStart((w) => {
-      const d = new Date(w);
-      d.setDate(d.getDate() - 7);
-      return d;
-    });
+    setWeekStart((w) => addDays(w, -7));
   }
 
   function nextWeek() {
-    setWeekStart((w) => {
-      const d = new Date(w);
-      d.setDate(d.getDate() + 7);
-      return d;
-    });
+    setWeekStart((w) => addDays(w, 7));
   }
 
   function goToToday() {
@@ -89,7 +91,6 @@ export function useCalendar(
         assessmentChecklist: client.assessmentChecklist,
         report: client.report,
       };
-      console.log("[calendar] saving client", client.id, "with", appointments.length, "appointments");
       try {
         await TauriAPI.updateClientDemographics(client.id, blob);
       } catch (err) {
@@ -104,25 +105,30 @@ export function useCalendar(
     clientId: string,
     start: Date,
     end: Date,
-    type: Appointment["type"] = "assessment"
+    type: Appointment["type"] = "assessment",
+    appointmentTimeZone: string = getViewerTimeZone()
   ) {
     const client = clients.find((c) => c.id === clientId);
     if (!client) return;
     const appt: Appointment = {
       id: crypto.randomUUID(),
-      start: start.toISOString(),
-      end: end.toISOString(),
       type,
+      startUtc: start.toISOString(),
+      endUtc: end.toISOString(),
+      appointmentTimeZone,
     };
     await persistClientAppointments(client, [...client.appointments, appt]);
   }
 
+  // Spec Part 10: drag/resize moves the absolute UTC instant. Appointment
+  // timezone metadata is preserved; wall-clock labels recompute from the
+  // new UTC value.
   const updateAppointment = useCallback(
     async (updated: CalendarEvent) => {
       const client = updated.client;
-      const { client: _client, ...appt } = updated;
+      const { client: _client, ...next } = updated;
       const newList = client.appointments.map((a) =>
-        a.id === appt.id ? appt : a
+        a.id === next.id ? next : a
       );
       await persistClientAppointments(client, newList);
     },
@@ -136,6 +142,13 @@ export function useCalendar(
     await persistClientAppointments(client, newList);
   }
 
+  // Convenience for callers that change duration without touching start —
+  // delegates to TimeService so duration logic stays centralized.
+  function withNewDuration(appt: Appointment, minutes: number): Appointment {
+    const endUtc = endUtcFromDuration(appt.startUtc, minutes);
+    return { ...appt, endUtc };
+  }
+
   return {
     weekStart,
     weekDates,
@@ -147,5 +160,8 @@ export function useCalendar(
     createAppointment,
     updateAppointment,
     deleteAppointment,
+    withNewDuration,
+    isSameDay,
+    timeService: TimeService,
   };
 }

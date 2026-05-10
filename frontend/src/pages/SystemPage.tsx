@@ -1,5 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { TauriAPI, isTauri } from "../api/tauriApi";
+import { getViewerTimeZone } from "../time";
+import { Temporal } from "@js-temporal/polyfill";
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 
@@ -773,10 +779,10 @@ function DebugTools() {
   const [log, setLog] = useState<string[]>([]);
 
   function addLog(msg: string) {
-    setLog((prev) => [
-      `[${new Date().toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}] ${msg}`,
-      ...prev.slice(0, 49),
-    ]);
+    // 24-hour HH:MM:SS in viewer-tz — locale-independent (spec Part 9.7).
+    const z = Temporal.Now.zonedDateTimeISO(getViewerTimeZone());
+    const stamp = `${pad2(z.hour)}:${pad2(z.minute)}:${pad2(z.second)}`;
+    setLog((prev) => [`[${stamp}] ${msg}`, ...prev.slice(0, 49)]);
   }
 
   async function handleValidate() {

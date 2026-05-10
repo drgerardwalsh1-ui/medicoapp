@@ -8,6 +8,7 @@ import {
   appointmentTopPx,
   appointmentHeightPx,
 } from "./calendarUtils";
+import { formatAppointmentTime } from "../time";
 
 interface Props {
   appointment: AppointmentWithClient;
@@ -28,8 +29,8 @@ const AppointmentBlock = memo(function AppointmentBlock({
   endOverride,
   isGhost,
 }: Props) {
-  const effectiveStart = startOverride ?? appointment.start;
-  const effectiveEnd = endOverride ?? appointment.end;
+  const effectiveStart = startOverride ?? appointment.startUtc;
+  const effectiveEnd = endOverride ?? appointment.endUtc;
   const status = getClientStatus(appointment.client);
   const style = statusStyle(status);
   const top = appointmentTopPx(effectiveStart);
@@ -37,6 +38,12 @@ const AppointmentBlock = memo(function AppointmentBlock({
   const isShort = height < 38;
   const hasMissingDocs = status === "missing";
   const label = formatFullName(appointment.client?.identity) || "Unknown";
+
+  // Spec Part 9.5/9.6: secondary tz label appears only when the appointment
+  // tz offset differs from the viewer tz at this instant.
+  const startLabel = formatAppointmentTime(effectiveStart, appointment.appointmentTimeZone);
+  const endLabel = formatAppointmentTime(effectiveEnd, appointment.appointmentTimeZone);
+  const showSecondary = startLabel.secondary !== null;
 
   return (
     <div
@@ -69,6 +76,7 @@ const AppointmentBlock = memo(function AppointmentBlock({
       title={[
         label,
         `${formatTime(effectiveStart)} – ${formatTime(effectiveEnd)}`,
+        showSecondary ? `(${startLabel.secondary} – ${endLabel.secondary})` : "",
         hasMissingDocs ? "⚠ Documents not uploaded" : "",
       ]
         .filter(Boolean)
@@ -95,7 +103,12 @@ const AppointmentBlock = memo(function AppointmentBlock({
             <div className="text-xs opacity-80 leading-tight">
               {formatTime(effectiveStart)}–{formatTime(effectiveEnd)}
             </div>
-            {appointment.type && height >= 56 && (
+            {showSecondary && height >= 56 && (
+              <div className="text-[10px] opacity-70 leading-tight">
+                ({startLabel.secondary})
+              </div>
+            )}
+            {appointment.type && height >= 56 && !showSecondary && (
               <div className="text-xs opacity-70 capitalize leading-tight mt-0.5">
                 {appointment.type}
               </div>
