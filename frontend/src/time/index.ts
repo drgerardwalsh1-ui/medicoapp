@@ -7,6 +7,8 @@ export type {
   AlertKind,
   WorkSession,
   WorkSessionType,
+  WorkTimelineEvent,
+  WorkTimelineEventType,
   ViewerTimeZone,
   AppointmentTimeZone,
   UUID,
@@ -24,6 +26,7 @@ export {
   getViewerTimeZone,
   setViewerTimeZoneOverride,
   offsetMinutesAt,
+  tzAbbreviation,
 } from "./zones";
 
 export type { TimeZoneOption } from "./zones";
@@ -85,4 +88,26 @@ export {
   totalMinutes,
 } from "./workSession";
 
+export {
+  newTimelineEvent,
+  appendEvent,
+  updateEvent,
+  deleteEvent,
+  splitEvent,
+  validateEvent,
+  todayEventsInViewerTz,
+  fromWorkSession,
+  activeEvent,
+  isPaused,
+  pauseEvent,
+  resumeEvent,
+  stopEvent,
+  activeWorkMs,
+  defaultTitleForType,
+  totalMinutes as totalTimelineMinutes,
+} from "./workTimeline";
+
+export type { ValidationResult } from "./workTimeline";
+
 export { default as TimerBar } from "./TimerBar";
+export type { TimerBarProps } from "./TimerBar";

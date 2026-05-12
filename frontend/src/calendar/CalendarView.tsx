@@ -9,6 +9,8 @@ import {
 import {
   TIMEZONE_OPTIONS,
   getViewerTimeZone,
+  useViewerTimeZone,
+  tzAbbreviation,
   TimeService,
   formatDateISO,
   formatTime24,
@@ -227,6 +229,12 @@ export default function CalendarView({
     updateAppointment,
   } = useCalendar(clients, onUpdateClient);
 
+  const viewerTz = useViewerTimeZone();
+  // Short city/region label from our curated list; fall back to the raw IANA id.
+  const tzOption = TIMEZONE_OPTIONS.find((o) => o.id === viewerTz);
+  const tzLabel = tzOption ? tzOption.label : viewerTz;
+  const tzAbbr = tzAbbreviation(viewerTz);
+
   const [newApptModal, setNewApptModal] = useState<{ start: Date } | null>(null);
 
   const weekEnd = useMemo(() => {
@@ -321,8 +329,35 @@ export default function CalendarView({
           </span>
         )}
 
+        {/* Viewer timezone indicator */}
+        <div
+          className="ml-auto flex items-center gap-1 text-xs text-slate-500 tabular-nums"
+          title={viewerTz}
+        >
+          <svg
+            className="w-3.5 h-3.5 text-slate-400 shrink-0"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.8}
+              d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2zm0 0c-2.5 0-4.5 5-4.5 10s2 10 4.5 10m0-20c2.5 0 4.5 5 4.5 10s-2 10-4.5 10M2 12h20"
+            />
+          </svg>
+          <span className="font-medium text-slate-600">{tzLabel}</span>
+          {tzAbbr && (
+            <span className="px-1 py-0.5 rounded bg-slate-100 text-slate-500 font-mono text-[10px] leading-none">
+              {tzAbbr}
+            </span>
+          )}
+        </div>
+
         {/* Legend */}
-        <div className="ml-auto flex items-center gap-3 text-xs text-slate-500">
+        <div className="flex items-center gap-3 text-xs text-slate-500">
           <span className="flex items-center gap-1.5">
             <span className="inline-block w-2.5 h-2.5 rounded-sm bg-emerald-500" />
             Complete

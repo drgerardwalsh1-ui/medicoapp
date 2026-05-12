@@ -112,6 +112,21 @@ export function isValidTimeZone(id: string): boolean {
   }
 }
 
+// DST abbreviation for a timezone at the current instant (or a given UTC ISO).
+// Returns e.g. "AEDT", "AEST", "UTC+8", "GMT+5:30".
+export function tzAbbreviation(tz: string, instantIso?: string): string {
+  const date = instantIso ? new Date(instantIso) : new Date();
+  try {
+    const parts = new Intl.DateTimeFormat("en-AU", {
+      timeZone: tz,
+      timeZoneName: "short",
+    }).formatToParts(date);
+    return parts.find((p) => p.type === "timeZoneName")?.value ?? "";
+  } catch {
+    return "";
+  }
+}
+
 // Offset of `tz` relative to viewer-tz at a given instant, in minutes.
 // Positive => `tz` is ahead of viewer.
 export function offsetMinutesAt(

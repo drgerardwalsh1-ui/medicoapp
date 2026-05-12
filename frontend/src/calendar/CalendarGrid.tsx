@@ -44,6 +44,11 @@ export default function CalendarGrid({
 
   const [interaction, setInteraction] = useState<Interaction | null>(null);
 
+  // Set to true when a drag/resize commits so the subsequent synthetic `click`
+  // event (which the browser fires on the original pointerdown target even
+  // after pointer capture) does NOT trigger navigation.
+  const didInteractRef = useRef(false);
+
   // Pending: pointer down on an appointment body, not yet dragging
   const pendingRef = useRef<{
     appointment: AppointmentWithClient;
@@ -211,6 +216,10 @@ export default function CalendarGrid({
       columnsRef.current?.releasePointerCapture(e.pointerId);
       // Spec Part 10: drag/resize moves the absolute UTC instant. Appointment
       // timezone is preserved; viewer wall-clock label recomputes from UTC.
+      // Flag that an interaction just committed so the following synthetic click
+      // (browser fires it on the original pointerdown target after capture
+      // release) is suppressed in handleNavigate.
+      didInteractRef.current = true;
       onUpdateAppointment({
         ...interaction.appointment,
         startUtc: interaction.previewStart,
@@ -219,6 +228,21 @@ export default function CalendarGrid({
       setInteraction(null);
     },
     [interaction, onUpdateAppointment]
+  );
+
+  // ── Navigation wrapper: suppress click-after-drag ─────────────────────────
+  // After a drag or resize the browser synthesises a `click` on the element
+  // that received the original `pointerdown`. We intercept that click here
+  // (not in AppointmentBlock) so the component stays unaware of drag state.
+  const handleNavigate = useCallback(
+    (clientId: string) => {
+      if (didInteractRef.current) {
+        didInteractRef.current = false;
+        return;
+      }
+      onNavigate(clientId);
+    },
+    [onNavigate]
   );
 
   const handlePointerCancel = useCallback(() => {
@@ -390,7 +414,7 @@ export default function CalendarGrid({
                   <div key={appt.id} data-appt="true">
                     <AppointmentBlock
                       appointment={appt}
-                      onNavigate={onNavigate}
+                      onNavigate={handleNavigate}
                       onBodyPointerDown={handleAppointmentBodyDown}
                       onResizeStart={handleResizeStart}
                       endOverride={
