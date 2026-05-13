@@ -145,3 +145,106 @@
     }
   }
 }
+
+/* ---------------------------
+   🖨 Work Timeline print
+   Spec Part 8, Part 21. Triggered by the Print button on
+   WorkTimelinePage:
+     1. Mount <PrintView/> via createPortal directly to document.body
+        (outside #root, so the flex/h-screen/overflow chain that
+        normally clips body content is not in the print chain).
+     2. Add body.printing-timeline class.
+     3. Call window.print() (after a double-rAF for layout flush).
+   On afterprint, both the portal and the body class are torn down.
+
+   The portal approach is what makes Tauri's WKWebView (which clips
+   to overflow:auto containers during print) actually emit the
+   timeline content. Earlier @media-print-only attempts produced an
+   empty print preview because the print block was a descendant of
+   <main class="overflow-auto">.
+---------------------------- */
+
+.timeline-print {
+  /* Hidden in screen mode at all times. Visibility is granted only by
+     the @media print rule below — and only when body.printing-timeline
+     is set. */
+  display: none;
+}
+
+.timeline-print h1 {
+  font-size: 22pt;
+  font-weight: 700;
+  margin: 0 0 4pt 0;
+  color: #0f172a;
+}
+.timeline-print h2 {
+  font-size: 13pt;
+  font-weight: 600;
+  margin: 16pt 0 6pt 0;
+  color: #0f172a;
+}
+.timeline-print p {
+  margin: 0;
+  font-size: 10pt;
+  color: #334155;
+}
+.timeline-print .timeline-print-header {
+  border-bottom: 1px solid #cbd5e1;
+  padding-bottom: 8pt;
+  margin-bottom: 8pt;
+}
+.timeline-print .timeline-print-day {
+  break-inside: avoid;
+  page-break-inside: avoid;
+  margin-bottom: 12pt;
+}
+.timeline-print table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10pt;
+}
+.timeline-print th,
+.timeline-print td {
+  text-align: left;
+  vertical-align: top;
+  padding: 4pt 6pt;
+  border-bottom: 1px solid #e2e8f0;
+}
+.timeline-print thead th {
+  border-bottom: 1px solid #94a3b8;
+  font-weight: 600;
+  color: #475569;
+}
+.timeline-print tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+.timeline-print .timeline-print-empty {
+  font-style: italic;
+  color: #64748b;
+}
+
+@media print {
+  /* Reveal the portal-mounted print block. Hide everything else by
+     hiding #root entirely — there is nothing in the print chain
+     except the .timeline-print sibling. This avoids any need to
+     enumerate screen chrome class names. */
+  body.printing-timeline {
+    background: white !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  body.printing-timeline #root {
+    display: none !important;
+  }
+  body.printing-timeline > .timeline-print {
+    display: block !important;
+    padding: 12pt;
+    color: #0f172a;
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  /* Page margins. Keep them small — the timeline is its own header. */
+  @page {
+    margin: 12mm;
+  }
+}

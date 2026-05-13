@@ -1,5 +1,8 @@
 import type { PIRSTableModel } from "./types";
-import type { Appointment as CanonicalAppointment } from "../time";
+import type {
+  Appointment as CanonicalAppointment,
+  WorkTimelineEvent,
+} from "../time";
 import {
   ageNow,
   ageOnDate,
@@ -154,6 +157,9 @@ export type Client = {
   // DSM-5-TR diagnostic assessment engine data.
   // Symptoms are shared entities; criterion satisfaction is diagnosis-specific.
   dsmAssessment?: import("./dsm").DSMAssessmentData;
+  // Authoritative chronology of work performed on this case (spec Part 17).
+  // Single source of truth for timers, manual entries, and printable output.
+  workTimeline?: WorkTimelineEvent[];
   created_at: string;
   updated_at: string;
 };
@@ -233,6 +239,7 @@ export function defaultClient(): Client {
     appointments: [],
     report: defaultReport(),
     assessmentChecklist: defaultAssessmentChecklist(),
+    workTimeline: [],
     created_at: now,
     updated_at: now,
   };
@@ -353,6 +360,16 @@ export function parseClientBlob(id: string, raw: unknown): Client {
     dsmAssessment: (b.dsmAssessment && typeof b.dsmAssessment === "object")
       ? (b.dsmAssessment as import("./dsm").DSMAssessmentData)
       : undefined,
+    workTimeline: Array.isArray(b.workTimeline)
+      ? (b.workTimeline as WorkTimelineEvent[]).filter(
+          (e) =>
+            e &&
+            typeof e === "object" &&
+            typeof (e as Record<string, unknown>).id === "string" &&
+            typeof (e as Record<string, unknown>).type === "string" &&
+            typeof (e as Record<string, unknown>).startedAtUtc === "string"
+        )
+      : [],
     report: {
       fields: (rawReport.fields && typeof rawReport.fields === "object" ? rawReport.fields : {}) as Record<string, unknown>,
       pirsTables: Array.isArray(rawReport.pirsTables) ? (rawReport.pirsTables as PIRSTableModel[]) : [],

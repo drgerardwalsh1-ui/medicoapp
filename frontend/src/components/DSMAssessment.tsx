@@ -24,6 +24,8 @@ import type {
   DSMTimelineEvent,
   DiagnosticInterpretation,
   SymptomEntity,
+  SymptomSeverity,
+  EpisodeSeverity,
   CriterionAssessment,
   TriState,
 } from "../types/dsm";
@@ -616,18 +618,29 @@ function CriterionAccordion({
 
 // ── Right panel: Symptom Workspace ────────────────────────────────────────────
 
-const SEVERITY_OPTIONS = ["mild", "moderate", "moderate-severe", "severe"] as const;
+// Two distinct severity scales — see SymptomSeverity vs EpisodeSeverity in
+// types/dsm.ts. Conflating them was the cause of the long-standing
+// "moderate-severe" type error: episode severity has 4 levels; symptom
+// severity has 3.
+const SYMPTOM_SEVERITY_OPTIONS: ReadonlyArray<Exclude<SymptomSeverity, "">> = [
+  "mild", "moderate", "severe",
+];
+const EPISODE_SEVERITY_OPTIONS: ReadonlyArray<Exclude<EpisodeSeverity, "">> = [
+  "mild", "moderate", "moderate-severe", "severe",
+];
 
 function severityLabel(s: string): string {
   if (s === "moderate-severe") return "Moderate-severe";
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-// Auto-severity calculation based on met symptom count and diagnosis thresholds
+// Auto-severity calculation based on met symptom count and diagnosis
+// thresholds. Returns EpisodeSeverity — this is the *episode-level*
+// suggestion, not a symptom rating.
 function calcAutoSeverity(
   def: DSMDiagnosisDef,
   data: DSMAssessmentData
-): string {
+): EpisodeSeverity {
   const thresh = def.severityThresholds;
   if (!thresh) return "";
   const drivingCriterion = def.criteria.find((c) => c.id === thresh.criterionId);
@@ -738,11 +751,11 @@ export function SymptomWorkspace({
           </div>
         </div>
 
-        {/* Symptom-level severity */}
+        {/* Symptom-level severity (3-level — DSM clinical-interview rating) */}
         <div>
           <label className="label text-xs">Symptom severity</label>
           <div className="flex gap-1.5 flex-wrap">
-            {SEVERITY_OPTIONS.map((s) => {
+            {SYMPTOM_SEVERITY_OPTIONS.map((s) => {
               const active = entity.severity === s;
               const hasVal = !!entity.severity;
               return (
@@ -1212,7 +1225,7 @@ function DiagnosticInterpretationPanel({
               )}
             </div>
             <div className="flex gap-1.5 flex-wrap">
-              {SEVERITY_OPTIONS.map((s) => {
+              {EPISODE_SEVERITY_OPTIONS.map((s) => {
                 const active = effectiveSeverity === s;
                 const isAuto = autoSeverity === s && !interp?.severityOverridden;
                 return (
@@ -1226,7 +1239,7 @@ function DiagnosticInterpretationPanel({
                       if (active) {
                         onUpdate({ severity: "", severityOverridden: true });
                       } else {
-                        onUpdate({ severity: s as DiagnosticInterpretation["severity"], severityOverridden: true });
+                        onUpdate({ severity: s, severityOverridden: true });
                       }
                     }}
                   />

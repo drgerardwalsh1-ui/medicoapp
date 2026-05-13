@@ -1,12 +1,12 @@
 /**
  * Layout wrapper that puts a global Sidebar on the left and a contextual
- * TopBar above the page content. It WRAPS the existing pages — they keep
- * their own internal layouts and headers.
+ * TopBar above the page content. Owns ONLY the truly application-wide
+ * chrome: sidebar, top bar, and the appointment-overrun alert.
  *
- * Also: subscribes to the viewer's IANA timezone (spec Part 6) and renders
- * the global appointment-overrun banner above the main content (spec Part
- * 11). The banner is non-blocking — never modal — and clears when the
- * imminent-appointment window passes.
+ * The TimerBar lives in ClientLayout, NOT here — timers are client-scoped
+ * lifecycle state. Mounting the TimerBar at the AppLayout level would
+ * imply the timer outlives the client context (it doesn't, per the
+ * exclusive-context invariant in main.tsx#switchActiveClient).
  */
 
 import Sidebar from "./Sidebar";
@@ -15,7 +15,6 @@ import {
   useViewerTimeZone,
   useAppointmentAlerts,
   alertMessage,
-  TimerBar,
   type Appointment,
 } from "../time";
 
@@ -44,12 +43,11 @@ export default function AppLayout({
       <Sidebar currentView={currentView} setView={setView} />
       <div className="flex-1 flex flex-col min-w-0">
         <TopBar {...topBarProps} />
-        <TimerBar />
         {alert && (
           <div
             role="status"
             className={[
-              "px-4 py-2 text-sm border-b shrink-0",
+              "alert-bar px-4 py-2 text-sm border-b shrink-0",
               alert.kind === "overrun"
                 ? "bg-rose-50 border-rose-200 text-rose-800"
                 : alert.kind === "pre5"

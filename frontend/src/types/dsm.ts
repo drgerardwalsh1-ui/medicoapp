@@ -11,6 +11,25 @@
 
 export type TriState = "unknown" | "met" | "not_met";
 
+// ── Severity ───────────────────────────────────────────────────────────────
+// Two distinct authoritative severity scales — DSM-5-TR uses different
+// scales at different layers and conflating them causes string drift.
+//
+//   - SymptomSeverity (3 levels) is the standard clinical-interview rating
+//     for an INDIVIDUAL SYMPTOM (mild / moderate / severe). DSM-5-TR symptom
+//     descriptors don't recognise an intermediate "moderate-severe" rung.
+//
+//   - EpisodeSeverity (4 levels) is the per-episode severity specifier used
+//     by several DSM-5-TR diagnoses (MDD, anxiety disorders, OCD, etc.) and
+//     produced by `severityThresholds`-driven auto-calculation. The
+//     "moderate-severe" rung exists at this layer.
+//
+// Empty string ("") means "not yet rated". Both unions allow it explicitly
+// so optional severity can be cleared without becoming undefined (which
+// would round-trip differently through JSON).
+export type SymptomSeverity = "mild" | "moderate" | "severe" | "";
+export type EpisodeSeverity = "mild" | "moderate" | "moderate-severe" | "severe" | "";
+
 // ── Shared Symptom Entity ─────────────────────────────────────────────────────
 // One entity per symptom type, shared across all diagnoses that reference it.
 // Updating this entity updates evidence for every diagnosis that uses it.
@@ -22,7 +41,7 @@ export type SymptomEntity = {
 
   // ── Current state ──────────────────────────────────────────────────────────
   currentPresence?: boolean;
-  severity?: "mild" | "moderate" | "severe" | "";
+  severity?: SymptomSeverity;
 
   // ── Frequency / Duration ──────────────────────────────────────────────────
   frequencyCount?: string;
@@ -107,8 +126,10 @@ export type DiagnosticInterpretation = {
   interpretation?: string;
   differentials?: string[];
   notes?: string;
-  // Severity — auto-suggested from symptom count; clinician can override
-  severity?: "mild" | "moderate" | "moderate-severe" | "severe" | "";
+  // Severity — auto-suggested from symptom count; clinician can override.
+  // Uses EpisodeSeverity (4-level) — see SymptomSeverity vs EpisodeSeverity
+  // comment at the top of this file.
+  severity?: EpisodeSeverity;
   severityOverridden?: boolean;
   // Specifier chips — multi-select, diagnosis-specific
   specifiers?: string[];
