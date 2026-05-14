@@ -297,8 +297,8 @@ function DiagnosisNavigator({
           </div>
         );
       })}
-      <div className="px-3 mt-6 text-[10px] text-slate-400 italic">
-        More diagnoses coming soon.
+      <div className="px-3 mt-4 text-[10px] text-slate-400 italic">
+        Mood · Trauma · Substance-Related Disorders
       </div>
     </div>
   );
@@ -637,6 +637,12 @@ function severityLabel(s: string): string {
 // Auto-severity calculation based on met symptom count and diagnosis
 // thresholds. Returns EpisodeSeverity — this is the *episode-level*
 // suggestion, not a symptom rating.
+//
+// Two severity models are supported:
+//   • Four-level (MDD/PDD): mild → moderate → moderate-severe → severe
+//     uses thresh.moderateSevere + optional agitationSymptomEntityId
+//   • Three-level (SUDs): mild (2–3) → moderate (4–5) → severe (6+)
+//     uses thresh.severe directly; no "moderate-severe" rung
 function calcAutoSeverity(
   def: DSMDiagnosisDef,
   data: DSMAssessmentData
@@ -650,6 +656,16 @@ function calcAutoSeverity(
     return a?.status === "met";
   }).length;
   if (metCount < thresh.mild) return "";
+
+  // Three-level SUD path: severe threshold present, no moderateSevere rung
+  if (thresh.severe !== undefined && thresh.moderateSevere === undefined) {
+    if (metCount >= thresh.severe) return "severe";
+    if (metCount >= thresh.moderate) return "moderate";
+    return "mild";
+  }
+
+  // Four-level path (MDD/PDD)
+  const modSevere = thresh.moderateSevere ?? Infinity;
   const agitationMet = thresh.agitationSymptomEntityId
     ? (() => {
         const agitSymDef = drivingCriterion.symptoms!.find(
@@ -660,8 +676,8 @@ function calcAutoSeverity(
         return a?.status === "met";
       })()
     : false;
-  if (agitationMet && metCount >= thresh.moderateSevere) return "severe";
-  if (metCount >= thresh.moderateSevere) return "moderate-severe";
+  if (agitationMet && metCount >= modSevere) return "severe";
+  if (metCount >= modSevere) return "moderate-severe";
   if (metCount >= thresh.moderate) return "moderate";
   return "mild";
 }
@@ -732,6 +748,63 @@ export function SymptomWorkspace({
       </div>
 
       <div className="px-4 py-3 space-y-4">
+
+        {/* ── Substance-specific fields (shown when captureHints includes "substanceQuantity") ── */}
+        {def.captureHints?.includes("substanceQuantity") && (
+          <>
+            <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 space-y-3">
+              <p className="text-[10px] font-semibold text-amber-700 uppercase tracking-wider">
+                Substance Use Details
+              </p>
+
+              {/* Quantity */}
+              <div>
+                <label className="label text-xs">Substance quantity</label>
+                <input
+                  type="text"
+                  className="input text-xs py-1.5"
+                  value={entity.substanceQuantity ?? ""}
+                  onChange={(e) => onUpdate({ substanceQuantity: e.target.value })}
+                  placeholder="e.g. 3 drinks/day · 1g/day · 2 pills/day"
+                />
+              </div>
+
+              {/* Change over time */}
+              <div>
+                <label className="label text-xs">Change over time</label>
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {(["Increasing", "Decreasing", "Fluctuating", "Binge pattern", "Stable"] as const).map((opt) => {
+                    const active = entity.substanceChangeOverTime?.includes(opt) ?? false;
+                    return (
+                      <Chip
+                        key={opt}
+                        label={opt}
+                        active={active}
+                        variant="amber"
+                        onClick={() => {
+                          const current = entity.substanceChangeOverTime ?? [];
+                          onUpdate({
+                            substanceChangeOverTime: active
+                              ? current.filter((v) => v !== opt)
+                              : [...current, opt],
+                          });
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+                <textarea
+                  className="input text-xs py-1.5 min-h-[50px] resize-none"
+                  value={entity.substanceChangeNotes ?? ""}
+                  onChange={(e) => onUpdate({ substanceChangeNotes: e.target.value })}
+                  placeholder="Notes on pattern — triggers, escalation, binge cycles…"
+                />
+              </div>
+            </div>
+            <hr className="border-slate-100" />
+          </>
+        )}
+
         {/* Current presence + severity */}
         <div>
           <label className="label text-xs">Current presence</label>

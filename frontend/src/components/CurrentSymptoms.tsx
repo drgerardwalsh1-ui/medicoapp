@@ -8,10 +8,10 @@
 // Changes here propagate to DSM Assessment automatically.
 // Changes in DSM Assessment propagate here automatically.
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { SymptomWorkspace } from "./DSMAssessment";
 import { SYMPTOM_DOMAINS, getDsmRefsForEntity } from "../data/symptomDomains";
-import type { SymptomDomain } from "../data/symptomDomains";
+import type { SymptomDomain, SymptomDomainSection } from "../data/symptomDomains";
 import type {
   DSMAssessmentData,
   DSMTimelineEvent,
@@ -243,6 +243,63 @@ function DomainNavigator({
   );
 }
 
+// ── Section header with optional editable label ───────────────────────────────
+
+function SectionHeader({
+  section,
+  leadEntity,
+  onLabelChange,
+}: {
+  section: SymptomDomainSection;
+  leadEntity: SymptomEntity | undefined;
+  onLabelChange: (newLabel: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const displayLabel = leadEntity?.customLabel || section.label;
+
+  function startEdit() {
+    setEditing(true);
+    setTimeout(() => inputRef.current?.select(), 0);
+  }
+
+  function commitEdit(val: string) {
+    setEditing(false);
+    if (val.trim()) onLabelChange(val.trim());
+  }
+
+  return (
+    <div className="flex items-center gap-2 px-4 py-1.5 bg-slate-100 border-b border-slate-200 mt-1 first:mt-0">
+      {editing ? (
+        <input
+          ref={inputRef}
+          type="text"
+          defaultValue={displayLabel}
+          className="text-xs font-semibold text-slate-700 bg-transparent border-b border-violet-400 outline-none flex-1"
+          onBlur={(e) => commitEdit(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commitEdit(e.currentTarget.value);
+            if (e.key === "Escape") setEditing(false);
+          }}
+          autoFocus
+        />
+      ) : (
+        <span className="text-xs font-semibold text-slate-600 flex-1">{displayLabel}</span>
+      )}
+      {section.editableLabel && !editing && (
+        <button
+          type="button"
+          title="Rename this section"
+          onClick={startEdit}
+          className="text-[10px] text-slate-400 hover:text-violet-600 transition shrink-0 px-1"
+        >
+          ✎
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── Middle panel: Symptom List ────────────────────────────────────────────────
 
 function SymptomList({
@@ -251,19 +308,40 @@ function SymptomList({
   selectedEntityId,
   onSelect,
   onPresenceToggle,
+  onSectionLabelChange,
 }: {
   domain: SymptomDomain;
   symptoms: Record<string, SymptomEntity>;
   selectedEntityId: string | null;
   onSelect: (entityId: string | null) => void;
   onPresenceToggle: (entityId: string, symptomType: string) => void;
+  onSectionLabelChange: (leadEntityId: string, newLabel: string) => void;
 }) {
-  const present  = domain.symptoms.filter((s) => symptoms[s.symptomEntityId]?.currentPresence === true);
-  const absent   = domain.symptoms.filter((s) => symptoms[s.symptomEntityId]?.currentPresence === false);
-  const unknown  = domain.symptoms.filter((s) => symptoms[s.symptomEntityId]?.currentPresence === undefined);
+  const totalPresent = domain.symptoms.filter((s) => symptoms[s.symptomEntityId]?.currentPresence === true).length;
+  const totalAbsent  = domain.symptoms.filter((s) => symptoms[s.symptomEntityId]?.currentPresence === false).length;
+  const totalUnknown = domain.symptoms.filter((s) => symptoms[s.symptomEntityId]?.currentPresence === undefined).length;
 
-  // Render in order: unknown first (not yet asked), then present, then absent
-  const ordered = [...unknown, ...present, ...absent];
+  // If domain has sections, render with section headers (no reordering within sections)
+  // If no sections, render in unknown→present→absent order
+  const renderWithSections = !!domain.sections?.length;
+
+  function renderRows(syms: typeof domain.symptoms) {
+    return syms.map((symDef) => {
+      const entity = symptoms[symDef.symptomEntityId];
+      return (
+        <SymptomListRow
+          key={symDef.symptomEntityId}
+          def={symDef}
+          entity={entity}
+          isSelected={selectedEntityId === symDef.symptomEntityId}
+          onSelect={() =>
+            onSelect(selectedEntityId === symDef.symptomEntityId ? null : symDef.symptomEntityId)
+          }
+          onPresenceToggle={() => onPresenceToggle(symDef.symptomEntityId, symDef.label)}
+        />
+      );
+    });
+  }
 
   return (
     <div className="h-full overflow-y-auto">
@@ -271,42 +349,44 @@ function SymptomList({
       <div className="sticky top-0 bg-white border-b border-slate-200 px-4 py-3 z-10">
         <h2 className="text-base font-semibold text-slate-900">{domain.label}</h2>
         <div className="flex gap-3 mt-1 text-[11px] text-slate-500">
-          <span>
-            <span className="text-emerald-600 font-semibold">{present.length}</span> present
-          </span>
-          <span>
-            <span className="text-red-500 font-semibold">{absent.length}</span> absent
-          </span>
-          <span>
-            <span className="text-slate-400 font-semibold">{unknown.length}</span> not yet asked
-          </span>
+          <span><span className="text-emerald-600 font-semibold">{totalPresent}</span> present</span>
+          <span><span className="text-red-500 font-semibold">{totalAbsent}</span> absent</span>
+          <span><span className="text-slate-400 font-semibold">{totalUnknown}</span> not yet asked</span>
         </div>
       </div>
 
-      {/* Symptom rows */}
-      <div>
-        {ordered.map((symDef) => {
-          const entity = symptoms[symDef.symptomEntityId];
-          return (
-            <SymptomListRow
-              key={symDef.symptomEntityId}
-              def={symDef}
-              entity={entity}
-              isSelected={selectedEntityId === symDef.symptomEntityId}
-              onSelect={() =>
-                onSelect(
-                  selectedEntityId === symDef.symptomEntityId
-                    ? null
-                    : symDef.symptomEntityId
-                )
-              }
-              onPresenceToggle={() =>
-                onPresenceToggle(symDef.symptomEntityId, symDef.label)
-              }
-            />
-          );
-        })}
-      </div>
+      {renderWithSections ? (
+        /* Sectioned rendering: Alcohol / Cannabis / Opioids / etc. */
+        <div>
+          {domain.sections!.map((section) => {
+            const sectionSyms = domain.symptoms.filter((s) =>
+              section.symptomEntityIds.includes(s.symptomEntityId)
+            );
+            const leadEntityId = section.symptomEntityIds[0];
+            const leadEntity = leadEntityId ? symptoms[leadEntityId] : undefined;
+
+            return (
+              <div key={section.id}>
+                <SectionHeader
+                  section={section}
+                  leadEntity={leadEntity}
+                  onLabelChange={(label) => onSectionLabelChange(leadEntityId, label)}
+                />
+                {renderRows(sectionSyms)}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        /* Flat rendering: unknown first, then present, then absent */
+        <div>
+          {renderRows([
+            ...domain.symptoms.filter((s) => symptoms[s.symptomEntityId]?.currentPresence === undefined),
+            ...domain.symptoms.filter((s) => symptoms[s.symptomEntityId]?.currentPresence === true),
+            ...domain.symptoms.filter((s) => symptoms[s.symptomEntityId]?.currentPresence === false),
+          ])}
+        </div>
+      )}
 
       {/* DSM mapping legend */}
       <div className="px-4 py-3 border-t border-slate-100 mt-2">
@@ -364,6 +444,27 @@ export default function CurrentSymptoms({
       updateSymptom(entityId, symptomType, { currentPresence: next });
     },
     [data.symptoms, updateSymptom]
+  );
+
+  // Store a custom section label on the lead entity of an editable section
+  const handleSectionLabelChange = useCallback(
+    (leadEntityId: string, newLabel: string) => {
+      const existing = data.symptoms[leadEntityId];
+      const symptomType = existing?.symptomType ?? newLabel;
+      onChange({
+        ...data,
+        symptoms: {
+          ...data.symptoms,
+          [leadEntityId]: {
+            id: leadEntityId,
+            symptomType,
+            ...(existing ?? {}),
+            customLabel: newLabel,
+          },
+        },
+      });
+    },
+    [data, onChange]
   );
 
   const handleAddTimelineEvent = useCallback(
@@ -426,6 +527,7 @@ export default function CurrentSymptoms({
               selectedEntityId={selectedEntityId}
               onSelect={setSelectedEntityId}
               onPresenceToggle={handlePresenceToggle}
+              onSectionLabelChange={handleSectionLabelChange}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-sm text-slate-400">

@@ -76,6 +76,15 @@ export type SymptomEntity = {
   // ── Timeline linkage ───────────────────────────────────────────────────────
   timelineEventIds?: string[];
 
+  // ── Substance use fields ───────────────────────────────────────────────────
+  // Shown when def.captureHints includes "substanceQuantity".
+  substanceQuantity?: string;       // e.g. "3 drinks/day", "1g/day"
+  substanceChangeOverTime?: string[]; // chips: increasing / decreasing / etc.
+  substanceChangeNotes?: string;
+
+  // ── Editable label (for "Other Substance Use" section header etc.) ────────
+  customLabel?: string;
+
   // ── Symptom-specific structured data ──────────────────────────────────────
   // Used for symptom types with specialised fields (e.g. suicide risk, sleep).
   extra?: Record<string, unknown>;
@@ -154,6 +163,7 @@ export type DSMSymptomDef = {
   prompts: string[];
   isMandatoryAnchor?: boolean;
   captureHints?: string[];  // field groups to show in workspace
+  editableLabel?: boolean;  // allow clinician to edit this symptom's label (e.g. "Other Substance Use")
 };
 
 export type DSMAssessmentAreaDef = {
@@ -186,7 +196,8 @@ export type DSMDiagnosisDef = {
     criterionId: string;              // which criterion drives the count (e.g. "A" for MDD, "B" for PDD)
     mild: number;                     // met count >= mild → Mild
     moderate: number;
-    moderateSevere: number;
+    moderateSevere?: number;          // optional — omit for disorders with no moderate-severe rung
+    severe?: number;                  // if set, count >= severe → Severe (used by SUDs: 6+)
     agitationSymptomEntityId?: string; // if this entity is met + count >= moderateSevere → Severe
   };
 };

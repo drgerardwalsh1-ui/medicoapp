@@ -42,18 +42,28 @@ export function deriveSchema(client: Client | null): ReportSchema {
   return overlay ? applyOverlay(base, overlay) : base;
 }
 
-// Spec list (Demographics, DSM, schema-driven sections, Work Timeline). The
-// order is fixed; only the schema-driven block in the middle varies by org.
+// Tab order: Demographics → schema sections up to and including "symptoms" →
+// DSM Assessment → remaining schema sections → Work Timeline.
+// This places DSM immediately after Current Symptoms in the tab bar.
 export function clientTabs(client: Client | null): ClientTab[] {
   const schema = deriveSchema(client);
+  const schemaTabs = schema.sections.map((s) => ({
+    id: s.id as ClientTabId,
+    label: s.title,
+    disabledForNewClient: true,
+  }));
+
+  // Find the index of the "symptoms" section so DSM can be inserted after it.
+  const symptomsIdx = schemaTabs.findIndex((t) => t.id === "symptoms");
+  const insertAt = symptomsIdx >= 0 ? symptomsIdx + 1 : schemaTabs.length;
+
+  const dsmTab: ClientTab = { id: "dsm", label: "DSM Assessment", disabledForNewClient: true };
+
   return [
     { id: "demographics", label: "Demographics", disabledForNewClient: false },
-    { id: "dsm",          label: "DSM Assessment", disabledForNewClient: true },
-    ...schema.sections.map((s) => ({
-      id: s.id as ClientTabId,
-      label: s.title,
-      disabledForNewClient: true,
-    })),
+    ...schemaTabs.slice(0, insertAt),
+    dsmTab,
+    ...schemaTabs.slice(insertAt),
     { id: "timeline",     label: "Work Timeline", disabledForNewClient: true },
   ];
 }

@@ -7,10 +7,24 @@ import type { DSMSymptomDef } from "../types/dsm";
 
 // ── Domain definition ─────────────────────────────────────────────────────────
 
+// Optional sub-section grouping within a domain. Used for Substance Use
+// to display Alcohol / Cannabis / Opioid / … as separate headed groups
+// within the single "Substance Use" domain.
+export type SymptomDomainSection = {
+  id: string;
+  label: string;
+  // If true, an inline text input lets the clinician rename this section.
+  // The custom name is stored in SymptomEntity.customLabel for the lead
+  // entity (first symptomEntityId in the section).
+  editableLabel?: boolean;
+  symptomEntityIds: string[]; // must be a subset of domain.symptoms[*].symptomEntityId
+};
+
 export type SymptomDomain = {
   id: string;
   label: string;
   symptoms: DSMSymptomDef[];
+  sections?: SymptomDomainSection[]; // optional sub-group headers
 };
 
 // ── DSM criterion mapping ─────────────────────────────────────────────────────
@@ -140,6 +154,88 @@ export const SYMPTOM_DSM_MAPPING: Record<string, DSMCriterionRef[]> = {
   depersonalization: [
     { diagnosisId: "asd", criterionId: "B", symptomDefId: "asd_b7" },
   ],
+  // ── Alcohol Use Disorder — Criterion A ──────────────────────────────────
+  aud_larger_longer:       [{ diagnosisId: "aud", criterionId: "A", symptomDefId: "aud_a1" }],
+  aud_cut_down:            [{ diagnosisId: "aud", criterionId: "A", symptomDefId: "aud_a2" }],
+  aud_time_spent:          [{ diagnosisId: "aud", criterionId: "A", symptomDefId: "aud_a3" }],
+  aud_craving:             [{ diagnosisId: "aud", criterionId: "A", symptomDefId: "aud_a4" }],
+  aud_role_failure:        [{ diagnosisId: "aud", criterionId: "A", symptomDefId: "aud_a5" }],
+  aud_social_problems:     [{ diagnosisId: "aud", criterionId: "A", symptomDefId: "aud_a6" }],
+  aud_activities_given_up: [{ diagnosisId: "aud", criterionId: "A", symptomDefId: "aud_a7" }],
+  aud_hazardous_use:       [{ diagnosisId: "aud", criterionId: "A", symptomDefId: "aud_a8" }],
+  aud_continued_harm:      [{ diagnosisId: "aud", criterionId: "A", symptomDefId: "aud_a9" }],
+  aud_tolerance:           [{ diagnosisId: "aud", criterionId: "A", symptomDefId: "aud_a10" }],
+  aud_withdrawal:          [{ diagnosisId: "aud", criterionId: "A", symptomDefId: "aud_a11" }],
+  // ── Cannabis Use Disorder — Criterion A ─────────────────────────────────
+  cud_larger_longer:       [{ diagnosisId: "cud", criterionId: "A", symptomDefId: "cud_a1" }],
+  cud_cut_down:            [{ diagnosisId: "cud", criterionId: "A", symptomDefId: "cud_a2" }],
+  cud_time_spent:          [{ diagnosisId: "cud", criterionId: "A", symptomDefId: "cud_a3" }],
+  cud_craving:             [{ diagnosisId: "cud", criterionId: "A", symptomDefId: "cud_a4" }],
+  cud_role_failure:        [{ diagnosisId: "cud", criterionId: "A", symptomDefId: "cud_a5" }],
+  cud_social_problems:     [{ diagnosisId: "cud", criterionId: "A", symptomDefId: "cud_a6" }],
+  cud_activities_given_up: [{ diagnosisId: "cud", criterionId: "A", symptomDefId: "cud_a7" }],
+  cud_hazardous_use:       [{ diagnosisId: "cud", criterionId: "A", symptomDefId: "cud_a8" }],
+  cud_continued_harm:      [{ diagnosisId: "cud", criterionId: "A", symptomDefId: "cud_a9" }],
+  cud_tolerance:           [{ diagnosisId: "cud", criterionId: "A", symptomDefId: "cud_a10" }],
+  cud_withdrawal:          [{ diagnosisId: "cud", criterionId: "A", symptomDefId: "cud_a11" }],
+  // ── Opioid Use Disorder — Criterion A ───────────────────────────────────
+  oud_larger_longer:       [{ diagnosisId: "oud", criterionId: "A", symptomDefId: "oud_a1" }],
+  oud_cut_down:            [{ diagnosisId: "oud", criterionId: "A", symptomDefId: "oud_a2" }],
+  oud_time_spent:          [{ diagnosisId: "oud", criterionId: "A", symptomDefId: "oud_a3" }],
+  oud_craving:             [{ diagnosisId: "oud", criterionId: "A", symptomDefId: "oud_a4" }],
+  oud_role_failure:        [{ diagnosisId: "oud", criterionId: "A", symptomDefId: "oud_a5" }],
+  oud_social_problems:     [{ diagnosisId: "oud", criterionId: "A", symptomDefId: "oud_a6" }],
+  oud_activities_given_up: [{ diagnosisId: "oud", criterionId: "A", symptomDefId: "oud_a7" }],
+  oud_hazardous_use:       [{ diagnosisId: "oud", criterionId: "A", symptomDefId: "oud_a8" }],
+  oud_continued_harm:      [{ diagnosisId: "oud", criterionId: "A", symptomDefId: "oud_a9" }],
+  oud_tolerance:           [{ diagnosisId: "oud", criterionId: "A", symptomDefId: "oud_a10" }],
+  oud_withdrawal:          [{ diagnosisId: "oud", criterionId: "A", symptomDefId: "oud_a11" }],
+  // ── Sedative/Hypnotic/Anxiolytic Use Disorder — Criterion A ─────────────
+  shaud_larger_longer:       [{ diagnosisId: "shaud", criterionId: "A", symptomDefId: "shaud_a1" }],
+  shaud_cut_down:            [{ diagnosisId: "shaud", criterionId: "A", symptomDefId: "shaud_a2" }],
+  shaud_time_spent:          [{ diagnosisId: "shaud", criterionId: "A", symptomDefId: "shaud_a3" }],
+  shaud_craving:             [{ diagnosisId: "shaud", criterionId: "A", symptomDefId: "shaud_a4" }],
+  shaud_role_failure:        [{ diagnosisId: "shaud", criterionId: "A", symptomDefId: "shaud_a5" }],
+  shaud_social_problems:     [{ diagnosisId: "shaud", criterionId: "A", symptomDefId: "shaud_a6" }],
+  shaud_activities_given_up: [{ diagnosisId: "shaud", criterionId: "A", symptomDefId: "shaud_a7" }],
+  shaud_hazardous_use:       [{ diagnosisId: "shaud", criterionId: "A", symptomDefId: "shaud_a8" }],
+  shaud_continued_harm:      [{ diagnosisId: "shaud", criterionId: "A", symptomDefId: "shaud_a9" }],
+  shaud_tolerance:           [{ diagnosisId: "shaud", criterionId: "A", symptomDefId: "shaud_a10" }],
+  shaud_withdrawal:          [{ diagnosisId: "shaud", criterionId: "A", symptomDefId: "shaud_a11" }],
+  // ── Stimulant Use Disorder — Criterion A ────────────────────────────────
+  stud_larger_longer:       [{ diagnosisId: "stud", criterionId: "A", symptomDefId: "stud_a1" }],
+  stud_cut_down:            [{ diagnosisId: "stud", criterionId: "A", symptomDefId: "stud_a2" }],
+  stud_time_spent:          [{ diagnosisId: "stud", criterionId: "A", symptomDefId: "stud_a3" }],
+  stud_craving:             [{ diagnosisId: "stud", criterionId: "A", symptomDefId: "stud_a4" }],
+  stud_role_failure:        [{ diagnosisId: "stud", criterionId: "A", symptomDefId: "stud_a5" }],
+  stud_social_problems:     [{ diagnosisId: "stud", criterionId: "A", symptomDefId: "stud_a6" }],
+  stud_activities_given_up: [{ diagnosisId: "stud", criterionId: "A", symptomDefId: "stud_a7" }],
+  stud_hazardous_use:       [{ diagnosisId: "stud", criterionId: "A", symptomDefId: "stud_a8" }],
+  stud_continued_harm:      [{ diagnosisId: "stud", criterionId: "A", symptomDefId: "stud_a9" }],
+  stud_tolerance:           [{ diagnosisId: "stud", criterionId: "A", symptomDefId: "stud_a10" }],
+  stud_withdrawal:          [{ diagnosisId: "stud", criterionId: "A", symptomDefId: "stud_a11" }],
+  // ── Inhalant Use Disorder — Criterion A (no tolerance / withdrawal) ──────
+  inud_larger_longer:       [{ diagnosisId: "inud", criterionId: "A", symptomDefId: "inud_a1" }],
+  inud_cut_down:            [{ diagnosisId: "inud", criterionId: "A", symptomDefId: "inud_a2" }],
+  inud_time_spent:          [{ diagnosisId: "inud", criterionId: "A", symptomDefId: "inud_a3" }],
+  inud_craving:             [{ diagnosisId: "inud", criterionId: "A", symptomDefId: "inud_a4" }],
+  inud_role_failure:        [{ diagnosisId: "inud", criterionId: "A", symptomDefId: "inud_a5" }],
+  inud_social_problems:     [{ diagnosisId: "inud", criterionId: "A", symptomDefId: "inud_a6" }],
+  inud_activities_given_up: [{ diagnosisId: "inud", criterionId: "A", symptomDefId: "inud_a7" }],
+  inud_hazardous_use:       [{ diagnosisId: "inud", criterionId: "A", symptomDefId: "inud_a8" }],
+  inud_continued_harm:      [{ diagnosisId: "inud", criterionId: "A", symptomDefId: "inud_a9" }],
+  // ── Other Substance Use Disorder — Criterion A ──────────────────────────
+  osud_larger_longer:       [{ diagnosisId: "osud", criterionId: "A", symptomDefId: "osud_a1" }],
+  osud_cut_down:            [{ diagnosisId: "osud", criterionId: "A", symptomDefId: "osud_a2" }],
+  osud_time_spent:          [{ diagnosisId: "osud", criterionId: "A", symptomDefId: "osud_a3" }],
+  osud_craving:             [{ diagnosisId: "osud", criterionId: "A", symptomDefId: "osud_a4" }],
+  osud_role_failure:        [{ diagnosisId: "osud", criterionId: "A", symptomDefId: "osud_a5" }],
+  osud_social_problems:     [{ diagnosisId: "osud", criterionId: "A", symptomDefId: "osud_a6" }],
+  osud_activities_given_up: [{ diagnosisId: "osud", criterionId: "A", symptomDefId: "osud_a7" }],
+  osud_hazardous_use:       [{ diagnosisId: "osud", criterionId: "A", symptomDefId: "osud_a8" }],
+  osud_continued_harm:      [{ diagnosisId: "osud", criterionId: "A", symptomDefId: "osud_a9" }],
+  osud_tolerance:           [{ diagnosisId: "osud", criterionId: "A", symptomDefId: "osud_a10" }],
+  osud_withdrawal:          [{ diagnosisId: "osud", criterionId: "A", symptomDefId: "osud_a11" }],
 };
 
 // ── Domain taxonomy ───────────────────────────────────────────────────────────
@@ -402,19 +498,157 @@ export const SYMPTOM_DOMAINS: SymptomDomain[] = [
   {
     id: "substance",
     label: "Substance Use",
+    // ── Sub-group sections ─────────────────────────────────────────────────────
+    sections: [
+      {
+        id: "section_alcohol",
+        label: "Alcohol",
+        symptomEntityIds: [
+          "aud_larger_longer","aud_cut_down","aud_time_spent","aud_craving",
+          "aud_role_failure","aud_social_problems","aud_activities_given_up",
+          "aud_hazardous_use","aud_continued_harm","aud_tolerance","aud_withdrawal",
+        ],
+      },
+      {
+        id: "section_cannabis",
+        label: "Cannabis",
+        symptomEntityIds: [
+          "cud_larger_longer","cud_cut_down","cud_time_spent","cud_craving",
+          "cud_role_failure","cud_social_problems","cud_activities_given_up",
+          "cud_hazardous_use","cud_continued_harm","cud_tolerance","cud_withdrawal",
+        ],
+      },
+      {
+        id: "section_opioids",
+        label: "Opioids",
+        symptomEntityIds: [
+          "oud_larger_longer","oud_cut_down","oud_time_spent","oud_craving",
+          "oud_role_failure","oud_social_problems","oud_activities_given_up",
+          "oud_hazardous_use","oud_continued_harm","oud_tolerance","oud_withdrawal",
+        ],
+      },
+      {
+        id: "section_sedatives",
+        label: "Sedatives / Hypnotics / Anxiolytics",
+        symptomEntityIds: [
+          "shaud_larger_longer","shaud_cut_down","shaud_time_spent","shaud_craving",
+          "shaud_role_failure","shaud_social_problems","shaud_activities_given_up",
+          "shaud_hazardous_use","shaud_continued_harm","shaud_tolerance","shaud_withdrawal",
+        ],
+      },
+      {
+        id: "section_stimulants",
+        label: "Stimulants",
+        symptomEntityIds: [
+          "stud_larger_longer","stud_cut_down","stud_time_spent","stud_craving",
+          "stud_role_failure","stud_social_problems","stud_activities_given_up",
+          "stud_hazardous_use","stud_continued_harm","stud_tolerance","stud_withdrawal",
+        ],
+      },
+      {
+        id: "section_inhalants",
+        label: "Inhalants",
+        symptomEntityIds: [
+          "inud_larger_longer","inud_cut_down","inud_time_spent","inud_craving",
+          "inud_role_failure","inud_social_problems","inud_activities_given_up",
+          "inud_hazardous_use","inud_continued_harm",
+        ],
+      },
+      {
+        id: "section_other",
+        label: "Other Substance Use",
+        editableLabel: true,  // clinician can rename (e.g. "Ketamine Use")
+        symptomEntityIds: [
+          "osud_larger_longer","osud_cut_down","osud_time_spent","osud_craving",
+          "osud_role_failure","osud_social_problems","osud_activities_given_up",
+          "osud_hazardous_use","osud_continued_harm","osud_tolerance","osud_withdrawal",
+        ],
+      },
+    ],
     symptoms: [
-      {
-        id: "domain_alcohol",
-        symptomEntityId: "alcohol_use",
-        label: "Alcohol use",
-        prompts: ["Frequency and quantity", "Change since injury", "Dependence indicators", "Functional impact"],
-      },
-      {
-        id: "domain_substances",
-        symptomEntityId: "substance_use_other",
-        label: "Other substance use",
-        prompts: ["Type of substance", "Frequency", "Change since injury", "Functional impact", "Prescribed vs illicit"],
-      },
+      // ── Alcohol ──────────────────────────────────────────────────────────────
+      { id: "aud_s1",  symptomEntityId: "aud_larger_longer",       label: "Larger amounts / longer than intended",       prompts: ["Taking more than planned","Lasting longer than intended","Episodes of excess"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "aud_s2",  symptomEntityId: "aud_cut_down",            label: "Persistent desire / unsuccessful cut-down",   prompts: ["Repeated failed attempts to cut down","Wanting to stop but can't","Rules around use that keep breaking"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "aud_s3",  symptomEntityId: "aud_time_spent",          label: "Excessive time obtaining / using / recovering",prompts: ["Time spent sourcing","Time recovering (hangover)","Day structured around use"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "aud_s4",  symptomEntityId: "aud_craving",             label: "Craving",                                     prompts: ["Intense urge to use","Craving frequency","Craving triggers","Ability to resist"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "aud_s5",  symptomEntityId: "aud_role_failure",        label: "Role obligation failure",                     prompts: ["Work / study failures","Parenting / home duties neglected","Recurrent absence"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "aud_s6",  symptomEntityId: "aud_social_problems",     label: "Continued use despite social problems",       prompts: ["Relationship conflicts about use","Domestic disputes","Social isolation due to use"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "aud_s7",  symptomEntityId: "aud_activities_given_up", label: "Important activities given up",               prompts: ["Hobbies stopped","Social activities abandoned","Work opportunities avoided"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "aud_s8",  symptomEntityId: "aud_hazardous_use",       label: "Recurrent hazardous use",                     prompts: ["Driving under influence","Operating machinery","Using in risky situations"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "aud_s9",  symptomEntityId: "aud_continued_harm",      label: "Continued use despite known harm",            prompts: ["Physical harm (liver, etc.)","Psychological worsening","Aware of harm but continues"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "aud_s10", symptomEntityId: "aud_tolerance",           label: "Tolerance",                                   prompts: ["Needs more to achieve same effect","Diminished effect with same amount","Dose escalation over time"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "aud_s11", symptomEntityId: "aud_withdrawal",          label: "Withdrawal",                                  prompts: ["Withdrawal symptoms on cessation","Using to relieve or avoid withdrawal","Characteristic withdrawal syndrome"], captureHints: ["substanceQuantity","changeOverTime"] },
+      // ── Cannabis ─────────────────────────────────────────────────────────────
+      { id: "cud_s1",  symptomEntityId: "cud_larger_longer",       label: "Larger amounts / longer than intended",       prompts: ["Sessions longer than planned","Using more per session than intended"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "cud_s2",  symptomEntityId: "cud_cut_down",            label: "Persistent desire / unsuccessful cut-down",   prompts: ["Failed quit attempts","Tolerance breaks attempted and abandoned"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "cud_s3",  symptomEntityId: "cud_time_spent",          label: "Excessive time obtaining / using / recovering",prompts: ["Time obtaining cannabis","Duration of intoxication","Post-use impairment period"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "cud_s4",  symptomEntityId: "cud_craving",             label: "Craving",                                     prompts: ["Urge to use","Frequency of cravings","Situational triggers"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "cud_s5",  symptomEntityId: "cud_role_failure",        label: "Role obligation failure",                     prompts: ["Work or study impairment","Daily tasks neglected"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "cud_s6",  symptomEntityId: "cud_social_problems",     label: "Continued use despite social problems",       prompts: ["Relationship conflicts","Family concerns about use"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "cud_s7",  symptomEntityId: "cud_activities_given_up", label: "Important activities given up",               prompts: ["Stopped sports or hobbies","Social withdrawal"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "cud_s8",  symptomEntityId: "cud_hazardous_use",       label: "Recurrent hazardous use",                     prompts: ["Driving while impaired","Using at work"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "cud_s9",  symptomEntityId: "cud_continued_harm",      label: "Continued use despite known harm",            prompts: ["Mental health worsening","Motivational impairment","Aware of harm but continues"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "cud_s10", symptomEntityId: "cud_tolerance",           label: "Tolerance",                                   prompts: ["Increased amount needed","Reduced effect at same dose"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "cud_s11", symptomEntityId: "cud_withdrawal",          label: "Withdrawal",                                  prompts: ["Irritability on cessation","Sleep disturbance on cessation","Anxiety on cessation","Cannabis withdrawal syndrome"], captureHints: ["substanceQuantity","changeOverTime"] },
+      // ── Opioids ──────────────────────────────────────────────────────────────
+      { id: "oud_s1",  symptomEntityId: "oud_larger_longer",       label: "Larger amounts / longer than intended",       prompts: ["Dose exceeds prescription","Using for longer than prescribed"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "oud_s2",  symptomEntityId: "oud_cut_down",            label: "Persistent desire / unsuccessful cut-down",   prompts: ["Failed attempts to reduce","Wanting to stop"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "oud_s3",  symptomEntityId: "oud_time_spent",          label: "Excessive time obtaining / using / recovering",prompts: ["Doctor shopping","Time recovering from effects"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "oud_s4",  symptomEntityId: "oud_craving",             label: "Craving",                                     prompts: ["Strong urge to use opioids","Craving at dose time","Preoccupation with next dose"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "oud_s5",  symptomEntityId: "oud_role_failure",        label: "Role obligation failure",                     prompts: ["Work impairment","Sedation interfering with duties"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "oud_s6",  symptomEntityId: "oud_social_problems",     label: "Continued use despite social problems",       prompts: ["Relationship conflict over use","Family concern"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "oud_s7",  symptomEntityId: "oud_activities_given_up", label: "Important activities given up",               prompts: ["Reduced activity due to sedation","Hobbies abandoned"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "oud_s8",  symptomEntityId: "oud_hazardous_use",       label: "Recurrent hazardous use",                     prompts: ["Driving while impaired","Using illicit opioids"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "oud_s9",  symptomEntityId: "oud_continued_harm",      label: "Continued use despite known harm",            prompts: ["Physical dependency acknowledged","Overdose history","Continued despite medical advice"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "oud_s10", symptomEntityId: "oud_tolerance",           label: "Tolerance",                                   prompts: ["Dose escalation","Reduced analgesia at same dose","Needing more for same pain relief"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "oud_s11", symptomEntityId: "oud_withdrawal",          label: "Withdrawal",                                  prompts: ["Physical withdrawal symptoms","Using to avoid withdrawal","Sweating / nausea / muscle pain on cessation"], captureHints: ["substanceQuantity","changeOverTime"] },
+      // ── Sedatives / Hypnotics / Anxiolytics ──────────────────────────────────
+      { id: "shaud_s1",  symptomEntityId: "shaud_larger_longer",       label: "Larger amounts / longer than intended",       prompts: ["Exceeding prescribed dose","Using for longer than recommended"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "shaud_s2",  symptomEntityId: "shaud_cut_down",            label: "Persistent desire / unsuccessful cut-down",   prompts: ["Attempted reduction without success","Tapers that failed"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "shaud_s3",  symptomEntityId: "shaud_time_spent",          label: "Excessive time obtaining / using / recovering",prompts: ["Time managing prescriptions","Recovery from sedation"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "shaud_s4",  symptomEntityId: "shaud_craving",             label: "Craving",                                     prompts: ["Urge to use sedative","Preoccupation with availability","Anxiety without sedative"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "shaud_s5",  symptomEntityId: "shaud_role_failure",        label: "Role obligation failure",                     prompts: ["Cognitive impairment from sedation","Work performance decline"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "shaud_s6",  symptomEntityId: "shaud_social_problems",     label: "Continued use despite social problems",       prompts: ["Relationship difficulties","Concern from others"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "shaud_s7",  symptomEntityId: "shaud_activities_given_up", label: "Important activities given up",               prompts: ["Reduced activity due to sedation","Avoids driving","Social withdrawal"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "shaud_s8",  symptomEntityId: "shaud_hazardous_use",       label: "Recurrent hazardous use",                     prompts: ["Driving while sedated","Combining with alcohol"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "shaud_s9",  symptomEntityId: "shaud_continued_harm",      label: "Continued use despite known harm",            prompts: ["Cognitive effects acknowledged","Falls risk","Continued despite medical advice"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "shaud_s10", symptomEntityId: "shaud_tolerance",           label: "Tolerance",                                   prompts: ["Dose escalation for same effect","Diminished anxiolytic effect"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "shaud_s11", symptomEntityId: "shaud_withdrawal",          label: "Withdrawal",                                  prompts: ["Rebound anxiety on cessation","Seizure risk","Physical withdrawal symptoms","Using to avoid withdrawal"], captureHints: ["substanceQuantity","changeOverTime"] },
+      // ── Stimulants ───────────────────────────────────────────────────────────
+      { id: "stud_s1",  symptomEntityId: "stud_larger_longer",       label: "Larger amounts / longer than intended",       prompts: ["Binge longer than planned","Taking more than intended"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "stud_s2",  symptomEntityId: "stud_cut_down",            label: "Persistent desire / unsuccessful cut-down",   prompts: ["Failed quit attempts","Cutting down attempts"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "stud_s3",  symptomEntityId: "stud_time_spent",          label: "Excessive time obtaining / using / recovering",prompts: ["Time obtaining stimulants","Crash / recovery period"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "stud_s4",  symptomEntityId: "stud_craving",             label: "Craving",                                     prompts: ["Intense craving","Preoccupation with use","Craving triggers (fatigue, stress)"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "stud_s5",  symptomEntityId: "stud_role_failure",        label: "Role obligation failure",                     prompts: ["Post-binge inability to function","Work or study failures"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "stud_s6",  symptomEntityId: "stud_social_problems",     label: "Continued use despite social problems",       prompts: ["Relationship conflicts","Paranoia or aggression affecting relationships"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "stud_s7",  symptomEntityId: "stud_activities_given_up", label: "Important activities given up",               prompts: ["Hobbies abandoned","Physical health activities stopped"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "stud_s8",  symptomEntityId: "stud_hazardous_use",       label: "Recurrent hazardous use",                     prompts: ["Risky sexual behaviour","Driving while intoxicated","Workplace use"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "stud_s9",  symptomEntityId: "stud_continued_harm",      label: "Continued use despite known harm",            prompts: ["Cardiovascular risk acknowledged","Psychosis risk","Weight loss"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "stud_s10", symptomEntityId: "stud_tolerance",           label: "Tolerance",                                   prompts: ["Dose escalation","Diminished euphoric effect"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "stud_s11", symptomEntityId: "stud_withdrawal",          label: "Withdrawal / crash",                          prompts: ["Crash after use (fatigue, dysphoria)","Hypersomnia","Increased appetite after cessation"], captureHints: ["substanceQuantity","changeOverTime"] },
+      // ── Inhalants ────────────────────────────────────────────────────────────
+      { id: "inud_s1",  symptomEntityId: "inud_larger_longer",       label: "Larger amounts / longer than intended",       prompts: ["Sessions longer than planned","Amounts exceeding intention"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "inud_s2",  symptomEntityId: "inud_cut_down",            label: "Persistent desire / unsuccessful cut-down",   prompts: ["Failed attempts to stop","Wanting to reduce"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "inud_s3",  symptomEntityId: "inud_time_spent",          label: "Excessive time obtaining / using / recovering",prompts: ["Time obtaining inhalants","Recovery from intoxication"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "inud_s4",  symptomEntityId: "inud_craving",             label: "Craving",                                     prompts: ["Urge to use","Preoccupation with use"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "inud_s5",  symptomEntityId: "inud_role_failure",        label: "Role obligation failure",                     prompts: ["School / work failures","Neurocognitive impairment"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "inud_s6",  symptomEntityId: "inud_social_problems",     label: "Continued use despite social problems",       prompts: ["Family concern","Peer group changes"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "inud_s7",  symptomEntityId: "inud_activities_given_up", label: "Important activities given up",               prompts: ["Activities replaced by use","Social withdrawal"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "inud_s8",  symptomEntityId: "inud_hazardous_use",       label: "Recurrent hazardous use",                     prompts: ["Sudden sniffing death risk","Using alone","Using near traffic"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "inud_s9",  symptomEntityId: "inud_continued_harm",      label: "Continued use despite known harm",            prompts: ["Organ damage acknowledged","Neurotoxicity","Continued despite warnings"], captureHints: ["substanceQuantity","changeOverTime"] },
+      // ── Other Substance Use ───────────────────────────────────────────────────
+      // editableLabel on first entry allows clinician to rename this section
+      { id: "osud_s1",  symptomEntityId: "osud_larger_longer",       label: "Larger amounts / longer than intended",       prompts: ["Taking more than planned","Sessions longer than intended"], captureHints: ["substanceQuantity","changeOverTime"], editableLabel: true },
+      { id: "osud_s2",  symptomEntityId: "osud_cut_down",            label: "Persistent desire / unsuccessful cut-down",   prompts: ["Failed reduction attempts","Wanting to stop"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "osud_s3",  symptomEntityId: "osud_time_spent",          label: "Excessive time obtaining / using / recovering",prompts: ["Time obtaining substance","Recovery period"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "osud_s4",  symptomEntityId: "osud_craving",             label: "Craving",                                     prompts: ["Urge to use","Craving triggers and frequency"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "osud_s5",  symptomEntityId: "osud_role_failure",        label: "Role obligation failure",                     prompts: ["Work / study failures","Responsibilities neglected"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "osud_s6",  symptomEntityId: "osud_social_problems",     label: "Continued use despite social problems",       prompts: ["Relationship conflicts","Family concern about use"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "osud_s7",  symptomEntityId: "osud_activities_given_up", label: "Important activities given up",               prompts: ["Hobbies abandoned","Social activities stopped"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "osud_s8",  symptomEntityId: "osud_hazardous_use",       label: "Recurrent hazardous use",                     prompts: ["Driving while intoxicated","Using in unsafe contexts"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "osud_s9",  symptomEntityId: "osud_continued_harm",      label: "Continued use despite known harm",            prompts: ["Harm acknowledged but continues","Medical or psychological worsening"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "osud_s10", symptomEntityId: "osud_tolerance",           label: "Tolerance",                                   prompts: ["Dose escalation over time","Reduced effect at same dose"], captureHints: ["substanceQuantity","changeOverTime"] },
+      { id: "osud_s11", symptomEntityId: "osud_withdrawal",          label: "Withdrawal",                                  prompts: ["Characteristic withdrawal syndrome","Using to avoid withdrawal"], captureHints: ["substanceQuantity","changeOverTime"] },
     ],
   },
   {

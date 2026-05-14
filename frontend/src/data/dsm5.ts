@@ -2,7 +2,7 @@
 // Structural definitions only — no assessment state here.
 // Assessment state lives in DSMAssessmentData (types/dsm.ts).
 
-import type { DSMDiagnosisDef } from "../types/dsm";
+import type { DSMCriterionDef, DSMDiagnosisDef } from "../types/dsm";
 
 // ── Major Depressive Disorder ─────────────────────────────────────────────────
 
@@ -1464,6 +1464,318 @@ export const UNSPEC_TRAUMA_DEFINITION: DSMDiagnosisDef = {
   ],
 };
 
+// ── Substance-Related and Addictive Disorders ─────────────────────────────────
+//
+// Architecture: all 7 disorders share the same 11-symptom Criterion A
+// structure. Each substance has its own entity ID prefix (aud_, cud_, etc.)
+// so symptoms are tracked independently per substance.
+//
+// Severity thresholds: Mild 2–3 / Moderate 4–5 / Severe 6+
+// (uses the `severe` threshold field — no "moderate-severe" rung for SUDs)
+
+const SUD_REMISSION_SPECIFIERS = [
+  "Early remission (3–12 months, no criteria except craving met)",
+  "Sustained remission (>12 months, no criteria except craving met)",
+  "In a controlled environment",
+];
+
+const SUD_SEVERITY: DSMDiagnosisDef["severityThresholds"] = {
+  criterionId: "A",
+  mild: 2,
+  moderate: 4,
+  severe: 6,
+};
+
+function sudImpairmentCriterion(id: string, label: string, description: string): DSMCriterionDef {
+  return {
+    id,
+    label,
+    description,
+    type: "impairment",
+    assessmentAreas: [
+      {
+        id: "functional",
+        label: "Functional impairment",
+        prompts: ["Clinically significant impairment or distress confirmed", "Impact on social functioning", "Impact on occupational functioning", "Impact on other important areas"],
+      },
+    ],
+  };
+}
+
+function sudExclusionCriterion(id: string): DSMCriterionDef {
+  return {
+    id,
+    label: `Criterion ${id} — Exclusion`,
+    description: "Symptoms are not better explained by another medical condition or mental disorder.",
+    type: "exclusion",
+    assessmentAreas: [
+      {
+        id: "exclusion",
+        label: "Exclusion assessment",
+        prompts: ["Not attributable to physiological effects of another substance", "Not better explained by another mental disorder", "Differential diagnoses considered"],
+      },
+    ],
+  };
+}
+
+// ── Alcohol Use Disorder ──────────────────────────────────────────────────────
+
+export const AUD_DEFINITION: DSMDiagnosisDef = {
+  id: "aud",
+  name: "Alcohol Use Disorder",
+  category: "Substance-Related and Addictive Disorders",
+  abbreviation: "AUD",
+  severityThresholds: SUD_SEVERITY,
+  specifiers: SUD_REMISSION_SPECIFIERS,
+  criteria: [
+    {
+      id: "A",
+      label: "Criterion A — Problematic Alcohol Use",
+      description: "A problematic pattern of alcohol use leading to clinically significant impairment or distress, as manifested by at least 2 of the following, occurring within a 12-month period.",
+      type: "symptom_count",
+      minRequired: 2,
+      symptoms: [
+        { id: "aud_a1",  symptomEntityId: "aud_larger_longer",       label: "Larger amounts / longer than intended",        prompts: ["Drink more than planned","Session longer than intended"] },
+        { id: "aud_a2",  symptomEntityId: "aud_cut_down",            label: "Persistent desire / unsuccessful cut-down",    prompts: ["Repeated failed attempts","Wanting to cut down but unable"] },
+        { id: "aud_a3",  symptomEntityId: "aud_time_spent",          label: "Great deal of time spent",                     prompts: ["Time obtaining alcohol","Time recovering from drinking"] },
+        { id: "aud_a4",  symptomEntityId: "aud_craving",             label: "Craving or strong urge to drink",              prompts: ["Intense urge","Preoccupation with drinking","Craving frequency"] },
+        { id: "aud_a5",  symptomEntityId: "aud_role_failure",        label: "Recurrent failure to fulfill role obligations", prompts: ["Work absence","Family duties neglected","Recurring impairment at work"] },
+        { id: "aud_a6",  symptomEntityId: "aud_social_problems",     label: "Continued use despite social problems",        prompts: ["Relationship conflicts caused by drinking","Persistent interpersonal problems"] },
+        { id: "aud_a7",  symptomEntityId: "aud_activities_given_up", label: "Important activities given up or reduced",     prompts: ["Hobbies abandoned","Social or recreational activities avoided"] },
+        { id: "aud_a8",  symptomEntityId: "aud_hazardous_use",       label: "Recurrent use in physically hazardous situations", prompts: ["Driving under influence","Operating machinery while intoxicated"] },
+        { id: "aud_a9",  symptomEntityId: "aud_continued_harm",      label: "Continued use despite knowing it causes harm", prompts: ["Liver disease","Depression worsened by alcohol","Aware but continues"] },
+        { id: "aud_a10", symptomEntityId: "aud_tolerance",           label: "Tolerance",                                    prompts: ["Needs more to achieve intoxication","Markedly diminished effect with same amount"] },
+        { id: "aud_a11", symptomEntityId: "aud_withdrawal",          label: "Withdrawal",                                   prompts: ["Characteristic alcohol withdrawal syndrome","Using to relieve or avoid withdrawal symptoms"] },
+      ],
+    },
+    sudImpairmentCriterion("B", "Criterion B — Impairment / Distress", "Clinically significant impairment or distress."),
+  ],
+};
+
+// ── Cannabis Use Disorder ─────────────────────────────────────────────────────
+
+export const CUD_DEFINITION: DSMDiagnosisDef = {
+  id: "cud",
+  name: "Cannabis Use Disorder",
+  category: "Substance-Related and Addictive Disorders",
+  abbreviation: "CUD",
+  severityThresholds: SUD_SEVERITY,
+  specifiers: SUD_REMISSION_SPECIFIERS,
+  criteria: [
+    {
+      id: "A",
+      label: "Criterion A — Problematic Cannabis Use",
+      description: "A problematic pattern of cannabis use leading to clinically significant impairment or distress, as manifested by at least 2 of the following, occurring within a 12-month period.",
+      type: "symptom_count",
+      minRequired: 2,
+      symptoms: [
+        { id: "cud_a1",  symptomEntityId: "cud_larger_longer",       label: "Larger amounts / longer than intended",        prompts: ["Sessions longer than planned","Amounts exceed intention"] },
+        { id: "cud_a2",  symptomEntityId: "cud_cut_down",            label: "Persistent desire / unsuccessful cut-down",    prompts: ["Failed quit attempts","Tolerance breaks abandoned"] },
+        { id: "cud_a3",  symptomEntityId: "cud_time_spent",          label: "Great deal of time spent",                     prompts: ["Time obtaining cannabis","Post-intoxication impairment period"] },
+        { id: "cud_a4",  symptomEntityId: "cud_craving",             label: "Craving or strong urge to use cannabis",       prompts: ["Urge to use","Situational craving triggers"] },
+        { id: "cud_a5",  symptomEntityId: "cud_role_failure",        label: "Recurrent failure to fulfill role obligations", prompts: ["Work or study impairment","Daily tasks neglected"] },
+        { id: "cud_a6",  symptomEntityId: "cud_social_problems",     label: "Continued use despite social problems",        prompts: ["Relationship conflicts","Family concern about use"] },
+        { id: "cud_a7",  symptomEntityId: "cud_activities_given_up", label: "Important activities given up or reduced",     prompts: ["Sports or hobbies stopped","Social withdrawal"] },
+        { id: "cud_a8",  symptomEntityId: "cud_hazardous_use",       label: "Recurrent use in physically hazardous situations", prompts: ["Driving while impaired","Using at work"] },
+        { id: "cud_a9",  symptomEntityId: "cud_continued_harm",      label: "Continued use despite knowing it causes harm", prompts: ["Mental health worsening","Motivational syndrome","Aware but continues"] },
+        { id: "cud_a10", symptomEntityId: "cud_tolerance",           label: "Tolerance",                                    prompts: ["Increased amount needed for same effect","Reduced effect at same dose"] },
+        { id: "cud_a11", symptomEntityId: "cud_withdrawal",          label: "Withdrawal",                                   prompts: ["Irritability on cessation","Anxiety/sleep disturbance after stopping","Cannabis withdrawal syndrome"] },
+      ],
+    },
+    sudImpairmentCriterion("B", "Criterion B — Impairment / Distress", "Clinically significant impairment or distress."),
+  ],
+};
+
+// ── Inhalant Use Disorder ─────────────────────────────────────────────────────
+// Note: DSM-5 inhalant use disorder does NOT include tolerance or withdrawal criteria (9 symptoms only).
+
+export const INUD_DEFINITION: DSMDiagnosisDef = {
+  id: "inud",
+  name: "Inhalant Use Disorder",
+  category: "Substance-Related and Addictive Disorders",
+  abbreviation: "InUD",
+  severityThresholds: { criterionId: "A", mild: 2, moderate: 4, severe: 6 },
+  specifiers: [
+    "Specify inhalant type (e.g. solvent, glue, petrol, aerosol)",
+    "In a controlled environment",
+  ],
+  criteria: [
+    {
+      id: "A",
+      label: "Criterion A — Problematic Inhalant Use",
+      description: "A problematic pattern of use of a hydrocarbon-based inhalant substance leading to clinically significant impairment or distress, as manifested by at least 2 of the following, occurring within a 12-month period.",
+      type: "symptom_count",
+      minRequired: 2,
+      symptoms: [
+        { id: "inud_a1", symptomEntityId: "inud_larger_longer",       label: "Larger amounts / longer than intended",        prompts: ["Sessions longer than planned"] },
+        { id: "inud_a2", symptomEntityId: "inud_cut_down",            label: "Persistent desire / unsuccessful cut-down",    prompts: ["Failed attempts to stop","Wanting to reduce"] },
+        { id: "inud_a3", symptomEntityId: "inud_time_spent",          label: "Great deal of time spent",                     prompts: ["Time obtaining inhalants","Recovery from intoxication"] },
+        { id: "inud_a4", symptomEntityId: "inud_craving",             label: "Craving or strong urge to use",                prompts: ["Urge to use","Preoccupation with use"] },
+        { id: "inud_a5", symptomEntityId: "inud_role_failure",        label: "Recurrent failure to fulfill role obligations", prompts: ["School / work failures","Cognitive impairment"] },
+        { id: "inud_a6", symptomEntityId: "inud_social_problems",     label: "Continued use despite social problems",        prompts: ["Family concern","Peer group changes"] },
+        { id: "inud_a7", symptomEntityId: "inud_activities_given_up", label: "Important activities given up or reduced",     prompts: ["Activities replaced by use"] },
+        { id: "inud_a8", symptomEntityId: "inud_hazardous_use",       label: "Recurrent use in physically hazardous situations", prompts: ["Sudden sniffing death risk","Using alone","Near traffic"] },
+        { id: "inud_a9", symptomEntityId: "inud_continued_harm",      label: "Continued use despite knowing it causes harm", prompts: ["Organ damage acknowledged","Neurotoxicity","Continued despite warnings"] },
+      ],
+    },
+    sudImpairmentCriterion("B", "Criterion B — Impairment / Distress", "Clinically significant impairment or distress."),
+    sudExclusionCriterion("C"),
+  ],
+};
+
+// ── Opioid Use Disorder ───────────────────────────────────────────────────────
+
+export const OUD_DEFINITION: DSMDiagnosisDef = {
+  id: "oud",
+  name: "Opioid Use Disorder",
+  category: "Substance-Related and Addictive Disorders",
+  abbreviation: "OUD",
+  severityThresholds: SUD_SEVERITY,
+  specifiers: [
+    "Early remission (3–12 months, no criteria except craving met)",
+    "Sustained remission (>12 months, no criteria except craving met)",
+    "On maintenance therapy (buprenorphine/methadone)",
+    "In a controlled environment",
+  ],
+  criteria: [
+    {
+      id: "A",
+      label: "Criterion A — Problematic Opioid Use",
+      description: "A problematic pattern of opioid use leading to clinically significant impairment or distress, as manifested by at least 2 of the following, occurring within a 12-month period.",
+      type: "symptom_count",
+      minRequired: 2,
+      symptoms: [
+        { id: "oud_a1",  symptomEntityId: "oud_larger_longer",       label: "Larger amounts / longer than intended",        prompts: ["Dose exceeds prescription","Using for longer than prescribed"] },
+        { id: "oud_a2",  symptomEntityId: "oud_cut_down",            label: "Persistent desire / unsuccessful cut-down",    prompts: ["Failed attempts to reduce","Wanting to stop"] },
+        { id: "oud_a3",  symptomEntityId: "oud_time_spent",          label: "Great deal of time spent",                     prompts: ["Doctor shopping","Time recovering from effects"] },
+        { id: "oud_a4",  symptomEntityId: "oud_craving",             label: "Craving or strong urge to use opioids",        prompts: ["Strong urge","Preoccupation with next dose","Dose-time craving"] },
+        { id: "oud_a5",  symptomEntityId: "oud_role_failure",        label: "Recurrent failure to fulfill role obligations", prompts: ["Work impairment","Sedation interfering with duties"] },
+        { id: "oud_a6",  symptomEntityId: "oud_social_problems",     label: "Continued use despite social problems",        prompts: ["Relationship conflict","Family concern"] },
+        { id: "oud_a7",  symptomEntityId: "oud_activities_given_up", label: "Important activities given up or reduced",     prompts: ["Reduced activity due to sedation","Hobbies abandoned"] },
+        { id: "oud_a8",  symptomEntityId: "oud_hazardous_use",       label: "Recurrent use in physically hazardous situations", prompts: ["Driving while impaired","Using illicit opioids"] },
+        { id: "oud_a9",  symptomEntityId: "oud_continued_harm",      label: "Continued use despite knowing it causes harm", prompts: ["Physical dependency acknowledged","Overdose history","Continued despite medical advice"] },
+        { id: "oud_a10", symptomEntityId: "oud_tolerance",           label: "Tolerance",                                    prompts: ["Dose escalation","Reduced analgesia","Needing more for same pain relief"] },
+        { id: "oud_a11", symptomEntityId: "oud_withdrawal",          label: "Withdrawal",                                   prompts: ["Physical withdrawal symptoms","Using to avoid withdrawal","Sweating/nausea/muscle pain on cessation"] },
+      ],
+    },
+    sudImpairmentCriterion("B", "Criterion B — Impairment / Distress", "Clinically significant impairment or distress."),
+  ],
+};
+
+// ── Sedative, Hypnotic, or Anxiolytic Use Disorder ────────────────────────────
+
+export const SHAUD_DEFINITION: DSMDiagnosisDef = {
+  id: "shaud",
+  name: "Sedative, Hypnotic, or Anxiolytic Use Disorder",
+  category: "Substance-Related and Addictive Disorders",
+  abbreviation: "SHA-UD",
+  severityThresholds: SUD_SEVERITY,
+  specifiers: SUD_REMISSION_SPECIFIERS,
+  criteria: [
+    {
+      id: "A",
+      label: "Criterion A — Problematic Sedative/Hypnotic/Anxiolytic Use",
+      description: "A problematic pattern of sedative, hypnotic, or anxiolytic use leading to clinically significant impairment or distress, as manifested by at least 2 of the following, occurring within a 12-month period.",
+      type: "symptom_count",
+      minRequired: 2,
+      symptoms: [
+        { id: "shaud_a1",  symptomEntityId: "shaud_larger_longer",       label: "Larger amounts / longer than intended",        prompts: ["Exceeding prescribed dose","Using for longer than recommended"] },
+        { id: "shaud_a2",  symptomEntityId: "shaud_cut_down",            label: "Persistent desire / unsuccessful cut-down",    prompts: ["Attempted reduction without success","Tapers that failed"] },
+        { id: "shaud_a3",  symptomEntityId: "shaud_time_spent",          label: "Great deal of time spent",                     prompts: ["Managing prescriptions","Recovery from sedation"] },
+        { id: "shaud_a4",  symptomEntityId: "shaud_craving",             label: "Craving or strong urge to use",                prompts: ["Urge to use sedative","Preoccupation with availability"] },
+        { id: "shaud_a5",  symptomEntityId: "shaud_role_failure",        label: "Recurrent failure to fulfill role obligations", prompts: ["Cognitive impairment","Work performance decline"] },
+        { id: "shaud_a6",  symptomEntityId: "shaud_social_problems",     label: "Continued use despite social problems",        prompts: ["Relationship difficulties","Concern from others"] },
+        { id: "shaud_a7",  symptomEntityId: "shaud_activities_given_up", label: "Important activities given up or reduced",     prompts: ["Avoids driving","Social withdrawal"] },
+        { id: "shaud_a8",  symptomEntityId: "shaud_hazardous_use",       label: "Recurrent use in physically hazardous situations", prompts: ["Driving while sedated","Combining with alcohol"] },
+        { id: "shaud_a9",  symptomEntityId: "shaud_continued_harm",      label: "Continued use despite knowing it causes harm", prompts: ["Cognitive effects acknowledged","Falls risk","Continued despite medical advice"] },
+        { id: "shaud_a10", symptomEntityId: "shaud_tolerance",           label: "Tolerance",                                    prompts: ["Dose escalation","Diminished anxiolytic effect at same dose"] },
+        { id: "shaud_a11", symptomEntityId: "shaud_withdrawal",          label: "Withdrawal",                                   prompts: ["Rebound anxiety on cessation","Seizure risk","Physical withdrawal","Using to avoid withdrawal"] },
+      ],
+    },
+    sudImpairmentCriterion("B", "Criterion B — Impairment / Distress", "Clinically significant impairment or distress."),
+  ],
+};
+
+// ── Stimulant Use Disorder ────────────────────────────────────────────────────
+
+export const STUD_DEFINITION: DSMDiagnosisDef = {
+  id: "stud",
+  name: "Stimulant Use Disorder",
+  category: "Substance-Related and Addictive Disorders",
+  abbreviation: "StUD",
+  severityThresholds: SUD_SEVERITY,
+  specifiers: [
+    "Amphetamine-type substance",
+    "Cocaine",
+    "Other or unspecified stimulant",
+    "Early remission (3–12 months, no criteria except craving met)",
+    "Sustained remission (>12 months, no criteria except craving met)",
+    "In a controlled environment",
+  ],
+  criteria: [
+    {
+      id: "A",
+      label: "Criterion A — Problematic Stimulant Use",
+      description: "A pattern of amphetamine-type substance, cocaine, or other stimulant use leading to clinically significant impairment or distress, as manifested by at least 2 of the following, occurring within a 12-month period.",
+      type: "symptom_count",
+      minRequired: 2,
+      symptoms: [
+        { id: "stud_a1",  symptomEntityId: "stud_larger_longer",       label: "Larger amounts / longer than intended",        prompts: ["Binge longer than planned","Taking more than intended"] },
+        { id: "stud_a2",  symptomEntityId: "stud_cut_down",            label: "Persistent desire / unsuccessful cut-down",    prompts: ["Failed quit attempts","Cutting-down attempts"] },
+        { id: "stud_a3",  symptomEntityId: "stud_time_spent",          label: "Great deal of time spent",                     prompts: ["Time obtaining stimulants","Crash / recovery period"] },
+        { id: "stud_a4",  symptomEntityId: "stud_craving",             label: "Craving or strong urge to use",                prompts: ["Intense craving","Craving triggers (fatigue, stress)","Preoccupation with use"] },
+        { id: "stud_a5",  symptomEntityId: "stud_role_failure",        label: "Recurrent failure to fulfill role obligations", prompts: ["Post-binge inability to function","Work or study failures"] },
+        { id: "stud_a6",  symptomEntityId: "stud_social_problems",     label: "Continued use despite social problems",        prompts: ["Relationship conflicts","Paranoia or aggression affecting relationships"] },
+        { id: "stud_a7",  symptomEntityId: "stud_activities_given_up", label: "Important activities given up or reduced",     prompts: ["Hobbies abandoned","Physical health activities stopped"] },
+        { id: "stud_a8",  symptomEntityId: "stud_hazardous_use",       label: "Recurrent use in physically hazardous situations", prompts: ["Risky sexual behaviour","Driving while intoxicated","Workplace use"] },
+        { id: "stud_a9",  symptomEntityId: "stud_continued_harm",      label: "Continued use despite knowing it causes harm", prompts: ["Cardiovascular risk","Psychosis risk","Weight loss acknowledged"] },
+        { id: "stud_a10", symptomEntityId: "stud_tolerance",           label: "Tolerance",                                    prompts: ["Dose escalation","Diminished euphoric effect"] },
+        { id: "stud_a11", symptomEntityId: "stud_withdrawal",          label: "Withdrawal / crash",                           prompts: ["Crash after use (fatigue, dysphoria)","Hypersomnia","Increased appetite after cessation"] },
+      ],
+    },
+    sudImpairmentCriterion("B", "Criterion B — Impairment / Distress", "Clinically significant impairment or distress."),
+  ],
+};
+
+// ── Other Substance Use Disorder ──────────────────────────────────────────────
+
+export const OSUD_DEFINITION: DSMDiagnosisDef = {
+  id: "osud",
+  name: "Other Substance Use Disorder",
+  category: "Substance-Related and Addictive Disorders",
+  abbreviation: "OtherSUD",
+  severityThresholds: SUD_SEVERITY,
+  specifiers: [
+    "Specify substance (e.g. ketamine, MDMA, nicotine, hallucinogen)",
+    "Early remission (3–12 months, no criteria except craving met)",
+    "Sustained remission (>12 months, no criteria except craving met)",
+    "In a controlled environment",
+  ],
+  criteria: [
+    {
+      id: "A",
+      label: "Criterion A — Problematic Substance Use",
+      description: "A problematic pattern of use of the specified substance leading to clinically significant impairment or distress, as manifested by at least 2 of the following, occurring within a 12-month period.",
+      type: "symptom_count",
+      minRequired: 2,
+      symptoms: [
+        { id: "osud_a1",  symptomEntityId: "osud_larger_longer",       label: "Larger amounts / longer than intended",        prompts: ["Taking more than planned","Sessions longer than intended"] },
+        { id: "osud_a2",  symptomEntityId: "osud_cut_down",            label: "Persistent desire / unsuccessful cut-down",    prompts: ["Failed reduction attempts","Wanting to stop"] },
+        { id: "osud_a3",  symptomEntityId: "osud_time_spent",          label: "Great deal of time spent",                     prompts: ["Time obtaining substance","Recovery period"] },
+        { id: "osud_a4",  symptomEntityId: "osud_craving",             label: "Craving or strong urge to use",                prompts: ["Urge to use","Craving triggers and frequency"] },
+        { id: "osud_a5",  symptomEntityId: "osud_role_failure",        label: "Recurrent failure to fulfill role obligations", prompts: ["Work / study failures","Responsibilities neglected"] },
+        { id: "osud_a6",  symptomEntityId: "osud_social_problems",     label: "Continued use despite social problems",        prompts: ["Relationship conflicts","Family concern about use"] },
+        { id: "osud_a7",  symptomEntityId: "osud_activities_given_up", label: "Important activities given up or reduced",     prompts: ["Hobbies abandoned","Social activities stopped"] },
+        { id: "osud_a8",  symptomEntityId: "osud_hazardous_use",       label: "Recurrent use in physically hazardous situations", prompts: ["Driving while intoxicated","Using in unsafe contexts"] },
+        { id: "osud_a9",  symptomEntityId: "osud_continued_harm",      label: "Continued use despite knowing it causes harm", prompts: ["Harm acknowledged but continues","Medical or psychological worsening"] },
+        { id: "osud_a10", symptomEntityId: "osud_tolerance",           label: "Tolerance",                                    prompts: ["Dose escalation","Reduced effect at same dose"] },
+        { id: "osud_a11", symptomEntityId: "osud_withdrawal",          label: "Withdrawal",                                   prompts: ["Characteristic withdrawal syndrome","Using to avoid withdrawal"] },
+      ],
+    },
+    sudImpairmentCriterion("B", "Criterion B — Impairment / Distress", "Clinically significant impairment or distress."),
+  ],
+};
+
 // ── Diagnosis registry ────────────────────────────────────────────────────────
 
 export const DSM5_DIAGNOSES: DSMDiagnosisDef[] = [
@@ -1474,11 +1786,19 @@ export const DSM5_DIAGNOSES: DSMDiagnosisDef[] = [
   ADJ_DEFINITION,
   OTHER_TRAUMA_DEFINITION,
   UNSPEC_TRAUMA_DEFINITION,
+  AUD_DEFINITION,
+  CUD_DEFINITION,
+  INUD_DEFINITION,
+  OUD_DEFINITION,
+  SHAUD_DEFINITION,
+  STUD_DEFINITION,
+  OSUD_DEFINITION,
 ];
 
 export const DSM5_CATEGORIES: { name: string; diagnosisIds: string[] }[] = [
   { name: "Mood Disorders", diagnosisIds: ["mdd", "pdd"] },
   { name: "Trauma-Related Disorders", diagnosisIds: ["ptsd", "asd", "adj", "other_trauma", "unspec_trauma"] },
+  { name: "Substance-Related and Addictive Disorders", diagnosisIds: ["aud", "cud", "inud", "oud", "shaud", "stud", "osud"] },
 ];
 
 export function getDiagnosisDef(id: string): DSMDiagnosisDef | undefined {
