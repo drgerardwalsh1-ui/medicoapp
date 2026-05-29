@@ -5,8 +5,10 @@ import Home from "./pages/Home";
 import DemographicsPage from "./pages/DemographicsPage";
 import DSMPage from "./pages/DSMPage";
 import CurrentSymptomsPage from "./pages/CurrentSymptomsPage";
+import HistoryEditor from "./components/History/HistoryEditor";
 import ReportPage from "./pages/ReportPage";
 import WorkTimelinePage from "./pages/WorkTimelinePage";
+import MSEPage from "./pages/MSEPage";
 import CalendarView from "./calendar/CalendarView";
 import SystemPage from "./pages/SystemPage";
 import { TauriAPI, isTauri, type ClientViewModel } from "./api/tauriApi";
@@ -27,6 +29,9 @@ import {
   pauseEvent,
   resumeEvent,
   stopEvent,
+  activeWorkMs,
+  endUtcFromDuration,
+  getViewerTimeZone,
   type WorkTimelineEvent,
   type WorkTimelineEventType,
   type TimerBarProps,
@@ -65,6 +70,8 @@ function buildSaveBlob(c: Client): Record<string, unknown> {
     assessmentChecklist: c.assessmentChecklist ?? defaultAssessmentChecklist(),
     report: c.report ?? defaultReport(),
     workTimeline: c.workTimeline ?? [],
+    psychiatricHistory: c.psychiatricHistory,
+    mse: c.mse,
   };
 }
 
@@ -255,12 +262,54 @@ function Root() {
 
   function handleTimerPause()  { applyTimerMutation(pauseEvent);  }
   function handleTimerResume() { applyTimerMutation(resumeEvent); }
+
+  // When an ASSESSMENT timer is stopped and finalised, the measured work
+  // duration becomes the authoritative assessment length: today's appointment
+  // end time is rebuilt as start + duration. The calendar reads the same
+  // `endUtc` field, so the calendar appointment updates with no extra wiring.
+  function applyAssessmentEndTime(
+    client: Client,
+    stopped: WorkTimelineEvent
+  ): Client {
+    if (stopped.type !== "assessment" || !stopped.endedAtUtc) return client;
+    const workMs = activeWorkMs(stopped);
+    if (workMs <= 0) return client;
+    const mins = Math.max(1, Math.round(workMs / 60000));
+    const viewerTz = getViewerTimeZone();
+    const today = Temporal.Now.plainDateISO(viewerTz);
+    const appts = client.appointments ?? [];
+    const idx = appts.findIndex((a) => {
+      try {
+        const tz = a.appointmentTimeZone || viewerTz;
+        const d = Temporal.Instant.from(a.startUtc).toZonedDateTimeISO(tz).toPlainDate();
+        return d.equals(today);
+      } catch {
+        return false;
+      }
+    });
+    if (idx < 0) return client;
+    const appt = appts[idx];
+    const newEndUtc = endUtcFromDuration(appt.startUtc, mins);
+    const nextAppts = appts.map((a, i) =>
+      i === idx ? { ...a, endUtc: newEndUtc } : a
+    );
+    return { ...client, appointments: nextAppts };
+  }
+
   function handleTimerStop() {
-    applyTimerMutation(stopEvent);
+    if (!activeTimerEvent || !timerOwnerClientId) return;
+    if (!activeClient || activeClient.id !== timerOwnerClientId) {
+      console.error("[timer] stop refused — active client is not the timer owner");
+      return;
+    }
+    const nextTimeline = stopEvent(activeClient.workTimeline, activeTimerEvent.id);
+    const stopped = nextTimeline.find((e) => e.id === activeTimerEvent.id);
+    let nextClient: Client = { ...activeClient, workTimeline: nextTimeline };
+    if (stopped) nextClient = applyAssessmentEndTime(nextClient, stopped);
+    setActiveClient(nextClient);
+    setIsDirty(true);
     // The post-stop sync effect below picks up the closed event and
-    // clears activeTimerEvent + timerOwnerClientId. Don't clear inline:
-    // the activeClient state hasn't flushed yet, so an immediate clear
-    // would race the subsequent useEffect re-derive.
+    // clears activeTimerEvent + timerOwnerClientId.
   }
 
   // Keep the active-event reference in sync with the active client's
@@ -317,7 +366,9 @@ function Root() {
         : clients.find((c) => c.id === timerOwnerClientId) ?? null;
     if (owner) {
       const closedTimeline = stopEvent(owner.workTimeline, activeTimerEvent.id);
-      const updatedOwner: Client = { ...owner, workTimeline: closedTimeline };
+      const stopped = closedTimeline.find((e) => e.id === activeTimerEvent.id);
+      let updatedOwner: Client = { ...owner, workTimeline: closedTimeline };
+      if (stopped) updatedOwner = applyAssessmentEndTime(updatedOwner, stopped);
       setClients((prev) => {
         const exists = prev.some((c) => c.id === updatedOwner.id);
         return exists
@@ -614,7 +665,8 @@ function Root() {
       const tabs = clientTabs(activeClient);
       const isSchemaSection = tabs.some(
         (t) => t.id === activeClientTab &&
-               t.id !== "demographics" && t.id !== "dsm" && t.id !== "timeline"
+               t.id !== "demographics" && t.id !== "dsm" && t.id !== "mse" &&
+               t.id !== "timeline" && t.id !== "backgroundHistory"
       );
 
       const body = (() => {
@@ -638,9 +690,28 @@ function Root() {
             />
           );
         }
+        if (activeClientTab === "mse") {
+          return (
+            <MSEPage
+              key={activeClient.id}
+              client={activeClient}
+              onClientChange={handleActiveClientChange}
+              onNavigateToSymptoms={() => setActiveClientTab("symptoms")}
+            />
+          );
+        }
         if (activeClientTab === "timeline") {
           return (
             <WorkTimelinePage
+              key={activeClient.id}
+              client={activeClient}
+              onClientChange={handleActiveClientChange}
+            />
+          );
+        }
+        if (activeClientTab === "backgroundHistory") {
+          return (
+            <HistoryEditor
               key={activeClient.id}
               client={activeClient}
               onClientChange={handleActiveClientChange}

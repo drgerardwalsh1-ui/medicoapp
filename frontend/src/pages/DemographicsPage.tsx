@@ -6,6 +6,7 @@ import {
   type ClientViewModel,
 } from "../api/tauriApi";
 import DocumentCard, { type IngestedDoc } from "../components/DocumentCard";
+import AttendeesPanel from "../components/AttendeesPanel";
 import RelationshipManager, {
   type Relationship,
   defaultRelationships,
@@ -19,6 +20,7 @@ import {
   defaultReport,
   defaultInjury,
   isAppointmentToday,
+  ASSESSMENT_MODALITY_OPTIONS,
   calcAge,
   calcAgeAtDate,
   calcYearsSince,
@@ -154,7 +156,7 @@ export default function DemographicsPage({
   const inj = data.clinical.injury;
   const ref = data.administrative.referrer;
   const chk = data.assessmentChecklist ?? defaultAssessmentChecklist();
-  const att = chk.attendees ?? {};
+  const att = chk.attendees ?? defaultAttendees();
 
   const displayAge = useMemo(
     () => (ident.dateOfBirth ? calcAge(ident.dateOfBirth) : ""),
@@ -339,12 +341,12 @@ export default function DemographicsPage({
       assessmentChecklist: { ...(prev.assessmentChecklist ?? defaultAssessmentChecklist()), [field]: value },
     }));
   }
-  function updateAttendees(field: string, value: unknown) {
+  function setAttendees(next: import("../types/client").AssessmentAttendees) {
     setData((prev) => ({
       ...prev,
       assessmentChecklist: {
         ...(prev.assessmentChecklist ?? defaultAssessmentChecklist()),
-        attendees: { ...(prev.assessmentChecklist?.attendees ?? {}), [field]: value },
+        attendees: next,
       },
     }));
   }
@@ -840,9 +842,26 @@ export default function DemographicsPage({
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="label">Assessment Modality</label>
-                <input className="input" value={chk.modality || ""}
-                  placeholder="e.g. Videoconference, In-person"
-                  onChange={(e) => updateChecklist("modality", e.target.value)} />
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {ASSESSMENT_MODALITY_OPTIONS.map((o) => {
+                    const active = chk.modality === o.value;
+                    return (
+                      <button
+                        key={o.value}
+                        type="button"
+                        onClick={() => updateChecklist("modality", active ? "" : o.value)}
+                        className={[
+                          "px-2.5 py-1 rounded-full text-xs font-medium border transition select-none",
+                          active
+                            ? "bg-violet-600 border-violet-600 text-white"
+                            : "bg-white border-slate-300 text-slate-600 hover:border-violet-400 hover:text-violet-700",
+                        ].join(" ")}
+                      >
+                        {o.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
               <div className="flex items-end pb-1">
                 <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
@@ -897,50 +916,11 @@ export default function DemographicsPage({
               )}
             </div>
 
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-slate-700">Attendees</h3>
-              <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
-                <input type="checkbox" className="w-4 h-4 accent-violet-600"
-                  checked={!!att.attendedAlone}
-                  onChange={(e) => updateAttendees("attendedAlone", e.target.checked)} />
-                Attended alone
-              </label>
-              {!att.attendedAlone && (
-                <div>
-                  <label className="label">Support Person</label>
-                  <input className="input" value={att.supportPerson || ""}
-                    onChange={(e) => updateAttendees("supportPerson", e.target.value)} />
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-3">
-              <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
-                <input type="checkbox" className="w-4 h-4 accent-violet-600"
-                  checked={!!att.interpreterPresent}
-                  onChange={(e) => updateAttendees("interpreterPresent", e.target.checked)} />
-                Interpreter present
-              </label>
-              {att.interpreterPresent && (
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="label">Interpreter Name</label>
-                    <input className="input" value={att.interpreterName || ""}
-                      onChange={(e) => updateAttendees("interpreterName", e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="label">NAATI Number</label>
-                    <input className="input" value={att.interpreterNaati || ""}
-                      onChange={(e) => updateAttendees("interpreterNaati", e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="label">Language</label>
-                    <input className="input" value={att.interpreterLanguage || ""}
-                      onChange={(e) => updateAttendees("interpreterLanguage", e.target.value)} />
-                  </div>
-                </div>
-              )}
-            </div>
+            <AttendeesPanel
+              attendees={att}
+              onChange={setAttendees}
+              variant="demographics"
+            />
 
             {!chk.completed ? (
               <button type="button" onClick={markChecklistComplete} className="btn-primary">
@@ -1038,7 +1018,16 @@ function TimeSelect({
 }) {
   const [hh = "", mm = ""] = (value || "").split(":");
   const safeHH = HOURS_24.includes(hh) ? hh : "";
-  const safeMM = MINUTES_5.includes(mm) ? mm : "";
+  // Minutes derived from a timer / duration calculation are not constrained
+  // to 5-minute increments. Display whatever the appointment actually holds
+  // by injecting the real minute value as a selectable option — otherwise
+  // an off-grid value (e.g. ":47") falls through to the "MM" placeholder.
+  const isValidMinute = /^[0-5]\d$/.test(mm);
+  const safeMM = isValidMinute ? mm : "";
+  const minuteOptions =
+    isValidMinute && !MINUTES_5.includes(mm)
+      ? [...MINUTES_5, mm].sort((a, b) => Number(a) - Number(b))
+      : MINUTES_5;
 
   return (
     <div className="flex gap-1 items-center">
@@ -1051,7 +1040,7 @@ function TimeSelect({
       <select className="input" value={safeMM}
         onChange={(e) => onChange(`${safeHH || "00"}:${e.target.value}`)}>
         <option value="">MM</option>
-        {MINUTES_5.map((m) => <option key={m} value={m}>{m}</option>)}
+        {minuteOptions.map((m) => <option key={m} value={m}>{m}</option>)}
       </select>
     </div>
   );

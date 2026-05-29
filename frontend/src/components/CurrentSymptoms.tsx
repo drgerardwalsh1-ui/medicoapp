@@ -12,27 +12,24 @@ import { useState, useCallback, useRef } from "react";
 import { SymptomWorkspace } from "./DSMAssessment";
 import { SYMPTOM_DOMAINS, getDsmRefsForEntity } from "../data/symptomDomains";
 import type { SymptomDomain, SymptomDomainSection } from "../data/symptomDomains";
+import { MOOD_DESCRIPTORS } from "../data/moodState";
 import type {
   DSMAssessmentData,
   DSMTimelineEvent,
   SymptomEntity,
+  MoodState,
 } from "../types/dsm";
 import {
   getOrCreateSymptom,
   defaultDSMAssessmentData,
 } from "../types/dsm";
+import SymptomPresenceControl from "../integration/ui/SymptomPresenceControl";
 
-// ── Presence state cycle ──────────────────────────────────────────────────────
-// undefined → true → false → undefined
-// Displayed as: ○ → ● → ✕ → ○
+// ── Presence state (Phase 19.1 — direct write via shared control) ─────────────
+// undefined (?) | true (✓) | false (✗) — bound directly to currentPresence.
+// No cycle, no shadow state — SymptomPresenceControl is the only editor.
 
 type Presence = boolean | undefined;
-
-function cyclePresence(current: Presence): Presence {
-  if (current === undefined) return true;
-  if (current === true) return false;
-  return undefined;
-}
 
 // ── Domain progress ───────────────────────────────────────────────────────────
 
@@ -105,36 +102,10 @@ function QuickIndicators({ entity }: { entity: SymptomEntity | undefined }) {
   );
 }
 
-// ── Presence toggle button ────────────────────────────────────────────────────
-
-function PresenceToggle({
-  presence,
-  onToggle,
-}: {
-  presence: Presence;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      title={
-        presence === undefined ? "Unknown — click to mark Present"
-        : presence === true    ? "Present — click to mark Absent"
-        :                        "Absent — click to clear"
-      }
-      onClick={(e) => { e.stopPropagation(); onToggle(); }}
-      className={`w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-bold transition shrink-0 ${
-        presence === true
-          ? "bg-emerald-500 border-emerald-500 text-white"
-          : presence === false
-          ? "bg-red-400 border-red-400 text-white"
-          : "bg-white border-slate-300 text-slate-400 hover:border-slate-500"
-      }`}
-    >
-      {presence === true ? "●" : presence === false ? "✕" : "○"}
-    </button>
-  );
-}
+// ── Presence toggle (Phase 19.1 — shared canonical control) ───────────────────
+// Both the DSM workspace and this list now render the SAME
+// SymptomPresenceControl bound to the same currentPresence field.
+// (Legacy single-button cycle removed.)
 
 // ── Symptom list row ──────────────────────────────────────────────────────────
 
@@ -143,13 +114,13 @@ function SymptomListRow({
   entity,
   isSelected,
   onSelect,
-  onPresenceToggle,
+  onPresenceChange,
 }: {
   def: SymptomDomain["symptoms"][number];
   entity: SymptomEntity | undefined;
   isSelected: boolean;
   onSelect: () => void;
-  onPresenceToggle: () => void;
+  onPresenceChange: (next: boolean | undefined) => void;
 }) {
   const presence = entity?.currentPresence;
   const hasEvidence = entity?.currentPresence === true;
@@ -163,7 +134,7 @@ function SymptomListRow({
           : "hover:bg-slate-50 border-l-2 border-l-transparent"
       } ${hasEvidence ? "bg-emerald-50/30" : ""}`}
     >
-      <PresenceToggle presence={presence} onToggle={onPresenceToggle} />
+      <SymptomPresenceControl value={presence} onChange={onPresenceChange} />
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
@@ -300,6 +271,60 @@ function SectionHeader({
   );
 }
 
+// ── Shared mood-state panel ───────────────────────────────────────────────────
+// Bound to DSMAssessmentData.moodState — the SAME field the MSE Mood domain
+// edits. Selecting a descriptor here is instantly reflected in the MSE, and
+// vice versa. Supports general emotional-state capture alongside the DSM
+// depressive-symptom items still listed in the symptom list below.
+
+function MoodStatePanel({
+  moodState,
+  onChange,
+}: {
+  moodState: MoodState;
+  onChange: (next: MoodState) => void;
+}) {
+  function toggle(id: string) {
+    const descriptors = moodState.descriptors.includes(id)
+      ? moodState.descriptors.filter((d) => d !== id)
+      : [...moodState.descriptors, id];
+    onChange({ ...moodState, descriptors });
+  }
+  return (
+    <div className="shrink-0 border-b border-slate-200 bg-violet-50/40 px-4 py-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-semibold text-slate-700">Mood State</h3>
+        <span className="text-[10px] text-slate-400">Shared with MSE</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {MOOD_DESCRIPTORS.map((d) => {
+          const active = moodState.descriptors.includes(d.id);
+          return (
+            <button
+              key={d.id}
+              type="button"
+              onClick={() => toggle(d.id)}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition select-none ${
+                active
+                  ? "bg-violet-600 border-violet-600 text-white"
+                  : "bg-white border-slate-300 text-slate-600 hover:border-violet-400 hover:text-violet-700"
+              }`}
+            >
+              {d.label}
+            </button>
+          );
+        })}
+      </div>
+      <textarea
+        className="w-full text-xs border border-slate-200 rounded px-2 py-1.5 resize-y min-h-[40px] outline-none focus:border-violet-400"
+        placeholder="Mood / emotional state notes"
+        value={moodState.notes ?? ""}
+        onChange={(e) => onChange({ ...moodState, notes: e.target.value })}
+      />
+    </div>
+  );
+}
+
 // ── Middle panel: Symptom List ────────────────────────────────────────────────
 
 function SymptomList({
@@ -307,14 +332,14 @@ function SymptomList({
   symptoms,
   selectedEntityId,
   onSelect,
-  onPresenceToggle,
+  onPresenceChange,
   onSectionLabelChange,
 }: {
   domain: SymptomDomain;
   symptoms: Record<string, SymptomEntity>;
   selectedEntityId: string | null;
   onSelect: (entityId: string | null) => void;
-  onPresenceToggle: (entityId: string, symptomType: string) => void;
+  onPresenceChange: (entityId: string, symptomType: string, next: boolean | undefined) => void;
   onSectionLabelChange: (leadEntityId: string, newLabel: string) => void;
 }) {
   const totalPresent = domain.symptoms.filter((s) => symptoms[s.symptomEntityId]?.currentPresence === true).length;
@@ -337,7 +362,7 @@ function SymptomList({
           onSelect={() =>
             onSelect(selectedEntityId === symDef.symptomEntityId ? null : symDef.symptomEntityId)
           }
-          onPresenceToggle={() => onPresenceToggle(symDef.symptomEntityId, symDef.label)}
+          onPresenceChange={(next) => onPresenceChange(symDef.symptomEntityId, symDef.label, next)}
         />
       );
     });
@@ -436,14 +461,13 @@ export default function CurrentSymptoms({
     [data, onChange]
   );
 
-  const handlePresenceToggle = useCallback(
-    (entityId: string, symptomType: string) => {
-      const entity = data.symptoms[entityId];
-      const current = entity?.currentPresence;
-      const next = cyclePresence(current);
+  // Phase 19.1 — direct write of the chosen presence value (no cycle).
+  // SymptomPresenceControl always passes the explicit next value.
+  const handlePresenceChange = useCallback(
+    (entityId: string, symptomType: string, next: boolean | undefined) => {
       updateSymptom(entityId, symptomType, { currentPresence: next });
     },
-    [data.symptoms, updateSymptom]
+    [updateSymptom]
   );
 
   // Store a custom section label on the lead entity of an editable section
@@ -521,14 +545,22 @@ export default function CurrentSymptoms({
         {/* Middle column — Symptom list */}
         <div className="flex-1 min-w-0 overflow-hidden flex flex-col border-r border-slate-200 bg-white">
           {selectedDomain ? (
-            <SymptomList
-              domain={selectedDomain}
-              symptoms={data.symptoms}
-              selectedEntityId={selectedEntityId}
-              onSelect={setSelectedEntityId}
-              onPresenceToggle={handlePresenceToggle}
-              onSectionLabelChange={handleSectionLabelChange}
-            />
+            <>
+              {selectedDomain.id === "mood" && (
+                <MoodStatePanel
+                  moodState={data.moodState ?? { descriptors: [], notes: "" }}
+                  onChange={(next) => onChange({ ...data, moodState: next })}
+                />
+              )}
+              <SymptomList
+                domain={selectedDomain}
+                symptoms={data.symptoms}
+                selectedEntityId={selectedEntityId}
+                onSelect={setSelectedEntityId}
+                onPresenceChange={handlePresenceChange}
+                onSectionLabelChange={handleSectionLabelChange}
+              />
+            </>
           ) : (
             <div className="flex items-center justify-center h-full text-sm text-slate-400">
               Select a domain from the left panel.

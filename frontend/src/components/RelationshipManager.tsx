@@ -1,5 +1,12 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { FrequencyInput } from "./FrequencyInput";
+import {
+  usePointerReorderEngine,
+  sortHouseholdGroup,
+  moveHouseholdGroup,
+  resetHouseholdGroup,
+  HOUSEHOLD_CAPABILITIES,
+} from "../ordering";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -246,17 +253,8 @@ function formatAge(age: AgeValue): string {
   return `${age.value}${age.unit}`;
 }
 
-function ageToMonths(age: AgeValue): number {
-  if (!age) return -1;
-  return age.unit === "yr" ? age.value * 12 : age.value;
-}
-
-function getPartnerPriority(r: Relationship): number {
-  if (r.status.includes("Deceased"))  return 4;
-  if (r.status.includes("Ex"))        return 3;
-  if (r.status.includes("Separated")) return 2;
-  return 1;
-}
+// ageToMonths / getPartnerPriority live in ordering/householdStrategy.ts.
+// This file no longer needs them at module scope.
 
 export function isCurrentPartner(r: Relationship): boolean {
   return (
@@ -267,28 +265,16 @@ export function isCurrentPartner(r: Relationship): boolean {
   );
 }
 
+// Sort + manual-mode detection delegate to the centralised
+// householdStrategy. order_mode / order_index semantics are owned there
+// — this component remains the only place that renders the Reset Order
+// affordance and tracks group-level manual status.
 function isGroupManual(rels: Relationship[]): boolean {
   return rels.some((r) => r.order_mode === "manual");
 }
 
-function sortGroup(rels: Relationship[], bt: BaseType): Relationship[] {
-  // Manual order overrides everything
-  if (isGroupManual(rels)) {
-    return [...rels].sort((a, b) => (a.order_index ?? 9999) - (b.order_index ?? 9999));
-  }
-  // Partner priority sort
-  if (bt === "partner") {
-    return [...rels].sort((a, b) => getPartnerPriority(a) - getPartnerPriority(b));
-  }
-  // Auto: age DESC, ageless at end
-  return [...rels].sort((a, b) => {
-    const am = ageToMonths(a.age);
-    const bm = ageToMonths(b.age);
-    if (am === -1 && bm === -1) return 0;
-    if (am === -1) return 1;
-    if (bm === -1) return -1;
-    return bm - am;
-  });
+function sortGroup(rels: Relationship[], _bt: BaseType): Relationship[] {
+  return sortHouseholdGroup(rels);
 }
 
 // ── Chip button primitives ────────────────────────────────────────────────────
@@ -540,9 +526,6 @@ export default function RelationshipManager({
   const [showNames,     setShowNames]     = useState(false);
   const [ageRaw,        setAgeRaw]        = useState<Record<string, string>>({});
   const [batchAttrs,    setBatchAttrs]    = useState<RelationshipAttributes>({});
-  // Drag state: which id is being dragged, and which id is the current drop target
-  const [draggingId,    setDraggingId]    = useState<string | null>(null);
-  const [dragOverId,    setDragOverId]    = useState<string | null>(null);
 
   const isBatch   = selected.size >= 2;
   const singleId  = selected.size === 1 ? [...selected][0] : null;
@@ -628,7 +611,7 @@ export default function RelationshipManager({
         const insideZone =
           el.closest('[data-zone="row"]')        ||
           el.closest('[data-zone="attributes"]') ||
-          el.closest('[data-zone="drag"]')       ||
+          el.closest('[data-reorder-handle]')    ||
           el.closest('[data-zone="expand"]')     ||
           el.closest('[data-zone="delete"]');
         if (!insideZone) setEditingId(null);
@@ -679,66 +662,21 @@ export default function RelationshipManager({
   }
 
   // ── Drag-and-drop ordering ─────────────────────────────────────────────────
-
-  function handleDrop(dragId: string, dropId: string, bt: BaseType) {
-    if (dragId === dropId) return;
-    const groupRels = sortGroup(value.filter((r) => r.base_type === bt), bt);
-    const from = groupRels.findIndex((r) => r.id === dragId);
-    const to   = groupRels.findIndex((r) => r.id === dropId);
-    if (from === -1 || to === -1) return;
-    const reordered = [...groupRels];
-    const [moved] = reordered.splice(from, 1);
-    reordered.splice(to, 0, moved);
-    const stamp = new Map(reordered.map((r, i) => [r.id, i]));
-    onChange(value.map((r) => {
-      if (r.base_type !== bt) return r;
-      return { ...r, order_mode: "manual" as const, order_index: stamp.get(r.id) ?? 0 };
-    }));
-  }
-
-  // ── Pointer-event drag (replaces HTML5 DnD — reliable in Tauri/WKWebView) ───
-  // A ref (not state) carries the drag source so there are zero stale-closure issues.
-  const ptrDragRef = useRef<{ id: string; bt: BaseType } | null>(null);
-
-  function startPointerDrag(id: string, dragBt: BaseType, e: React.PointerEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    ptrDragRef.current = { id, bt: dragBt };
-    setDraggingId(id);
-
-    function onMove(ev: PointerEvent) {
-      const el = document.elementFromPoint(ev.clientX, ev.clientY);
-      const row = el?.closest("[data-rel-id]");
-      setDragOverId(row?.getAttribute("data-rel-id") ?? null);
-    }
-
-    function onUp(ev: PointerEvent) {
-      document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("pointerup", onUp);
-
-      const el = document.elementFromPoint(ev.clientX, ev.clientY);
-      const row = el?.closest("[data-rel-id]");
-      const dropId = row?.getAttribute("data-rel-id") ?? null;
-      const dropBt = row?.getAttribute("data-rel-bt") as BaseType | null;
-
-      const src = ptrDragRef.current;
-      ptrDragRef.current = null;
-      setDraggingId(null);
-      setDragOverId(null);
-
-      if (src && dropId && dropId !== src.id && dropBt === src.bt) {
-        handleDrop(src.id, dropId, src.bt);
-      }
-    }
-
-    document.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerup", onUp);
-  }
+  // Mechanics live in usePointerReorderEngine (data-reorder-id /
+  // -group / -handle). Ordering semantics — manual/auto, order_index
+  // stamping, partner-priority fallback — live in householdStrategy.
+  // This component only wires the two together and renders the Reset
+  // Order affordance.
+  const reorder = usePointerReorderEngine<string>({
+    reorderable: HOUSEHOLD_CAPABILITIES.reorderable,
+    onMove: ({ fromId, toId }) => {
+      const next = moveHouseholdGroup(value, fromId, toId);
+      if (next !== value) onChange(next);
+    },
+  });
 
   function resetGroupOrder(bt: BaseType) {
-    onChange(value.map((r) =>
-      r.base_type === bt ? { ...r, order_mode: "auto" as const, order_index: undefined } : r
-    ));
+    onChange(resetHouseholdGroup(value, bt));
   }
 
   // ── Batch apply ───────────────────────────────────────────────────────────
@@ -916,29 +854,33 @@ export default function RelationshipManager({
                     const rawAge      = ageDisplay(rel);
                     const badAge      = !!ageRaw[rel.id] && !parseAge(ageRaw[rel.id] ?? "");
                     const statusOpts  = getStatusOptions(rel.base_type);
-                    const isDragOver  = dragOverId === rel.id && draggingId !== rel.id;
+                    const handle = reorder.getHandleProps(rel.id);
+                    const isDragOver = handle.isDragOver;
+                    const isDragging = handle.isDragging;
 
                     return (
                       <div key={rel.id} data-zone="row">
                         {/* ── Chip row ── zones: D(drag) · multi-sel(checkbox) · B(expand) · A(label) · age · name · C(delete) */}
                         <div
-                          data-rel-id={rel.id}
-                          data-rel-bt={bt}
+                          {...reorder.getRowProps(rel.id, bt)}
                           onClick={(e) => { e.stopPropagation(); handleInteraction(e.metaKey || e.ctrlKey ? { type: "toggle_select", id: rel.id } : { type: "select", id: rel.id }); }}
                           className={`flex items-center gap-1 px-1.5 py-1 rounded text-xs transition select-none ${
                             isDragOver  ? "ring-2 ring-violet-400 bg-violet-50" :
                             isSel       ? "bg-violet-50" :
                             isOpen      ? "bg-slate-50" :
                             "hover:bg-slate-50"
-                          } ${draggingId === rel.id ? "opacity-40" : ""}`}>
+                          } ${isDragging ? "opacity-40" : ""}`}>
 
-                          {/* Zone D — Drag handle (pointer events, not HTML5 DnD) */}
-                          <span
-                            data-zone="drag"
-                            onPointerDown={(e) => startPointerDrag(rel.id, bt, e)}
-                            onClick={(e) => e.stopPropagation()}
-                            className="text-slate-300 cursor-grab shrink-0 select-none leading-none text-sm px-0.5 hover:text-slate-500"
-                            title="Drag to reorder">⠿</span>
+                          {/* Zone D — Drag handle (pointer events via shared engine).
+                              Rendered only when the strategy declares the
+                              list reorderable. */}
+                          {HOUSEHOLD_CAPABILITIES.reorderable && (
+                            <span
+                              {...handle}
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-slate-300 cursor-grab shrink-0 select-none leading-none text-sm px-0.5 hover:text-slate-500"
+                              title="Drag to reorder">⠿</span>
+                          )}
 
                           {/* Multi-select checkbox — independent of Zone A */}
                           <input type="checkbox" className="w-3 h-3 accent-violet-600 shrink-0 cursor-pointer"

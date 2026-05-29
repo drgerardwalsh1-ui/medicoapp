@@ -42,9 +42,14 @@ export function deriveSchema(client: Client | null): ReportSchema {
   return overlay ? applyOverlay(base, overlay) : base;
 }
 
-// Tab order: Demographics → schema sections up to and including "symptoms" →
-// DSM Assessment → remaining schema sections → Work Timeline.
-// This places DSM immediately after Current Symptoms in the tab bar.
+// Tab order:
+//   Demographics → History of Injury → Background History → Current Symptoms →
+//   DSM Assessment → PIRS Assessment → Opinion → Work Timeline
+// History of Injury is the schema-driven "history" section (free-text narrative
+// of mechanism / event). Background History is the structured clinical-entity
+// editor — its tab id is "backgroundHistory" to avoid collision with the
+// schema section id (the previous "history" id collided and lit both tabs
+// simultaneously).
 export function clientTabs(client: Client | null): ClientTab[] {
   const schema = deriveSchema(client);
   const schemaTabs = schema.sections.map((s) => ({
@@ -53,18 +58,41 @@ export function clientTabs(client: Client | null): ClientTab[] {
     disabledForNewClient: true,
   }));
 
-  // Find the index of the "symptoms" section so DSM can be inserted after it.
+  const historyIdx = schemaTabs.findIndex((t) => t.id === "history");
   const symptomsIdx = schemaTabs.findIndex((t) => t.id === "symptoms");
-  const insertAt = symptomsIdx >= 0 ? symptomsIdx + 1 : schemaTabs.length;
 
+  const backgroundHistoryTab: ClientTab = {
+    id: "backgroundHistory",
+    label: "Background History",
+    disabledForNewClient: true,
+  };
   const dsmTab: ClientTab = { id: "dsm", label: "DSM Assessment", disabledForNewClient: true };
+  const mseTab: ClientTab = { id: "mse", label: "MSE", disabledForNewClient: true };
+
+  // Splice schema tabs around our inserted tabs:
+  //   [..before history+1] (= Demographics through "History of Injury")
+  //   → Background History
+  //   → [..through symptoms]
+  //   → DSM
+  //   → MSE
+  //   → [remaining schema (pirs, opinion, …)]
+  //   → Work Timeline
+  const beforeBackground = historyIdx >= 0 ? schemaTabs.slice(0, historyIdx + 1) : schemaTabs;
+  const betweenBackgroundAndDsm =
+    historyIdx >= 0 && symptomsIdx >= 0
+      ? schemaTabs.slice(historyIdx + 1, symptomsIdx + 1)
+      : [];
+  const afterDsm = symptomsIdx >= 0 ? schemaTabs.slice(symptomsIdx + 1) : [];
 
   return [
     { id: "demographics", label: "Demographics", disabledForNewClient: false },
-    ...schemaTabs.slice(0, insertAt),
+    ...beforeBackground,
+    backgroundHistoryTab,
+    ...betweenBackgroundAndDsm,
     dsmTab,
-    ...schemaTabs.slice(insertAt),
-    { id: "timeline",     label: "Work Timeline", disabledForNewClient: true },
+    mseTab,
+    ...afterDsm,
+    { id: "timeline", label: "Work Timeline", disabledForNewClient: true },
   ];
 }
 

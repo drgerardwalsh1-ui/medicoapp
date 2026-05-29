@@ -556,6 +556,49 @@ fn attach_document(
     Ok(document_id)
 }
 
+// ─── Phase 7 — clinician decision persistence (opaque JSON only) ─────────────
+// Stores the clinician's ClinicalDecision and the frozen ReportSnapshotV2 as
+// opaque JSON lines. It does NOT interpret, modify, validate, or recompute any
+// clinical content — it only writes and returns a storage confirmation.
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistConfirmation {
+    id: String,
+    saved_at: String,
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn persist_clinical_decision(
+    snapshot: serde_json::Value,
+    decision: serde_json::Value,
+) -> Result<PersistConfirmation, String> {
+    use std::io::Write;
+
+    let id = uuid::Uuid::now_v7().to_string();
+    let saved_at = chrono::Utc::now().to_rfc3339();
+
+    let record = serde_json::json!({
+        "id": id,
+        "savedAt": saved_at,
+        "snapshot": snapshot,
+        "decision": decision,
+    });
+    let mut line = serde_json::to_string(&record).map_err(|e| e.to_string())?;
+    line.push('\n');
+
+    let path = event_store::default_clinical_decisions_path();
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("persist_clinical_decision: open failed: {e}"))?;
+    f.write_all(line.as_bytes())
+        .map_err(|e| format!("persist_clinical_decision: write failed: {e}"))?;
+
+    Ok(PersistConfirmation { id, saved_at })
+}
+
 // ─── Core commands (always compiled) ─────────────────────────────────────────
 
 #[tauri::command]
@@ -4290,6 +4333,8 @@ pub fn run() {
             export_all_data,
             save_text_file,
             reveal_in_finder,
+            // ── Phase 7 — clinician decision persistence ─────────────────────
+            persist_clinical_decision,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

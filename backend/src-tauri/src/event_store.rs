@@ -202,6 +202,12 @@ pub fn default_projection_db_path() -> PathBuf {
     base_dir().join("projection.db")
 }
 
+/// Standalone append-only store for Phase 7 clinician decisions + snapshots.
+/// Opaque JSON-lines; not part of the event-sourced engine schema.
+pub fn default_clinical_decisions_path() -> PathBuf {
+    base_dir().join("clinical_decisions.jsonl")
+}
+
 fn base_dir() -> PathBuf {
     if let Some(home) = dirs_home() {
         let dir = home.join(".medicoapp");

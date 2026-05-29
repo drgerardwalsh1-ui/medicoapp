@@ -1,0 +1,331 @@
+{
+  "stableStrings": [
+    "{\"audit\":{\"generatedAt\":\"T1\",\"snapshotHash\":\"h1\"},\"diagnoses\":[{\"candidacyState\":\"approaching_threshold\",\"id\":\"mdd\",\"semanticState\":\"subthreshold\"},{\"candidacyState\":\"approaching_threshold\",\"id\":\"pdd\",\"semanticState\":\"possible\"}],\"differentials\":[{\"groupId\":\"mood_polarity\",\"members\":[\"mdd\",\"pdd\"],\"resolved\":false}],\"meta\":{\"generatedAt\":\"T1\",\"snapshotHash\":\"h1\"},\"observations\":[\"{\\\"presence\\\":\\\"present\\\",\\\"symptomId\\\":\\\"depressed_mood\\\",\\\"symptomName\\\":\\\"depressed_mood\\\"}\"],\"temporal\":[{\"diagnosisId\":\"pdd\",\"diagnosisName\":\"PDD\",\"reason\":\"≥2-year chronicity not documented\",\"temporalState\":\"temporally_unknown\"}],\"version\":\"1.0.0\"}",
+    "{\"audit\":{\"generatedAt\":\"T2\",\"snapshotHash\":\"h2\"},\"diagnoses\":[{\"candidacyState\":\"approaching_threshold\",\"id\":\"mdd\",\"semanticState\":\"differential_primary\"},{\"candidacyState\":\"threshold_likely_met\",\"id\":\"pdd\",\"semanticState\":\"differential_primary\"}],\"differentials\":[{\"groupId\":\"mood_polarity\",\"members\":[\"mdd\",\"pdd\"],\"resolved\":false}],\"meta\":{\"generatedAt\":\"T2\",\"snapshotHash\":\"h2\"},\"observations\":[\"{\\\"presence\\\":\\\"present\\\",\\\"symptomId\\\":\\\"depressed_mood\\\",\\\"symptomName\\\":\\\"depressed_mood\\\"}\",\"{\\\"presence\\\":\\\"present\\\",\\\"symptomId\\\":\\\"anhedonia\\\",\\\"symptomName\\\":\\\"anhedonia\\\"}\"],\"temporal\":[{\"diagnosisId\":\"pdd\",\"diagnosisName\":\"PDD\",\"reason\":\"Documented depressed-mood duration ≥ 2 years\",\"temporalState\":\"temporally_supported\"}],\"version\":\"1.0.0\"}",
+    "{\"audit\":{\"generatedAt\":\"T3\",\"replayHash\":\"r-3\",\"snapshotHash\":\"h3\"},\"clinicianDecisions\":[{\"conclusion\":\"confirmed\",\"diagnosisId\":\"pdd\",\"diagnosisName\":\"PDD\",\"overrideFromSystem\":false}],\"diagnoses\":[{\"candidacyState\":\"approaching_threshold\",\"id\":\"mdd\",\"semanticState\":\"subthreshold\"},{\"candidacyState\":\"threshold_likely_met\",\"id\":\"pdd\",\"rationale\":\"Chronicity met\",\"semanticState\":\"likely\"}],\"differentials\":[{\"groupId\":\"mood_polarity\",\"members\":[\"mdd\",\"pdd\"],\"resolved\":false}],\"meta\":{\"generatedAt\":\"T3\",\"snapshotHash\":\"h3\"},\"observations\":[\"{\\\"presence\\\":\\\"present\\\",\\\"symptomId\\\":\\\"depressed_mood\\\",\\\"symptomName\\\":\\\"depressed_mood\\\"}\",\"{\\\"presence\\\":\\\"present\\\",\\\"symptomId\\\":\\\"anhedonia\\\",\\\"symptomName\\\":\\\"anhedonia\\\"}\"],\"temporal\":[{\"diagnosisId\":\"pdd\",\"diagnosisName\":\"PDD\",\"reason\":\"Documented depressed-mood duration ≥ 2 years\",\"temporalState\":\"temporally_supported\"}],\"version\":\"1.0.0\"}"
+  ],
+  "envelopes": [
+    {
+      "reportHash": "c17fc98c304df1a03598200b20599f4264ba5beedd92396fc9916425ceded5f7",
+      "algorithm": "HMAC-SHA256",
+      "keyId": "v1-default",
+      "createdAt": "T-RUNTIME"
+    },
+    {
+      "reportHash": "68b6ab5db15817dc37dc697a7bff485cecbe55fe0d2377d38398af589d2b175e",
+      "algorithm": "HMAC-SHA256",
+      "keyId": "v1-default",
+      "createdAt": "T-RUNTIME"
+    },
+    {
+      "reportHash": "e2d0ab54ec665967dbaaaac2ccfb529d42b815f775f24850679d970dd5463596",
+      "algorithm": "HMAC-SHA256",
+      "keyId": "v1-default",
+      "createdAt": "T-RUNTIME"
+    }
+  ],
+  "stepwiseDiffs": [
+    {
+      "changedSections": [
+        {
+          "section": "audit",
+          "path": "audit.generatedAt",
+          "before": "T1",
+          "after": "T2"
+        },
+        {
+          "section": "audit",
+          "path": "audit.snapshotHash",
+          "before": "h1",
+          "after": "h2"
+        },
+        {
+          "section": "diagnoses",
+          "path": "diagnoses[0].semanticState",
+          "before": "subthreshold",
+          "after": "differential_primary"
+        },
+        {
+          "section": "diagnoses",
+          "path": "diagnoses[1].candidacyState",
+          "before": "approaching_threshold",
+          "after": "threshold_likely_met"
+        },
+        {
+          "section": "diagnoses",
+          "path": "diagnoses[1].semanticState",
+          "before": "possible",
+          "after": "differential_primary"
+        },
+        {
+          "section": "meta",
+          "path": "meta.generatedAt",
+          "before": "T1",
+          "after": "T2"
+        },
+        {
+          "section": "meta",
+          "path": "meta.snapshotHash",
+          "before": "h1",
+          "after": "h2"
+        },
+        {
+          "section": "temporal",
+          "path": "temporal[0].reason",
+          "before": "≥2-year chronicity not documented",
+          "after": "Documented depressed-mood duration ≥ 2 years"
+        },
+        {
+          "section": "temporal",
+          "path": "temporal[0].temporalState",
+          "before": "temporally_unknown",
+          "after": "temporally_supported"
+        }
+      ],
+      "addedFields": [
+        {
+          "path": "observations[1]",
+          "value": "{\"presence\":\"present\",\"symptomId\":\"anhedonia\",\"symptomName\":\"anhedonia\"}"
+        }
+      ],
+      "removedFields": [],
+      "identical": false
+    },
+    {
+      "changedSections": [
+        {
+          "section": "audit",
+          "path": "audit.generatedAt",
+          "before": "T2",
+          "after": "T3"
+        },
+        {
+          "section": "audit",
+          "path": "audit.snapshotHash",
+          "before": "h2",
+          "after": "h3"
+        },
+        {
+          "section": "diagnoses",
+          "path": "diagnoses[0].semanticState",
+          "before": "differential_primary",
+          "after": "subthreshold"
+        },
+        {
+          "section": "diagnoses",
+          "path": "diagnoses[1].semanticState",
+          "before": "differential_primary",
+          "after": "likely"
+        },
+        {
+          "section": "meta",
+          "path": "meta.generatedAt",
+          "before": "T2",
+          "after": "T3"
+        },
+        {
+          "section": "meta",
+          "path": "meta.snapshotHash",
+          "before": "h2",
+          "after": "h3"
+        }
+      ],
+      "addedFields": [
+        {
+          "path": "audit.replayHash",
+          "value": "r-3"
+        },
+        {
+          "path": "clinicianDecisions",
+          "value": [
+            {
+              "diagnosisId": "pdd",
+              "diagnosisName": "PDD",
+              "conclusion": "confirmed",
+              "overrideFromSystem": false
+            }
+          ]
+        },
+        {
+          "path": "diagnoses[1].rationale",
+          "value": "Chronicity met"
+        }
+      ],
+      "removedFields": [],
+      "identical": false
+    }
+  ],
+  "replay": {
+    "steps": [
+      {
+        "fromHash": "h1",
+        "toHash": "h2",
+        "structuralDiff": {
+          "changedSections": [
+            {
+              "section": "audit",
+              "path": "audit.generatedAt",
+              "before": "T1",
+              "after": "T2"
+            },
+            {
+              "section": "audit",
+              "path": "audit.snapshotHash",
+              "before": "h1",
+              "after": "h2"
+            },
+            {
+              "section": "diagnoses",
+              "path": "diagnoses[0].semanticState",
+              "before": "subthreshold",
+              "after": "differential_primary"
+            },
+            {
+              "section": "diagnoses",
+              "path": "diagnoses[1].candidacyState",
+              "before": "approaching_threshold",
+              "after": "threshold_likely_met"
+            },
+            {
+              "section": "diagnoses",
+              "path": "diagnoses[1].semanticState",
+              "before": "possible",
+              "after": "differential_primary"
+            },
+            {
+              "section": "meta",
+              "path": "meta.generatedAt",
+              "before": "T1",
+              "after": "T2"
+            },
+            {
+              "section": "meta",
+              "path": "meta.snapshotHash",
+              "before": "h1",
+              "after": "h2"
+            },
+            {
+              "section": "temporal",
+              "path": "temporal[0].reason",
+              "before": "≥2-year chronicity not documented",
+              "after": "Documented depressed-mood duration ≥ 2 years"
+            },
+            {
+              "section": "temporal",
+              "path": "temporal[0].temporalState",
+              "before": "temporally_unknown",
+              "after": "temporally_supported"
+            }
+          ],
+          "addedFields": [
+            {
+              "path": "observations[1]",
+              "value": "{\"presence\":\"present\",\"symptomId\":\"anhedonia\",\"symptomName\":\"anhedonia\"}"
+            }
+          ],
+          "removedFields": [],
+          "identical": false
+        }
+      },
+      {
+        "fromHash": "h2",
+        "toHash": "h3",
+        "structuralDiff": {
+          "changedSections": [
+            {
+              "section": "audit",
+              "path": "audit.generatedAt",
+              "before": "T2",
+              "after": "T3"
+            },
+            {
+              "section": "audit",
+              "path": "audit.snapshotHash",
+              "before": "h2",
+              "after": "h3"
+            },
+            {
+              "section": "diagnoses",
+              "path": "diagnoses[0].semanticState",
+              "before": "differential_primary",
+              "after": "subthreshold"
+            },
+            {
+              "section": "diagnoses",
+              "path": "diagnoses[1].semanticState",
+              "before": "differential_primary",
+              "after": "likely"
+            },
+            {
+              "section": "meta",
+              "path": "meta.generatedAt",
+              "before": "T2",
+              "after": "T3"
+            },
+            {
+              "section": "meta",
+              "path": "meta.snapshotHash",
+              "before": "h2",
+              "after": "h3"
+            }
+          ],
+          "addedFields": [
+            {
+              "path": "audit.replayHash",
+              "value": "r-3"
+            },
+            {
+              "path": "clinicianDecisions",
+              "value": [
+                {
+                  "diagnosisId": "pdd",
+                  "diagnosisName": "PDD",
+                  "conclusion": "confirmed",
+                  "overrideFromSystem": false
+                }
+              ]
+            },
+            {
+              "path": "diagnoses[1].rationale",
+              "value": "Chronicity met"
+            }
+          ],
+          "removedFields": [],
+          "identical": false
+        }
+      }
+    ],
+    "invariantPaths": [
+      "diagnoses[0].candidacyState",
+      "diagnoses[0].id",
+      "diagnoses[1].id",
+      "differentials[0].groupId",
+      "differentials[0].members[0]",
+      "differentials[0].members[1]",
+      "differentials[0].resolved",
+      "observations[0]",
+      "temporal[0].diagnosisId",
+      "temporal[0].diagnosisName",
+      "version"
+    ],
+    "volatilePaths": [
+      "audit.generatedAt",
+      "audit.replayHash",
+      "audit.snapshotHash",
+      "clinicianDecisions[0].conclusion",
+      "clinicianDecisions[0].diagnosisId",
+      "clinicianDecisions[0].diagnosisName",
+      "clinicianDecisions[0].overrideFromSystem",
+      "diagnoses[0].semanticState",
+      "diagnoses[1].candidacyState",
+      "diagnoses[1].rationale",
+      "diagnoses[1].semanticState",
+      "meta.generatedAt",
+      "meta.snapshotHash",
+      "observations[1]",
+      "temporal[0].reason",
+      "temporal[0].temporalState"
+    ],
+    "identicalAcrossAll": false
+  }
+}

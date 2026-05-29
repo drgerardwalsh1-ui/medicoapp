@@ -11,6 +11,8 @@
 
 import { useState, useCallback } from "react";
 import { FrequencyInput } from "./FrequencyInput";
+import SymptomPresenceControl from "../integration/ui/SymptomPresenceControl";
+import CriterionTriStateControl from "../integration/ui/CriterionTriStateControl";
 import {
   DSM5_CATEGORIES,
   DSM5_DIAGNOSES,
@@ -367,7 +369,7 @@ function SymptomRow({
       </div>
 
       <div onClick={(e) => e.stopPropagation()}>
-        <TriStateControl value={status} onChange={onStatusChange} compact />
+        <CriterionTriStateControl value={status} onChange={onStatusChange} compact />
       </div>
     </div>
   );
@@ -451,7 +453,7 @@ function CriterionBEPanel({
         <StatusDot status={status} />
         <span className="flex-1 text-xs font-medium text-slate-700">Overall assessment</span>
         <div onClick={(e) => e.stopPropagation()}>
-          <TriStateControl value={status} onChange={onStatusChange} compact />
+          <CriterionTriStateControl value={status} onChange={onStatusChange} compact />
         </div>
       </div>
 
@@ -626,7 +628,11 @@ const SYMPTOM_SEVERITY_OPTIONS: ReadonlyArray<Exclude<SymptomSeverity, "">> = [
   "mild", "moderate", "severe",
 ];
 const EPISODE_SEVERITY_OPTIONS: ReadonlyArray<Exclude<EpisodeSeverity, "">> = [
-  "mild", "moderate", "moderate-severe", "severe",
+  "mild", "moderate", "moderate-severe", "severe", "extreme",
+];
+// Eating disorders use a 4-level scale without "moderate-severe" (Mild/Moderate/Severe/Extreme)
+const EATING_SEVERITY_OPTIONS: ReadonlyArray<Exclude<EpisodeSeverity, "">> = [
+  "mild", "moderate", "severe", "extreme",
 ];
 
 function severityLabel(s: string): string {
@@ -749,6 +755,40 @@ export function SymptomWorkspace({
 
       <div className="px-4 py-3 space-y-4">
 
+        {/* ── BMI entry (shown when captureHints includes "bmiEntry") ── */}
+        {def.captureHints?.includes("bmiEntry") && (
+          <div className="rounded-lg bg-teal-50 border border-teal-200 px-3 py-2.5">
+            <p className="text-[10px] font-semibold text-teal-700 uppercase tracking-wider mb-2">
+              BMI / Weight Documentation
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="label text-xs">Current BMI</label>
+                <input
+                  type="text"
+                  className="input text-xs py-1.5"
+                  value={(entity.extra?.bmiValue as string) ?? ""}
+                  onChange={(e) => onUpdate({ extra: { ...entity.extra, bmiValue: e.target.value } })}
+                  placeholder="e.g. 15.2"
+                />
+                <p className="text-[9px] text-teal-600 mt-0.5 italic">
+                  Mild ≥17 · Moderate 16–16.99 · Severe 15–15.99 · Extreme &lt;15
+                </p>
+              </div>
+              <div>
+                <label className="label text-xs">Current weight</label>
+                <input
+                  type="text"
+                  className="input text-xs py-1.5"
+                  value={(entity.extra?.currentWeight as string) ?? ""}
+                  onChange={(e) => onUpdate({ extra: { ...entity.extra, currentWeight: e.target.value } })}
+                  placeholder="e.g. 42 kg"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── Substance-specific fields (shown when captureHints includes "substanceQuantity") ── */}
         {def.captureHints?.includes("substanceQuantity") && (
           <>
@@ -805,23 +845,15 @@ export function SymptomWorkspace({
           </>
         )}
 
-        {/* Current presence + severity */}
+        {/* Current presence — Phase 19.1 shared canonical control.
+            Bound directly to the same currentPresence field the symptom list
+            edits, so both surfaces stay synchronised by design. */}
         <div>
           <label className="label text-xs">Current presence</label>
-          <div className="flex gap-2">
-            <Chip
-              label="Present"
-              active={entity.currentPresence === true}
-              onClick={() => onUpdate({ currentPresence: entity.currentPresence === true ? undefined : true })}
-              variant="emerald"
-            />
-            <Chip
-              label="Absent"
-              active={entity.currentPresence === false}
-              onClick={() => onUpdate({ currentPresence: entity.currentPresence === false ? undefined : false })}
-              variant="red"
-            />
-          </div>
+          <SymptomPresenceControl
+            value={entity.currentPresence}
+            onChange={(next) => onUpdate({ currentPresence: next })}
+          />
         </div>
 
         {/* Symptom-level severity (3-level — DSM clinical-interview rating) */}
@@ -1279,15 +1311,18 @@ function DiagnosticInterpretationPanel({
           ))}
         </div>
 
-        {/* Severity — auto-suggested + clinician override */}
-        {def.severityThresholds && (
+        {/* Severity — auto-suggested (count-based) OR manual (eating disorders, SUDs) */}
+        {(def.severityThresholds || def.showManualSeverity) && (
           <div>
             <div className="flex items-center gap-2 mb-1">
               <label className="label text-xs mb-0">Episode severity</label>
-              {autoSeverity && !interp?.severityOverridden && (
+              {def.severityThresholds && autoSeverity && !interp?.severityOverridden && (
                 <span className="text-[10px] text-violet-500 italic">auto-suggested</span>
               )}
-              {interp?.severityOverridden && (
+              {def.showManualSeverity && !def.severityThresholds && (
+                <span className="text-[10px] text-slate-400 italic">clinician-rated</span>
+              )}
+              {interp?.severityOverridden && def.severityThresholds && (
                 <button
                   type="button"
                   className="text-[10px] text-slate-400 hover:text-slate-700 underline"
@@ -1298,9 +1333,12 @@ function DiagnosticInterpretationPanel({
               )}
             </div>
             <div className="flex gap-1.5 flex-wrap">
-              {EPISODE_SEVERITY_OPTIONS.map((s) => {
+              {(def.showManualSeverity && !def.severityThresholds
+                ? EATING_SEVERITY_OPTIONS
+                : EPISODE_SEVERITY_OPTIONS
+              ).map((s) => {
                 const active = effectiveSeverity === s;
-                const isAuto = autoSeverity === s && !interp?.severityOverridden;
+                const isAuto = !!def.severityThresholds && autoSeverity === s && !interp?.severityOverridden;
                 return (
                   <Chip
                     key={s}
@@ -1319,6 +1357,25 @@ function DiagnosticInterpretationPanel({
                 );
               })}
             </div>
+
+            {/* BMI entry for AN (eating disorder severity is BMI-based) */}
+            {def.showBmiEntry && (
+              <div className="mt-2 flex items-center gap-3">
+                <div>
+                  <label className="label text-xs mb-0">BMI</label>
+                  <input
+                    type="text"
+                    className="input text-xs py-1 w-24"
+                    value={interp?.bmi ?? ""}
+                    onChange={(e) => onUpdate({ bmi: e.target.value })}
+                    placeholder="e.g. 15.8"
+                  />
+                </div>
+                <p className="text-[9px] text-slate-400 mt-4 italic">
+                  Mild ≥17 · Moderate 16–16.99 · Severe 15–15.99 · Extreme &lt;15
+                </p>
+              </div>
+            )}
           </div>
         )}
 

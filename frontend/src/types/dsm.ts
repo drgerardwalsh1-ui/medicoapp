@@ -28,7 +28,8 @@ export type TriState = "unknown" | "met" | "not_met";
 // so optional severity can be cleared without becoming undefined (which
 // would round-trip differently through JSON).
 export type SymptomSeverity = "mild" | "moderate" | "severe" | "";
-export type EpisodeSeverity = "mild" | "moderate" | "moderate-severe" | "severe" | "";
+// "extreme" is used by eating disorders (AN/BN/BED BMI / episode frequency scale).
+export type EpisodeSeverity = "mild" | "moderate" | "moderate-severe" | "severe" | "extreme" | "";
 
 // ── Shared Symptom Entity ─────────────────────────────────────────────────────
 // One entity per symptom type, shared across all diagnoses that reference it.
@@ -136,22 +137,36 @@ export type DiagnosticInterpretation = {
   differentials?: string[];
   notes?: string;
   // Severity — auto-suggested from symptom count; clinician can override.
-  // Uses EpisodeSeverity (4-level) — see SymptomSeverity vs EpisodeSeverity
-  // comment at the top of this file.
+  // Uses EpisodeSeverity — see SymptomSeverity vs EpisodeSeverity comments.
   severity?: EpisodeSeverity;
   severityOverridden?: boolean;
   // Specifier chips — multi-select, diagnosis-specific
   specifiers?: string[];
+  // BMI entry — shown for eating disorders (Anorexia Nervosa severity documentation)
+  bmi?: string;
+  // Free-form extra fields for flexible disorder-specific data (e.g. OSFED subtype notes)
+  extra?: Record<string, unknown>;
 };
 
 // ── Assessment Container ───────────────────────────────────────────────────────
 // Stored in Client.dsmAssessment
+
+// Unified mood / emotional state. SINGLE source of truth shared by the
+// Current Symptoms ("Mood & Emotional State" domain) and the MSE Mood domain
+// — editing it in either place updates both. `descriptors` are ids from
+// MOOD_DESCRIPTORS (see data/moodState.ts).
+export type MoodState = {
+  descriptors: string[];
+  notes?: string;
+};
 
 export type DSMAssessmentData = {
   symptoms: Record<string, SymptomEntity>;          // keyed by symptomEntityId
   criterionAssessments: CriterionAssessment[];
   diagnosticInterpretations: DiagnosticInterpretation[];
   timelineEvents: DSMTimelineEvent[];
+  // Shared mood-state — see MoodState above.
+  moodState?: MoodState;
 };
 
 // ── DSM Definition Types (structural — not stored in assessment data) ──────────
@@ -200,6 +215,13 @@ export type DSMDiagnosisDef = {
     severe?: number;                  // if set, count >= severe → Severe (used by SUDs: 6+)
     agitationSymptomEntityId?: string; // if this entity is met + count >= moderateSevere → Severe
   };
+  // showManualSeverity: show severity chips without auto-calculation.
+  // Used by eating disorders where severity is based on BMI / episodes/week,
+  // not symptom count. Also shows "Extreme" chip.
+  showManualSeverity?: boolean;
+  // showBmiEntry: show a BMI input in the Diagnostic Summary panel.
+  // Used by Anorexia Nervosa (BMI-based severity scale).
+  showBmiEntry?: boolean;
 };
 
 // ── Default factory ───────────────────────────────────────────────────────────

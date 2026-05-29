@@ -206,6 +206,53 @@ export const TauriAPI = {
   ): Promise<number> =>
     guarded("update_client_demographics", { clientId, demographics }),
 
+  // ── Psychiatric History (event-sourced via the omnibus blob) ───────────
+  // The existing `update_client_demographics` Rust command persists the
+  // full client blob (including psychiatricHistory, see buildSaveBlob in
+  // main.tsx). These wrappers expose finer-grained, history-specific
+  // entry points so future Rust commands can replace the call site
+  // without churning every caller.
+  //
+  // FOLLOW-UP (Rust):
+  //   - update_client_psychiatric_history  → emits PsychiatricHistoryUpdated
+  //   - add_treatment_entry                → emits TreatmentEntryAdded
+  //   - update_treatment_entry             → emits TreatmentEntryUpdated
+  //   - add_medical_condition              → emits MedicalConditionAdded
+  //   - update_history_event               → emits HistoryEventUpdated
+  // Until those land, all five wrappers go through update_client_demographics
+  // with the latest full blob (already the established pattern for DSM and
+  // WorkTimeline data).
+
+  updateClientPsychiatricHistory: (
+    clientId: string,
+    fullDemographics: Record<string, unknown>
+  ): Promise<number> =>
+    guarded("update_client_demographics", { clientId, demographics: fullDemographics }),
+
+  addTreatmentEntry: (
+    clientId: string,
+    fullDemographics: Record<string, unknown>
+  ): Promise<number> =>
+    guarded("update_client_demographics", { clientId, demographics: fullDemographics }),
+
+  updateTreatmentEntry: (
+    clientId: string,
+    fullDemographics: Record<string, unknown>
+  ): Promise<number> =>
+    guarded("update_client_demographics", { clientId, demographics: fullDemographics }),
+
+  addMedicalCondition: (
+    clientId: string,
+    fullDemographics: Record<string, unknown>
+  ): Promise<number> =>
+    guarded("update_client_demographics", { clientId, demographics: fullDemographics }),
+
+  updateHistoryEvent: (
+    clientId: string,
+    fullDemographics: Record<string, unknown>
+  ): Promise<number> =>
+    guarded("update_client_demographics", { clientId, demographics: fullDemographics }),
+
   /**
    * Attach an already-extracted document to a client. Returns the new
    * document_id (UUIDv7). The frontend is expected to have already run
@@ -225,6 +272,18 @@ export const TauriAPI = {
       charCount,
       correlationId: correlationId ?? null,
     }),
+
+  // ── Phase 7 — clinician decision persistence (opaque JSON) ─────────────────
+  /**
+   * Persist a frozen ReportSnapshotV2 + ClinicalDecision as opaque JSON.
+   * The backend does not interpret or validate clinical content.
+   * Returns { id, savedAt }.
+   */
+  persistClinicalDecision: (
+    snapshot: unknown,
+    decision: unknown
+  ): Promise<{ id: string; savedAt: string }> =>
+    guarded("persist_clinical_decision", { snapshot, decision }),
 };
 
 /** Mirrors the Rust `EventHistoryItem`. */

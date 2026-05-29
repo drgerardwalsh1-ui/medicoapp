@@ -39,6 +39,7 @@ export {
   formatDateRange,
   formatTimestamp,
   formatAppointmentTime,
+  formatPartialDate,
 } from "./format";
 
 export {

@@ -1,4 +1,5 @@
 import DSMAssessment from "../components/DSMAssessment";
+import DSMErrorBoundary from "../components/DSMErrorBoundary";
 import type { Client } from "../types/client";
 import type { DSMAssessmentData } from "../types/dsm";
 
@@ -14,12 +15,14 @@ export type DSMPageProps = {
 export default function DSMPage({ client, onClientChange }: DSMPageProps) {
   return (
     <div className="h-full">
-      <DSMAssessment
-        data={client.dsmAssessment}
-        onChange={(d: DSMAssessmentData) =>
-          onClientChange({ ...client, dsmAssessment: d })
-        }
-      />
+      <DSMErrorBoundary label="DSM Assessment">
+        <DSMAssessment
+          data={client.dsmAssessment}
+          onChange={(d: DSMAssessmentData) =>
+            onClientChange({ ...client, dsmAssessment: d })
+          }
+        />
+      </DSMErrorBoundary>
     </div>
   );
 }

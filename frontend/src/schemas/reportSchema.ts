@@ -49,8 +49,7 @@ export const PIC_SCHEMA: ReportSchema = {
       id: "history",
       title: "History of Injury",
       fields: [
-        { key: "historyOfInjury", label: "History", type: "textarea" },
-        { key: "mechanismOfInjury", label: "Mechanism", type: "textarea" }
+        { key: "historyOfInjuryNarrative", label: "Claimant narrative of injury mechanism, event, and history", type: "textarea" }
       ]
     },
     {

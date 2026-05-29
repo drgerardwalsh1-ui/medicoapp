@@ -103,23 +103,84 @@ export type Appointment = CanonicalAppointment;
 
 export interface AssessmentAttendees {
   attendedAlone: boolean;
+  // Relationship chip for the support person (husband/wife/partner/son/
+  // daughter). Empty string when none chosen — `supportPerson` then holds
+  // a free-text description of the attendee instead.
+  supportPersonRelation?: string;
   supportPerson?: string;
   interpreterPresent: boolean;
+  // Coverage of the interpreter across the assessment. Carried into the
+  // MSE narrative; "" means not recorded.
+  interpreterCoverage?: "" | "entire" | "partial";
+  interpreterPartialReason?: string;
   interpreterName?: string;
   interpreterNaati?: string;
   interpreterLanguage?: string;
 }
 
+// Assessment modality — chip-selected, carried into the MSE narrative.
+export type AssessmentModality = "" | "videoconference" | "in person" | "telephone";
+
+export const ASSESSMENT_MODALITY_OPTIONS: { value: AssessmentModality; label: string }[] = [
+  { value: "videoconference", label: "Videoconference" },
+  { value: "in person", label: "In person" },
+  { value: "telephone", label: "Telephone" },
+];
+
+// Relationship chips offered for the support person, shared by the
+// Demographics and MSE attendee panels.
+export const SUPPORT_PERSON_RELATIONS = [
+  "husband",
+  "wife",
+  "partner",
+  "son",
+  "daughter",
+] as const;
+
 export interface AssessmentChecklist {
   completed: boolean;
   consentGiven: boolean | null;
-  modality: string;
+  modality: AssessmentModality;
   modalityConfirmed: boolean;
   purposeExplained: boolean;
   technicalIssues: string;
   technicalNotes?: string;
   attendees: AssessmentAttendees;
   completedAt?: string;
+}
+
+// ── Mental State Examination ──────────────────────────────────────────────────
+// Structured data underneath, generated prose layered on top. Each domain
+// stores the selected chip ids plus free-text observations. Domains default
+// to a clinically normal state — an empty `chips` array means "no abnormality".
+
+export interface MSEDomainState {
+  chips: string[];
+  notes: string;
+}
+
+export interface MSEData {
+  // Keyed by MSE domain id (see data/mseDomains.ts).
+  domains: Record<string, MSEDomainState>;
+  // Cognition / assessment-quality structured selections.
+  historyQuality?: "" | "good" | "reasonable" | "poor";
+  durationCoping?: "" | "well" | "fairly well" | "poorly";
+  concentrationDifficulty?: "" | "none" | "mild" | "moderate" | "severe";
+  // Manual narrative override. When `narrativeEdited` is true the generated
+  // prose is NOT recomputed — the clinician's edited text in `narrative`
+  // is authoritative.
+  narrative?: string;
+  narrativeEdited?: boolean;
+}
+
+export function defaultMSEData(): MSEData {
+  return {
+    domains: {},
+    historyQuality: "",
+    durationCoping: "",
+    concentrationDifficulty: "",
+    narrativeEdited: false,
+  };
 }
 
 // ── Report ────────────────────────────────────────────────────────────────────
@@ -160,6 +221,13 @@ export type Client = {
   // Authoritative chronology of work performed on this case (spec Part 17).
   // Single source of truth for timers, manual entries, and printable output.
   workTimeline?: WorkTimelineEvent[];
+  // Structured clinical history (pre-existing + subsequent events,
+  // denials, family / developmental / education / work-history /
+  // medical / treatment). Persisted via the omnibus updateClientDemographics
+  // event (see buildSaveBlob in main.tsx) — no separate event stream.
+  psychiatricHistory?: import("./history").PsychiatricHistory;
+  // Mental State Examination — structured chip data + generated narrative.
+  mse?: MSEData;
   created_at: string;
   updated_at: string;
 };
@@ -370,6 +438,20 @@ export function parseClientBlob(id: string, raw: unknown): Client {
             typeof (e as Record<string, unknown>).startedAtUtc === "string"
         )
       : [],
+    psychiatricHistory: (b.psychiatricHistory && typeof b.psychiatricHistory === "object")
+      ? (b.psychiatricHistory as import("./history").PsychiatricHistory)
+      : undefined,
+    mse: (b.mse && typeof b.mse === "object")
+      ? {
+          ...defaultMSEData(),
+          ...(b.mse as Partial<MSEData>),
+          domains:
+            (b.mse as Record<string, unknown>).domains &&
+            typeof (b.mse as Record<string, unknown>).domains === "object"
+              ? ((b.mse as MSEData).domains as Record<string, MSEDomainState>)
+              : {},
+        }
+      : undefined,
     report: {
       fields: (rawReport.fields && typeof rawReport.fields === "object" ? rawReport.fields : {}) as Record<string, unknown>,
       pirsTables: Array.isArray(rawReport.pirsTables) ? (rawReport.pirsTables as PIRSTableModel[]) : [],

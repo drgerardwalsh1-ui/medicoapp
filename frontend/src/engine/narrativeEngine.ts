@@ -13,6 +13,16 @@ import type {
   RelationshipEntry,
   ChildrenEntry,
 } from "../types/types";
+import type {
+  PsychiatricHistory,
+  HistoryEvent,
+  TreatmentEntry,
+  TreatmentHistory,
+  FrequencyValue,
+  PartialDate,
+} from "../types/history";
+import { formatPartialDate } from "../time/format";
+import { MEDICATION_CLASS_LABELS } from "../data/medications";
 
 // ── Subject ───────────────────────────────────────────────────────────────────
 
@@ -695,4 +705,322 @@ export function generateCategoryNarrative(
   }
 
   return all.join(" ");
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PSYCHIATRIC HISTORY NARRATIVE GENERATION
+// ────────────────────────────────────────────────────────────────────────────
+// Deterministic, rule-based assembly — mirrors the PIRS narrative style.
+// Reuses buildSubject, makeVerbRotator, formatFrequency, RECENCY_PHRASES.
+// No templating, no placeholders, no external engine.
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── FrequencyValue → existing formatFrequency(unit, count) ────────────────
+// Bridges the typed FrequencyValue (history types) onto the existing
+// narrative-engine frequency vocabulary so output stays consistent with PIRS.
+
+function freqValueToText(f: FrequencyValue | undefined): string {
+  if (!f) return "";
+  if (f.freeText) return f.freeText;
+  const unitMap: Record<FrequencyValue["unit"], string> = {
+    day: "Day",
+    week: "Week",
+    month: "Month",
+    year: "Year",
+  };
+  const u = unitMap[f.unit];
+  const times = f.timesPerUnit;
+  // Map common cardinalities to the existing quick-chip vocabulary.
+  let count = "";
+  if (times === 1) count = "1";
+  else if (times === 2 || times === 3) count = "2–3";
+  else if (times === 4 || times === 5) count = "4–5";
+  else if (times != null) count = String(times);
+  if (f.every && f.every > 1) {
+    return count ? `${count} every ${f.every} ${f.unit}s` : `every ${f.every} ${f.unit}s`;
+  }
+  return formatFrequency(u, count);
+}
+
+// ── PartialDate phrase ────────────────────────────────────────────────────
+function partialDatePhrase(d: PartialDate | undefined): string {
+  const t = formatPartialDate(d);
+  if (!t) return "";
+  // Year-only renders as "since 2020"; full dates render as "on …".
+  if (d && d.year != null && d.month == null) return `since ${t}`;
+  if (d && d.year != null && d.month != null && d.day == null) return `from ${t}`;
+  return `on ${t}`;
+}
+
+// ── Source attribution phrasing ───────────────────────────────────────────
+// "Documentation noted …" / "The GP records noted …" etc.
+function sourcePrefix(ev: HistoryEvent): string {
+  switch (ev.sourceType) {
+    case "records":       return "Documentation noted";
+    case "gp":            return "The GP records noted";
+    case "psychiatrist":  return "Psychiatric records noted";
+    case "psychologist":  return "Psychological records noted";
+    case "hospital":      return "Hospital records noted";
+    case "claimant":      return "";    // claimant statements use the verb rotator below
+    case "other":
+    default:              return "Records noted";
+  }
+}
+
+// ── Denial paragraph ──────────────────────────────────────────────────────
+// Full denial if all four denial flags are true; otherwise emit each
+// active denial as a separate sentence.
+export function generateDenialNarrative(
+  denials: PsychiatricHistory["psychiatricDenials"],
+  subj: NarrativeSubject
+): string {
+  const { noun, pronoun } = subj;
+  const vr = makeVerbRotator();
+  const all =
+    denials.deniedPreExistingPsychHistory &&
+    denials.deniedMentalHealthAdmissions &&
+    denials.deniedSelfHarmHistory &&
+    denials.deniedViolenceHistory;
+
+  if (all) {
+    return `${noun} ${vr()} that ${pronoun} denied any pre-existing psychiatric history, prior mental health admissions, self-harm, or history of violence.`;
+  }
+
+  const out: string[] = [];
+  if (denials.deniedPreExistingPsychHistory) {
+    out.push(`${noun} ${vr()} that ${pronoun} denied any pre-existing psychiatric history.`);
+  }
+  if (denials.deniedMentalHealthAdmissions) {
+    out.push(`${noun} ${vr()} that ${pronoun} denied any prior mental health admissions.`);
+  }
+  if (denials.deniedSelfHarmHistory) {
+    out.push(`${noun} ${vr()} that ${pronoun} denied any history of self-harm.`);
+  }
+  if (denials.deniedViolenceHistory) {
+    out.push(`${noun} ${vr()} that ${pronoun} denied any history of violence.`);
+  }
+  return out.join(" ");
+}
+
+// ── Single HistoryEvent → sentences ───────────────────────────────────────
+function sentencesForHistoryEvent(ev: HistoryEvent, subj: NarrativeSubject): string[] {
+  const { noun, pronoun, possessive } = subj;
+  const vr = makeVerbRotator();
+  const out: string[] = [];
+  const datePhrase = partialDatePhrase(ev.date);
+
+  // Anchor sentence — source-dependent attribution.
+  const titleText = ev.title ?? "an event";
+  if (ev.sourceType === "claimant") {
+    const datePart = datePhrase ? ` ${datePhrase}` : "";
+    if (ev.sourceText) {
+      out.push(`${noun} ${vr()} that ${ev.sourceText}${datePart}.`);
+    } else {
+      out.push(`${noun} ${vr()} that ${pronoun} experienced ${titleText}${datePart}.`);
+    }
+  } else {
+    const prefix = sourcePrefix(ev);
+    const datePart = datePhrase ? ` ${datePhrase}` : "";
+    if (ev.sourceText) {
+      out.push(`${prefix} ${ev.sourceText}${datePart}.`);
+    } else {
+      out.push(`${prefix} ${titleText}${datePart}.`);
+    }
+  }
+
+  // Bridging clarification when the claimant was asked about a record.
+  if (ev.claimantClarification) {
+    out.push(`When asked about that, ${pronoun} ${vr()} that ${ev.claimantClarification}.`);
+  }
+
+  // Functional impact.
+  if (ev.effectOnFunctioning) {
+    out.push(`${noun} ${vr()} that this affected ${possessive} functioning: ${ev.effectOnFunctioning}.`);
+  }
+
+  // Assessor commentary — emitted plainly (no verb rotator: it's the
+  // assessor speaking, not the claimant).
+  if (ev.assessorComment) {
+    out.push(ev.assessorComment.trim().endsWith(".") ? ev.assessorComment : `${ev.assessorComment}.`);
+  }
+
+  return out;
+}
+
+// ── History narrative (pre-existing + subsequent + denials) ───────────────
+export function generateHistoryNarrative(
+  history: PsychiatricHistory,
+  subj: NarrativeSubject
+): string {
+  const out: string[] = [];
+
+  // Pre-existing events — chronological where dates exist; original order
+  // otherwise (stable sort behaviour).
+  const pre = [...(history.preExistingEvents ?? [])].sort(byPartialDate);
+  if (pre.length) {
+    for (const ev of pre) out.push(...sentencesForHistoryEvent(ev, subj));
+  }
+
+  // Denials — emitted after pre-existing events so the report reads
+  // "what was found" then "what was denied".
+  const denialText = generateDenialNarrative(history.psychiatricDenials, subj);
+  if (denialText) out.push(denialText);
+
+  // Subsequent events (post-injury).
+  const sub = [...(history.subsequentEvents ?? [])].sort(byPartialDate);
+  if (sub.length) {
+    for (const ev of sub) out.push(...sentencesForHistoryEvent(ev, subj));
+  }
+
+  // Optional manual additions verbatim.
+  for (const extra of history.narrativeAdditions ?? []) {
+    if (!extra) continue;
+    out.push(extra.trim().endsWith(".") ? extra : `${extra}.`);
+  }
+
+  return out.join(" ");
+}
+
+function byPartialDate(a: HistoryEvent, b: HistoryEvent): number {
+  const ay = a.date?.year ?? Infinity;
+  const by = b.date?.year ?? Infinity;
+  if (ay !== by) return ay - by;
+  const am = a.date?.month ?? 13;
+  const bm = b.date?.month ?? 13;
+  if (am !== bm) return am - bm;
+  const ad = a.date?.day ?? 32;
+  const bd = b.date?.day ?? 32;
+  return ad - bd;
+}
+
+// ── Treatment narrative ───────────────────────────────────────────────────
+
+function describeTreatment(t: TreatmentEntry): string {
+  if (t.category === "medication") {
+    const cls = t.drugClass ? ` (${MEDICATION_CLASS_LABELS[t.drugClass]})` : "";
+    const dose =
+      t.dose && t.dose.value != null
+        ? ` ${t.dose.value}${t.dose.unit ?? "mg"}`
+        : "";
+    return `${t.name}${dose}${cls}`;
+  }
+  return t.name;
+}
+
+const BENEFIT_TEXT: Record<NonNullable<TreatmentEntry["perceivedBenefit"]>, string> = {
+  none:        "no perceived benefit",
+  minimal:     "minimal perceived benefit",
+  partial:     "partial perceived benefit",
+  moderate:    "moderate perceived benefit",
+  significant: "significant perceived benefit",
+};
+
+function sentencesForTreatment(t: TreatmentEntry, subj: NarrativeSubject): string[] {
+  const { noun, pronoun, possessive } = subj;
+  const vr = makeVerbRotator();
+  const out: string[] = [];
+
+  const verb = t.current ? "was taking" : "had taken";
+  const desc = describeTreatment(t);
+  const commenced = partialDatePhrase(t.commenced);
+  const ceased = t.ceased ? partialDatePhrase(t.ceased) : "";
+  const freq = freqValueToText(t.frequency);
+
+  // Opening sentence — verb + description + dates.
+  const parts: string[] = [`${noun} ${vr()} that ${pronoun} ${verb} ${desc}`];
+  if (commenced) parts.push(commenced);
+  if (!t.current && ceased) parts.push(`until ${formatPartialDate(t.ceased)}`);
+  if (freq) parts.push(freq);
+  out.push(parts.join(", ") + ".");
+
+  // Provider / indication.
+  if (t.providerName || t.indication) {
+    const segs: string[] = [];
+    if (t.providerName) segs.push(`prescribed by ${t.providerName}`);
+    if (t.indication) segs.push(`for ${t.indication}`);
+    out.push(`This was ${segs.join(" ")}.`);
+  }
+
+  // Side effects (medication only).
+  if (t.category === "medication" && t.sideEffects) {
+    out.push(`${noun} ${vr()} that ${pronoun} experienced ${t.sideEffects}.`);
+  }
+
+  // Perceived benefit.
+  if (t.perceivedBenefit) {
+    out.push(`${noun} ${vr()} ${BENEFIT_TEXT[t.perceivedBenefit]}.`);
+  }
+
+  // Cessation reason.
+  if (!t.current && t.ceasedReason) {
+    out.push(`${noun} ${vr()} that ${possessive} treatment ended because ${t.ceasedReason}.`);
+  }
+
+  // Duration override (free text if commenced/ceased not modelled).
+  if (t.durationText && !commenced && !ceased) {
+    out.push(`${noun} ${vr()} that this continued for ${t.durationText}.`);
+  }
+
+  // Free-text notes appended verbatim.
+  if (t.notes) {
+    out.push(t.notes.trim().endsWith(".") ? t.notes : `${t.notes}.`);
+  }
+
+  return out;
+}
+
+export function generateTreatmentNarrative(
+  history: TreatmentHistory,
+  subj: NarrativeSubject
+): string {
+  const out: string[] = [];
+  const treatments = history.treatments ?? [];
+
+  // Group current vs past for readability.
+  const current = treatments.filter((t) => t.current);
+  const past = treatments.filter((t) => !t.current);
+
+  if (!treatments.length) {
+    out.push(`${subj.noun} ${makeVerbRotator()()} no treatment to declare.`);
+  }
+
+  if (current.length) {
+    for (const t of current) out.push(...sentencesForTreatment(t, subj));
+  }
+  if (past.length) {
+    for (const t of past) out.push(...sentencesForTreatment(t, subj));
+  }
+
+  // Future-treatment plan, if recorded.
+  const fp = history.futureTreatment;
+  if (fp && (fp.recommended?.length || fp.notes)) {
+    const vr = makeVerbRotator();
+    if (fp.recommended?.length) {
+      const list = listJoinPublic(fp.recommended);
+      out.push(`Recommended future treatment includes ${list}.`);
+    }
+    if (fp.notes) {
+      out.push(fp.notes.trim().endsWith(".") ? fp.notes : `${fp.notes}.`);
+    }
+    // vr is reserved here in case future expansions need claimant-voiced
+    // sentences about the treatment plan (e.g. willingness to engage).
+    void vr;
+  }
+
+  for (const extra of history.treatmentNarrativeAdditions ?? []) {
+    if (!extra) continue;
+    out.push(extra.trim().endsWith(".") ? extra : `${extra}.`);
+  }
+
+  return out.join(" ");
+}
+
+// Public re-export of the private listJoin so external narrative additions
+// (developmental / education prose helpers built on top of these primitives)
+// can stay consistent without duplicating the join logic.
+export function listJoinPublic(items: string[]): string {
+  if (items.length === 0) return "";
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }

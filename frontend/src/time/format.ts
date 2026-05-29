@@ -94,3 +94,34 @@ function apptZShortLabel(tz: string): string {
   const last = tz.split("/").pop() ?? tz;
   return last.replace(/_/g, " ");
 }
+
+// ── PartialDate formatter ─────────────────────────────────────────────────
+// Display-only formatter for the history subsystem. Never used in time math.
+// Mirrors the project's existing month names so reports stay stylistically
+// consistent with the calendar header / appointment formatter above.
+
+const PARTIAL_MONTHS_LONG = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+export function formatPartialDate(
+  d: { year?: number; month?: number; day?: number; approximate?: boolean } | null | undefined
+): string {
+  if (!d || (d.year == null && d.month == null && d.day == null)) return "";
+  const approxPrefix = d.approximate ? "circa " : "";
+  if (d.year != null && d.month != null && d.day != null) {
+    const m = PARTIAL_MONTHS_LONG[d.month - 1] ?? String(d.month);
+    return `${approxPrefix}${d.day} ${m} ${d.year}`;
+  }
+  if (d.year != null && d.month != null) {
+    const m = PARTIAL_MONTHS_LONG[d.month - 1] ?? String(d.month);
+    return `${approxPrefix}${m} ${d.year}`;
+  }
+  if (d.year != null) return `${approxPrefix}${d.year}`;
+  if (d.month != null) {
+    const m = PARTIAL_MONTHS_LONG[d.month - 1] ?? String(d.month);
+    return approxPrefix + m;
+  }
+  return "";
+}
