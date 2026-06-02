@@ -41,3 +41,10 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 uuid = { version = "1", features = ["v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 
+# Persistence-boundary medico-legal integrity. Real SHA-256 for the
+# chain-of-custody anchor (`DocumentExtracted.source_bytes_sha256`),
+# the freeze-point digest (`clean_text_sha256`), and the content-derived
+# globally-unique ClinicalEvent id. `sha2` is already a transitive
+# dependency of rusqlite-bundled, so this adds no compile-time cost.
+sha2 = "0.10"
+

@@ -21,6 +21,7 @@ export default function DSMPage({ client, onClientChange }: DSMPageProps) {
           onChange={(d: DSMAssessmentData) =>
             onClientChange({ ...client, dsmAssessment: d })
           }
+          scrollKeyBase={`client:${client.id}:dsm`}
         />
       </DSMErrorBoundary>
     </div>

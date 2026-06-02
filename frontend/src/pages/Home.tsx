@@ -1,10 +1,14 @@
 import { useState } from "react";
 import { formatFullName, type Client } from "../types/client";
+import { validateClientName } from "../types/clientValidation";
 import {
   formatTime24,
   getViewerTimeZone,
   isFutureInstant,
   compareInstants,
+  viewerWeekStartDate,
+  viewerPlainDate,
+  addDaysToPlainDate,
 } from "../time";
 import { Temporal } from "@js-temporal/polyfill";
 
@@ -40,15 +44,6 @@ function nextAppointmentISO(client: Client): string | null {
   return nextAppointmentStart(client);
 }
 
-function compareNext(a: Client, b: Client): number {
-  const sa = nextAppointmentStart(a);
-  const sb = nextAppointmentStart(b);
-  if (sa === null && sb === null) return 0;
-  if (sa === null) return 1;
-  if (sb === null) return -1;
-  return compareInstants(sa, sb);
-}
-
 export default function Home({
   clients,
   setActiveClient,
@@ -60,37 +55,62 @@ export default function Home({
 }) {
   const [selectedId, setSelectedId] = useState("");
 
-  // Sort: clients with upcoming appointments first (soonest first), then the rest.
-  const sorted = [...clients].sort(compareNext);
+  // STRICT: a persisted client list must never render an entry without a
+  // valid name. After the save-gate no NEW nameless client can exist;
+  // this filter additionally suppresses any legacy phantom rows so
+  // "Unnamed Client" can never appear in the quick-select or week lists.
+  // (The rows still exist in the DB and remain recoverable via the
+  // System page — they are only hidden from these persisted lists.)
+  const namedClients = clients.filter((c) => validateClientName(c.identity).ok);
 
-  const nowMs = Temporal.Now.instant().epochMilliseconds;
-  const msInDay = 24 * 60 * 60 * 1000;
+  const tz = getViewerTimeZone();
+  const thisWeekStart = viewerWeekStartDate(
+    Temporal.Now.instant().toString(),
+    tz,
+  );
 
-  function msUntilNext(c: Client): number {
-    const iso = nextAppointmentStart(c);
-    if (iso === null) return Infinity;
-    return Temporal.Instant.from(iso).epochMilliseconds - nowMs;
+  // Returns the earliest appointment start (ISO) for `c` within the
+  // Monday-Sunday week at `offset` (-1, 0, 1) relative to the viewer's current
+  // week, or null if none.
+  function earliestInWeekOffset(c: Client, offset: number): string | null {
+    const weekStart = addDaysToPlainDate(thisWeekStart, offset * 7);
+    const weekEndExclusive = addDaysToPlainDate(weekStart, 7);
+    const appts = c.appointments;
+    if (!Array.isArray(appts) || appts.length === 0) return null;
+    const inWeek = appts
+      .filter((a) => {
+        const d = viewerPlainDate(a.startUtc, tz);
+        return d >= weekStart && d < weekEndExclusive;
+      })
+      .map((a) => a.startUtc)
+      .sort(compareInstants);
+    return inWeek[0] ?? null;
   }
 
-  const thisWeek = sorted.filter((c) => {
-    const t = msUntilNext(c);
-    return t !== Infinity && t <= 7 * msInDay;
-  });
+  function clientsForWeekOffset(offset: number): Client[] {
+    return namedClients
+      .map((c) => ({ c, start: earliestInWeekOffset(c, offset) }))
+      .filter((x): x is { c: Client; start: string } => x.start !== null)
+      .sort((a, b) => compareInstants(a.start, b.start))
+      .map((x) => x.c);
+  }
 
-  const nextWeek = sorted.filter((c) => {
-    const t = msUntilNext(c);
-    return t !== Infinity && t > 7 * msInDay && t <= 14 * msInDay;
-  });
+  const lastWeekClients = clientsForWeekOffset(-1);
+  const thisWeekClients = clientsForWeekOffset(0);
+  const nextWeekClients = clientsForWeekOffset(1);
 
   function handleSelect(id: string) {
     if (!id) return;
     if (id === "NEW") { startCreate(); return; }
-    const c = clients.find((cl) => cl.id === id);
+    const c = namedClients.find((cl) => cl.id === id);
     if (c) setActiveClient(c);
   }
 
+  // namedClients guarantees a non-empty name, so formatFullName never
+  // returns "". The fallback below is defensive only and deliberately
+  // NOT the phantom "Unnamed Client" string.
   function clientDisplayName(c: Client): string {
-    return formatFullName(c.identity) || "Unnamed Client";
+    return formatFullName(c.identity) || "Client";
   }
 
   function ClientRow({ c }: { c: Client }) {
@@ -129,7 +149,7 @@ export default function Home({
           }}
         >
           <option value="">— Select Client —</option>
-          {clients.map((c) => (
+          {namedClients.map((c) => (
             <option key={c.id as string} value={c.id as string}>
               {clientDisplayName(c)}
             </option>
@@ -148,49 +168,55 @@ export default function Home({
         </button>
       </div>
 
-      {/* This week */}
-      {thisWeek.length > 0 && (
-        <div className="mb-4">
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-2">
-            This Week
-          </h2>
+      {/* Last week */}
+      <div className="mb-4">
+        <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-2">
+          Last Week
+        </h2>
+        {lastWeekClients.length > 0 ? (
           <div className="space-y-2">
-            {thisWeek.map((c) => (
+            {lastWeekClients.map((c) => (
               <ClientRow key={c.id as string} c={c} />
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-xs text-slate-400">No appointments last week</p>
+        )}
+      </div>
+
+      {/* This week */}
+      <div className="mb-4">
+        <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-2">
+          This Week
+        </h2>
+        {thisWeekClients.length > 0 ? (
+          <div className="space-y-2">
+            {thisWeekClients.map((c) => (
+              <ClientRow key={c.id as string} c={c} />
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-slate-400">No appointments this week</p>
+        )}
+      </div>
 
       {/* Next week */}
-      {nextWeek.length > 0 && (
-        <div className="mb-4">
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-2">
-            Next Week
-          </h2>
+      <div className="mb-4">
+        <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-2">
+          Next Week
+        </h2>
+        {nextWeekClients.length > 0 ? (
           <div className="space-y-2">
-            {nextWeek.map((c) => (
+            {nextWeekClients.map((c) => (
               <ClientRow key={c.id as string} c={c} />
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-xs text-slate-400">No appointments next week</p>
+        )}
+      </div>
 
-      {/* All clients */}
-      {clients.length > 0 && (
-        <div>
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-2">
-            All Clients
-          </h2>
-          <div className="space-y-2">
-            {sorted.map((c) => (
-              <ClientRow key={c.id as string} c={c} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {clients.length === 0 && (
+      {namedClients.length === 0 && (
         <div className="text-center text-slate-400 py-12">
           <p className="text-sm">No clients yet.</p>
           <p className="text-xs mt-1">

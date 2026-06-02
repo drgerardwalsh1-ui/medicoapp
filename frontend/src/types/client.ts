@@ -228,6 +228,14 @@ export type Client = {
   psychiatricHistory?: import("./history").PsychiatricHistory;
   // Mental State Examination — structured chip data + generated narrative.
   mse?: MSEData;
+  // Projection-sourced uploaded-document list (file_name / method /
+  // char_count / uploaded_at), carried in memory from
+  // `getClientView().documents` via `viewToClient`. This is a READ-MODEL
+  // projection, NOT demographics: it is the source of truth the UI uses
+  // to rehydrate document cards across navigation. It is never written
+  // back through `buildSaveBlob` (documents live in the projection
+  // `documents` table, populated by the ingestion boundary).
+  documents?: import("../api/tauriApi").DocumentSummary[];
   created_at: string;
   updated_at: string;
 };
@@ -297,10 +305,50 @@ export function defaultReport(): Report {
   };
 }
 
+/**
+ * Sentinel id for an in-memory draft client that has NOT been persisted.
+ *
+ * `defaultClient()` used to mint a `crypto.randomUUID()` here, which the
+ * upload path then treated as a real client identity — producing phantom
+ * "Unnamed Client" rows and orphan documents. A draft must carry NO real
+ * identity. The sentinel makes "is this a real, persisted client?" a
+ * value comparison instead of a truthiness check, so nothing can mistake
+ * a draft for a saved client.
+ *
+ * The sentinel is NEVER sent to the backend: `create_client` mints the
+ * authoritative server-side UUIDv7 and returns it; the draft id is
+ * discarded at that point.
+ */
+export const DRAFT_CLIENT_ID = "DRAFT";
+
+/**
+ * True when `id` denotes a real, persisted client (a server-minted id),
+ * NOT the draft sentinel and not an empty/whitespace string. This is the
+ * canonical front-end predicate for "treat this as a saved client".
+ *
+ * NOTE: this is a NECESSARY but not SUFFICIENT check for ingestion —
+ * existence in the projection DB is the source of truth (see
+ * `TauriAPI.clientExists`). Use this only as a cheap pre-filter before
+ * the authoritative async check.
+ */
+export function isPersistedClientId(id: string | null | undefined): boolean {
+  if (!id) return false;
+  const t = id.trim();
+  return t.length > 0 && t !== DRAFT_CLIENT_ID;
+}
+
+/** True when `id` is the draft sentinel (an unsaved, UI-only client). */
+export function isDraftClientId(id: string | null | undefined): boolean {
+  return (id ?? "").trim() === DRAFT_CLIENT_ID;
+}
+
 export function defaultClient(): Client {
   const now = new Date().toISOString();
   return {
-    id: crypto.randomUUID(),
+    // Draft sentinel — NOT a real identity. Replaced by the server-minted
+    // UUIDv7 on first successful save. Never persisted, never sent to the
+    // backend, never treated as a saved-client id.
+    id: DRAFT_CLIENT_ID,
     identity: defaultIdentity(),
     administrative: defaultAdministrative(),
     clinical: defaultClinical(),

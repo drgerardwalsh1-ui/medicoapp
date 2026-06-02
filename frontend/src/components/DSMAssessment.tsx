@@ -10,6 +10,7 @@
 //   • Tri-state: unknown ≠ absent
 
 import { useState, useCallback } from "react";
+import { useScrollRestoration } from "../hooks/useScrollRestoration";
 import { FrequencyInput } from "./FrequencyInput";
 import SymptomPresenceControl from "../integration/ui/SymptomPresenceControl";
 import CriterionTriStateControl from "../integration/ui/CriterionTriStateControl";
@@ -223,12 +224,15 @@ function DiagnosisNavigator({
   selectedId,
   onSelect,
   assessments,
+  scrollKey,
 }: {
   selectedId: string;
   onSelect: (id: string) => void;
   assessments: CriterionAssessment[];
+  scrollKey?: string;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const scrollRef = useScrollRestoration<HTMLDivElement>(scrollKey);
 
   function toggleCategory(cat: string) {
     setCollapsed((prev) => {
@@ -250,7 +254,7 @@ function DiagnosisNavigator({
   }
 
   return (
-    <div className="h-full overflow-y-auto py-3 select-none">
+    <div ref={scrollRef} className="h-full overflow-y-auto py-3 select-none">
       <p className="px-3 text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
         Diagnoses
       </p>
@@ -698,21 +702,24 @@ export function SymptomWorkspace({
   entity,
   onUpdate,
   onAddTimelineEvent,
+  scrollKey,
 }: {
   def: DSMSymptomDef;
   entity: SymptomEntity;
   onUpdate: (updates: Partial<SymptomEntity>) => void;
   onAddTimelineEvent: (event: Omit<DSMTimelineEvent, "id">) => void;
+  scrollKey?: string;
 }) {
   const isSuicide = def.symptomEntityId === "suicidal_ideation";
   const extra = (entity.extra ?? {}) as Record<string, string | string[]>;
+  const scrollRef = useScrollRestoration<HTMLDivElement>(scrollKey);
 
   function updateExtra(key: string, value: unknown) {
     onUpdate({ extra: { ...entity.extra, [key]: value } });
   }
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div ref={scrollRef} className="h-full overflow-y-auto">
       {/* Header */}
       <div className="sticky top-0 bg-white border-b border-slate-200 px-4 py-3 z-10">
         <div className="flex items-start justify-between gap-2">
@@ -1510,6 +1517,7 @@ function CriteriaEngine({
   onAreaUpdate,
   onInterpretationUpdate,
   onDeleteTimelineEvent,
+  scrollKey,
 }: {
   def: DSMDiagnosisDef;
   data: DSMAssessmentData;
@@ -1522,14 +1530,16 @@ function CriteriaEngine({
   onAreaUpdate: (criterionId: string, areaId: string, field: string, value: string) => void;
   onInterpretationUpdate: (updates: Partial<import("../types/dsm").DiagnosticInterpretation>) => void;
   onDeleteTimelineEvent: (id: string) => void;
+  scrollKey?: string;
 }) {
   const [showTimeline, setShowTimeline] = useState(false);
   const diagnosisEvents = data.timelineEvents.filter(
     (e) => !e.diagnosisId || e.diagnosisId === def.id
   );
+  const scrollRef = useScrollRestoration<HTMLDivElement>(scrollKey);
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div ref={scrollRef} className="h-full overflow-y-auto">
       {/* Diagnosis header */}
       <div className="sticky top-0 bg-white border-b border-slate-200 px-4 py-3 z-10">
         <div className="flex items-center justify-between">
@@ -1596,9 +1606,16 @@ function CriteriaEngine({
 export default function DSMAssessment({
   data: externalData,
   onChange,
+  scrollKeyBase,
 }: {
   data?: DSMAssessmentData;
   onChange: (data: DSMAssessmentData) => void;
+  /**
+   * Stable base for inner-panel scroll restoration. The three panels
+   * (left/middle/right) append their own suffix, so positions are
+   * remembered independently per client/tab.
+   */
+  scrollKeyBase?: string;
 }) {
   const data: DSMAssessmentData = externalData ?? defaultDSMAssessmentData();
 
@@ -1772,6 +1789,7 @@ export default function DSMAssessment({
             setSelectedBECriterionId(null);
           }}
           assessments={data.criterionAssessments}
+          scrollKey={scrollKeyBase ? `${scrollKeyBase}:left-panel` : undefined}
         />
       </div>
 
@@ -1793,6 +1811,11 @@ export default function DSMAssessment({
               onAreaUpdate={handleAreaUpdate}
               onInterpretationUpdate={handleInterpretationUpdate}
               onDeleteTimelineEvent={handleDeleteTimelineEvent}
+              scrollKey={
+                scrollKeyBase
+                  ? `${scrollKeyBase}:criteria-panel:${selectedDiagnosisId}`
+                  : undefined
+              }
             />
           ) : (
             <div className="flex items-center justify-center h-full text-sm text-slate-400">
@@ -1826,6 +1849,11 @@ export default function DSMAssessment({
                 )
               }
               onAddTimelineEvent={handleAddTimelineEvent}
+              scrollKey={
+                scrollKeyBase
+                  ? `${scrollKeyBase}:symptom-panel:${selectedSymptomDef.symptomEntityId}`
+                  : undefined
+              }
             />
           )}
         </div>

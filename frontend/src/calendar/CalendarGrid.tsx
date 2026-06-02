@@ -44,10 +44,19 @@ export default function CalendarGrid({
 
   const [interaction, setInteraction] = useState<Interaction | null>(null);
 
-  // Set to true when a drag/resize commits so the subsequent synthetic `click`
-  // event (which the browser fires on the original pointerdown target even
-  // after pointer capture) does NOT trigger navigation.
-  const didInteractRef = useRef(false);
+  // Timestamp of the most recent drag/resize commit. The browser synthesises a
+  // `click` after pointer capture release; that click is routed to the original
+  // pointerdown target — which may have been unmounted/remounted because of the
+  // drop. A boolean flag cleared by the click handler was fragile (it stayed
+  // set if the click never fired, or fired on a different element that didn't
+  // route through handleNavigate). A timestamp window catches every variant:
+  //   - click on the remounted block        → handleNavigate suppresses
+  //   - click swallowed (cross-day drop)    → window expires harmlessly
+  //   - click leaks to the column           → handleColumnClick suppresses
+  const SUPPRESS_WINDOW_MS = 350;
+  const didInteractAtMsRef = useRef<number>(0);
+  const suppressed = () =>
+    Date.now() - didInteractAtMsRef.current < SUPPRESS_WINDOW_MS;
 
   // Pending: pointer down on an appointment body, not yet dragging
   const pendingRef = useRef<{
@@ -216,10 +225,10 @@ export default function CalendarGrid({
       columnsRef.current?.releasePointerCapture(e.pointerId);
       // Spec Part 10: drag/resize moves the absolute UTC instant. Appointment
       // timezone is preserved; viewer wall-clock label recomputes from UTC.
-      // Flag that an interaction just committed so the following synthetic click
+      // Stamp the interaction-end time so the following synthetic click
       // (browser fires it on the original pointerdown target after capture
-      // release) is suppressed in handleNavigate.
-      didInteractRef.current = true;
+      // release) is suppressed in handleNavigate / handleColumnClick.
+      didInteractAtMsRef.current = Date.now();
       onUpdateAppointment({
         ...interaction.appointment,
         startUtc: interaction.previewStart,
@@ -236,10 +245,7 @@ export default function CalendarGrid({
   // (not in AppointmentBlock) so the component stays unaware of drag state.
   const handleNavigate = useCallback(
     (clientId: string) => {
-      if (didInteractRef.current) {
-        didInteractRef.current = false;
-        return;
-      }
+      if (suppressed()) return;
       onNavigate(clientId);
     },
     [onNavigate]
@@ -255,6 +261,10 @@ export default function CalendarGrid({
   const handleColumnClick = useCallback(
     (e: React.MouseEvent, dayIndex: number) => {
       if ((e.target as HTMLElement).closest("[data-appt]")) return;
+      // Suppress the slot-click that follows a drop on empty space —
+      // otherwise releasing a drag in a blank column would immediately
+      // open the New-Appointment modal.
+      if (suppressed()) return;
       const col = e.currentTarget as HTMLElement;
       const rect = col.getBoundingClientRect();
       const rawY = e.clientY - rect.top;

@@ -29,9 +29,12 @@ import {
   pauseEvent,
   resumeEvent,
   stopEvent,
-  activeWorkMs,
+  updateOpenAssessmentPauseIssue,
+  wallClockMs,
   endUtcFromDuration,
   getViewerTimeZone,
+  deriveSuggestedTimerType,
+  findCurrentOrSoonAppointment,
   type WorkTimelineEvent,
   type WorkTimelineEventType,
   type TimerBarProps,
@@ -46,6 +49,8 @@ import {
   type Client,
   type Appointment,
 } from "./types/client";
+import { validateClientName } from "./types/clientValidation";
+import { isPersistedClientId } from "./types/client";
 
 // Spec Part 9–13, Part 22. The single state machine that drives the app.
 // All client tabs route through ClientLayout — there is no longer a separate
@@ -55,7 +60,17 @@ import {
 type View = "home" | "client" | "create" | "calendar" | "finance" | "system";
 
 function viewToClient(v: ClientViewModel): Client {
-  return parseClientBlob(v.id, v.demographics);
+  // STEP 2 FIX: preserve the projection document list. `parseClientBlob`
+  // reconstructs ONLY demographics — it has no knowledge of documents,
+  // which live in the projection `documents` table (not the demographics
+  // blob). Without carrying `v.documents` here, every client object
+  // sourced from the projection (listClients / handleClientCreated)
+  // silently loses its documents, and the UI shows an empty document
+  // list after navigation even though the data is safe in SQLite.
+  return {
+    ...parseClientBlob(v.id, v.demographics),
+    documents: v.documents ?? [],
+  };
 }
 
 function buildSaveBlob(c: Client): Record<string, unknown> {
@@ -81,6 +96,8 @@ function Root() {
   const [view, setView] = useState<View>("home");
   const [activeClientTab, setActiveClientTab] = useState<ClientTabId>("demographics");
   const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
+  const [deleteCandidate, setDeleteCandidate] = useState<Client | null>(null);
+  const [isDeletingClient, setIsDeletingClient] = useState(false);
 
   // Save state — owned here so every tab has the same indicator
   // experience in TopBar (spec Part 11).
@@ -223,12 +240,25 @@ function Root() {
       console.warn("[timer] start refused — a timer is already running");
       return;
     }
+    // For Assessment starts, link the appointment that is currently
+    // happening (or starting within the smart-default window). Manual
+    // Assessment starts with no qualifying appointment are allowed —
+    // linkedAppointmentId stays undefined.
+    let linkedAppointmentId: string | undefined;
+    if (type === "assessment") {
+      const appt = findCurrentOrSoonAppointment(
+        activeClient.appointments,
+        Date.now(),
+      );
+      linkedAppointmentId = appt?.id;
+    }
     const event = newTimelineEvent({
       type,
       title: defaultTitleForType(type),
       startedAtUtc: Temporal.Now.instant().toString(),
       endedAtUtc: null,
       createdAutomatically: true,
+      linkedAppointmentId,
     });
     const next: Client = {
       ...activeClient,
@@ -263,6 +293,30 @@ function Root() {
   function handleTimerPause()  { applyTimerMutation(pauseEvent);  }
   function handleTimerResume() { applyTimerMutation(resumeEvent); }
 
+  // Patch the open AssessmentPauseIssue (chip selection / note typing).
+  // Routed through the same owner gate as other timer mutations — the
+  // assessment event lives on the timer owner's timeline, so writes must
+  // go to that client and only that client.
+  function handleAssessmentPauseIssueChange(
+    patch: Partial<{ category: string; reason: string; note: string }>
+  ) {
+    if (!activeTimerEvent || !timerOwnerClientId) return;
+    if (!activeClient || activeClient.id !== timerOwnerClientId) {
+      console.error(
+        "[timer] assessment pause issue update refused — active client is not the timer owner",
+      );
+      return;
+    }
+    if (activeTimerEvent.type !== "assessment") return;
+    const nextTimeline = updateOpenAssessmentPauseIssue(
+      activeClient.workTimeline,
+      activeTimerEvent.id,
+      patch as Parameters<typeof updateOpenAssessmentPauseIssue>[2],
+    );
+    setActiveClient({ ...activeClient, workTimeline: nextTimeline });
+    setIsDirty(true);
+  }
+
   // When an ASSESSMENT timer is stopped and finalised, the measured work
   // duration becomes the authoritative assessment length: today's appointment
   // end time is rebuilt as start + duration. The calendar reads the same
@@ -272,7 +326,9 @@ function Root() {
     stopped: WorkTimelineEvent
   ): Client {
     if (stopped.type !== "assessment" || !stopped.endedAtUtc) return client;
-    const workMs = activeWorkMs(stopped);
+    // Use wall-clock for Assessment: pauses are part of the session and
+    // must be reflected in the resulting appointment end time.
+    const workMs = wallClockMs(stopped);
     if (workMs <= 0) return client;
     const mins = Math.max(1, Math.round(workMs / 60000));
     const viewerTz = getViewerTimeZone();
@@ -467,6 +523,53 @@ function Root() {
     });
   }
 
+  // Ask before deleting the currently-active saved client. Refuses while a
+  // timer is running for that client (the user must stop it first — we never
+  // auto-finalise a timer into a deleted client).
+  function requestDeleteActiveClient() {
+    if (!activeClient?.id) return;
+
+    if (activeTimerEvent && timerOwnerClientId === activeClient.id) {
+      alert("Stop the active timer before deleting this client.");
+      return;
+    }
+
+    setDeleteCandidate(activeClient);
+  }
+
+  // Delete only after the warning modal's Continue button is clicked. On
+  // success the projection is the source of truth: we drop the in-memory
+  // entry, clear active/dirty state, route home, and refresh from projection.
+  async function confirmDeleteClient() {
+    if (!deleteCandidate?.id || isDeletingClient) return;
+
+    const deletedId = deleteCandidate.id;
+    setIsDeletingClient(true);
+    try {
+      if (isTauri) {
+        await TauriAPI.deleteClient(deletedId);
+      }
+      setClients((prev) => prev.filter((c) => c.id !== deletedId));
+      setDeleteCandidate(null);
+      setActiveClient(null);
+      setIsDirty(false);
+      setSaveStatus("idle");
+      setView("home");
+      if (isTauri) {
+        refreshFromProjection().catch(() => undefined);
+      }
+    } catch (err) {
+      alert(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsDeletingClient(false);
+    }
+  }
+
+  function cancelDeleteClient() {
+    if (isDeletingClient) return;
+    setDeleteCandidate(null);
+  }
+
   function handleReset() {
     // Wipe all client data. If a timer is running, the modal fires —
     // the user can choose End+continue (timer stops, then wipe) or
@@ -536,11 +639,39 @@ function Root() {
     setActiveClient(defaultClient());
   }, [view]);
 
-  function navigate(target: string) {
+  async function navigate(target: string) {
     if (target === "client") {
-      // Returning to the current client view — same context, no
-      // navigation away from the timer. Modal not needed.
-      setView(activeClient ? "client" : "home");
+      // Sidebar "Client Profile" entry. Previously this only flipped the
+      // view and REUSED the cached `activeClient`, which could be a stale
+      // / partial object (e.g. one whose `.documents` were never refreshed
+      // after upload or demographics edit). That is why the sidebar path
+      // showed a bare "(unnamed)" document with no extraction, while the
+      // Home dropdown and Calendar paths — which both re-seed
+      // `activeClient` from the projection-sourced `clients[]` via
+      // `viewToClient` — hydrated correctly.
+      //
+      // FIX: re-seed `activeClient` from a FRESH projection fetch so EVERY
+      // entry point into the client view (Home / Calendar / Sidebar) lands
+      // on identical, fully-hydrated state. The page's own effects then
+      // load documents + extraction the same way regardless of entry path.
+      if (!activeClient) {
+        setView("home");
+        return;
+      }
+      if (isTauri && isPersistedClientId(activeClient.id)) {
+        try {
+          const v = await TauriAPI.getClientView(activeClient.id);
+          const fresh = viewToClient(v);
+          // TEMP verification (remove after confirming): the sidebar entry
+          // should now carry the same hydrated documents as Home/Calendar.
+          console.log("[SIDEBAR] re-seeded client:", fresh.id,
+            "documents:", fresh.documents?.length ?? 0);
+          setActiveClient(fresh);
+        } catch (err) {
+          console.warn("[nav] getClientView failed; using cached client:", err);
+        }
+      }
+      setView("client");
       return;
     }
     if (target === "home" || target === "calendar" || target === "finance" || target === "system") {
@@ -562,6 +693,24 @@ function Root() {
   //     a non-existent client and fail.
   const isActiveClientSaved =
     !!activeClient && clients.some((c) => c.id === activeClient.id);
+
+  // Smart-default suggestion. Re-derives once per minute so the picker
+  // can flip from "prereading" to "assessment" as an appointment
+  // approaches the 30-minute window — but never auto-starts a timer.
+  // Tab changes also re-derive (cheap), but `suggestionKey` deliberately
+  // ignores the tab so a user who manually chose a type isn't overridden
+  // by tab-hopping. See deriveSuggestedTimerType for the precedence rule.
+  const [nowTickMs, setNowTickMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTickMs(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const suggestion = deriveSuggestedTimerType(
+    activeClient,
+    activeClientTab,
+    nowTickMs,
+  );
+
   const timerProps: TimerBarProps = {
     activeEvent: activeTimerEvent,
     todayTimeline: activeClient?.workTimeline ?? [],
@@ -569,6 +718,9 @@ function Root() {
     onPause: handleTimerPause,
     onResume: handleTimerResume,
     onStop: handleTimerStop,
+    onAssessmentPauseIssueChange: handleAssessmentPauseIssueChange,
+    suggestedType: suggestion.type,
+    suggestionKey: suggestion.key,
     disabled: !isActiveClientSaved,
     ownerLabel:
       activeTimerEvent && activeClient
@@ -615,6 +767,17 @@ function Root() {
       const draft = activeClient;
       newClientCreateRef.current = async () => {
         if (!isTauri) return;
+        // STRICT: no "Unnamed Client". A client cannot be persisted
+        // without at least one non-whitespace character in firstName or
+        // lastName. See clientValidation.ts for the canonical rule.
+        const nameCheck = validateClientName({
+          firstName: draft.identity?.firstName,
+          lastName: draft.identity?.lastName,
+        });
+        if (!nameCheck.ok) {
+          alert(nameCheck.message);
+          return;
+        }
         try {
           const blob = buildSaveBlob(draft);
           const id = await TauriAPI.createClient(blob);
@@ -633,6 +796,7 @@ function Root() {
           versionHistoryOpen={false}
           onVersionHistoryClose={() => undefined}
           timerProps={timerProps}
+          scrollKey={`client:new:${draft.id}:demographics`}
         >
           <DemographicsPage
             key={draft.id}
@@ -754,6 +918,7 @@ function Root() {
           onVersionHistoryClose={() => setVersionHistoryOpen(false)}
           onClientRestored={() => refreshFromProjection()}
           timerProps={timerProps}
+          scrollKey={`client:${activeClient.id}:${activeClientTab}`}
         >
           {body}
         </ClientLayout>
@@ -832,6 +997,11 @@ function Root() {
           const schema = deriveSchema(activeClient);
           exportReportToDocx(activeClient, schema.title);
         },
+        showDeleteClient: !!activeClient?.id,
+        onDeleteClient: requestDeleteActiveClient,
+        deleteClientDisabled:
+          isDeletingClient ||
+          (!!activeTimerEvent && timerOwnerClientId === activeClient?.id),
       };
     }
     return { title: "" };
@@ -857,6 +1027,7 @@ function Root() {
         setView={navigate}
         topBarProps={topBarProps()}
         upcomingAppointments={allAppointments}
+        scrollKey={`app:${view}`}
       >
         {pageContent()}
       </AppLayout>
@@ -868,6 +1039,49 @@ function Root() {
         onReturnToCurrent={guardReturnToCurrent}
         onCancel={guardCancel}
       />
+      {deleteCandidate && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-client-title"
+        >
+          <div className="w-full max-w-md rounded-lg bg-white shadow-xl border border-slate-200">
+            <div className="px-5 py-4 border-b border-slate-100">
+              <h2 id="delete-client-title" className="text-base font-semibold text-slate-900">
+                Delete client?
+              </h2>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <p className="text-sm text-slate-700">
+                You are about to delete{" "}
+                <strong>{formatFullName(deleteCandidate.identity) || "this client"}</strong>.
+              </p>
+              <p className="text-sm text-slate-600">
+                This removes the client from the app. Continue with the delete?
+              </p>
+            </div>
+            <div className="px-5 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-2">
+              <button
+                type="button"
+                className="text-xs px-3 py-1.5 rounded-md border border-slate-200 hover:bg-white text-slate-700 disabled:opacity-50"
+                onClick={cancelDeleteClient}
+                disabled={isDeletingClient}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="text-xs px-3 py-1.5 rounded-md bg-red-600 hover:bg-red-500 text-white disabled:opacity-50"
+                onClick={confirmDeleteClient}
+                disabled={isDeletingClient}
+              >
+                {isDeletingClient ? "Deleting..." : "Continue Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

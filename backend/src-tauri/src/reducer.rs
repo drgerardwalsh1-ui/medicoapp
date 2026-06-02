@@ -32,6 +32,11 @@ pub struct ClientState {
     /// Demographics JSON, opaque to the reducer.
     pub demographics: Option<serde_json::Value>,
     pub documents: Vec<DocumentState>,
+    /// True once a `ClientDeleted` event has been observed. Projection
+    /// uses this to remove the row from the read model; rebuild uses it
+    /// to skip the upsert entirely so deleted clients don't reappear.
+    #[serde(default)]
+    pub deleted: bool,
 }
 
 /// Pure, strict in-order fold. **Does not sort.** If `events` mixes clients
@@ -56,6 +61,11 @@ pub fn reduce(events: &[EventEnvelope]) -> ClientState {
             EventPayload::DemographicsUpdated(p) => {
                 state.demographics = Some(p.demographics.clone());
             }
+            EventPayload::ClientDeleted(_) => {
+                state.deleted = true;
+                state.demographics = None;
+                state.documents.clear();
+            }
             EventPayload::DocumentUploaded(p) => {
                 if let Some(existing) = state
                     .documents
@@ -76,6 +86,17 @@ pub fn reduce(events: &[EventEnvelope]) -> ClientState {
                     });
                 }
             }
+            // ── Persistence-boundary events are folded by
+            // `projection::apply_boundary_events`, not by the base
+            // reducer. The boundary tables (clinical_events,
+            // resolved_attributions, …) are not represented in
+            // `ClientState`, which only models demographics + document
+            // metadata. Ignored here so the reducer stays pure +
+            // minimal.
+            EventPayload::DocumentExtracted(_)
+            | EventPayload::ClinicalEventsRecorded(_)
+            | EventPayload::AttributionRecorded(_)
+            | EventPayload::ExtractionRunRecorded(_) => {}
         }
     }
     state

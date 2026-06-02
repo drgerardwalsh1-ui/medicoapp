@@ -1,4 +1,5 @@
 import { useMemo, useState, useCallback } from "react";
+import { useScrollRestoration } from "../hooks/useScrollRestoration";
 import { evaluateSchema } from "../schemas/reportSchema";
 import { deriveSchema } from "../components/ClientLayout";
 import { Field } from "../renderers/renderField";
@@ -144,6 +145,20 @@ export default function ReportPage({ client, sectionId, onClientChange }: Report
 
   const [activePirsCategory, setActivePirsCategory] = useState<PirsCategoryKey>("selfCare");
 
+  // Per-section scroll restoration. Each scrollable column has its own
+  // stable key — switching tabs and back, or switching report section,
+  // restores each panel independently.
+  const reportScrollBase = `client:${client.id}:report:${sectionId}`;
+  const pirsNavScrollRef = useScrollRestoration<HTMLElement>(
+    `${reportScrollBase}:category-nav`,
+  );
+  const mainScrollRef = useScrollRestoration<HTMLDivElement>(
+    `${reportScrollBase}:main`,
+  );
+  const referenceScrollRef = useScrollRestoration<HTMLDivElement>(
+    `${reportScrollBase}:reference`,
+  );
+
   // ── Mutators — every change rebuilds activeClient via onClientChange ───
   function setReportFields(next: Record<string, unknown>) {
     onClientChange({
@@ -234,7 +249,10 @@ export default function ReportPage({ client, sectionId, onClientChange }: Report
           <div className="px-3 py-2 border-b">
             <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Category</p>
           </div>
-          <nav className="flex-1 overflow-y-auto p-1.5">
+          <nav
+            ref={pirsNavScrollRef}
+            className="flex-1 overflow-y-auto p-1.5"
+          >
             {PIRS_CATEGORIES.map((cat) => {
               const cls = currentPirsTable?.classes[cat.index] ?? 1;
               const isActive = activePirsCategory === cat.key;
@@ -258,6 +276,8 @@ export default function ReportPage({ client, sectionId, onClientChange }: Report
               );
             })}
           </nav>
+
+          {/* (end PIRS category nav) */}
           <div className="p-2 border-t space-y-1">
             <button
               className="w-full text-[11px] px-2 py-1 rounded bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-40"
@@ -278,7 +298,7 @@ export default function ReportPage({ client, sectionId, onClientChange }: Report
       )}
 
       {/* MAIN CONTENT */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div ref={mainScrollRef} className="flex-1 overflow-y-auto p-6">
         <div className="max-w-3xl mx-auto space-y-6">
           {!activeSection && (
             <div className="card text-sm text-slate-500">
@@ -382,7 +402,7 @@ export default function ReportPage({ client, sectionId, onClientChange }: Report
               {pirsKeyToLabel(activePirsCategory)} — Reference
             </h3>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs text-slate-600">
+          <div ref={referenceScrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 text-xs text-slate-600">
             <div>
               <p className="font-semibold text-slate-700 text-[11px] uppercase tracking-wide mb-2">
                 Class Definitions — {pirsKeyToLabel(activePirsCategory)}

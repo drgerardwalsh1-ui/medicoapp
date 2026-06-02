@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useScrollRestoration } from "../hooks/useScrollRestoration";
 import {
   PIC_SCHEMA,
   MOTOR_SCHEMA,
@@ -113,6 +114,13 @@ export type ClientLayoutProps = {
    * timer can outlive a change of activeClient.
    */
   timerProps: TimerBarProps;
+  /**
+   * Stable key identifying the current client+tab scrollable view.
+   * When the user switches tabs or clients and comes back, the scroll
+   * position previously seen under this key is restored. Typically
+   * `client:<clientId>:<tabId>` or `client:new:<draftId>:demographics`.
+   */
+  scrollKey?: string;
   children: React.ReactNode;
 };
 
@@ -125,9 +133,11 @@ export default function ClientLayout({
   onVersionHistoryClose,
   onClientRestored,
   timerProps,
+  scrollKey,
   children,
 }: ClientLayoutProps) {
   const tabs = useMemo(() => clientTabs(client), [client?.administrative?.referrer?.org]);
+  const scrollRef = useScrollRestoration<HTMLDivElement>(scrollKey);
 
   return (
     <div className="flex flex-col h-full bg-slate-100">
@@ -172,7 +182,7 @@ export default function ClientLayout({
       {/* Body — page-specific content. Pages NEVER render their own back
           button, save, or tab pills; that's a centralization invariant
           (spec Part 13, Part 22). */}
-      <div className="flex-1 min-h-0 overflow-auto">
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto">
         {children}
       </div>
 

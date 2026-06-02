@@ -12,6 +12,8 @@ export type {
   ViewerTimeZone,
   AppointmentTimeZone,
   UUID,
+  AssessmentPauseIssue,
+  AssessmentPauseIssueCategory,
 } from "./types";
 
 export {
@@ -103,10 +105,22 @@ export {
   pauseEvent,
   resumeEvent,
   stopEvent,
+  updateOpenAssessmentPauseIssue,
   activeWorkMs,
+  wallClockMs,
+  displayedDurationMs,
   defaultTitleForType,
   totalMinutes as totalTimelineMinutes,
 } from "./workTimeline";
+
+export {
+  deriveSuggestedTimerType,
+  findCurrentOrSoonAppointment,
+  findRecentCompletedAppointment,
+  isReportWritingTab,
+} from "./suggestion";
+
+export type { TimerSuggestion } from "./suggestion";
 
 export type { ValidationResult } from "./workTimeline";
 

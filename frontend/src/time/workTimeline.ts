@@ -5,6 +5,7 @@ import type {
   WorkSession,
   ViewerTimeZone,
   UUID,
+  AssessmentPauseIssue,
 } from "./types";
 import { asViewerTimeZone } from "./types";
 import { getViewerTimeZone } from "./zones";
@@ -234,6 +235,34 @@ export function activeWorkMs(event: WorkTimelineEvent, nowMs?: number): number {
   return Math.max(0, work);
 }
 
+// Wall-clock span from startedAt to endedAt-or-now. Unlike `activeWorkMs`,
+// this INCLUDES paused intervals — Assessment pauses are part of the
+// session and should count toward the displayed duration. Non-assessment
+// timers still default to `activeWorkMs` (pause excluded).
+export function wallClockMs(event: WorkTimelineEvent, nowMs?: number): number {
+  let startMs: number;
+  try {
+    startMs = Temporal.Instant.from(event.startedAtUtc).epochMilliseconds;
+  } catch {
+    return 0;
+  }
+  const endMs =
+    event.endedAtUtc !== null
+      ? safeInstantMs(event.endedAtUtc, nowMs)
+      : (nowMs ?? Temporal.Now.instant().epochMilliseconds);
+  return Math.max(0, endMs - startMs);
+}
+
+// Per-event-type display duration. Assessment uses wall-clock (pauses
+// count); everything else uses active work (pauses excluded). This is
+// the single point used by TimerBar elapsed, WorkTimelinePage row
+// labels, and the today/total aggregates — keeping it centralised
+// prevents per-call-site drift.
+export function displayedDurationMs(event: WorkTimelineEvent, nowMs?: number): number {
+  if (event.type === "assessment") return wallClockMs(event, nowMs);
+  return activeWorkMs(event, nowMs);
+}
+
 function safeInstantMs(iso: string, fallbackMs?: number): number {
   try {
     return Temporal.Instant.from(iso).epochMilliseconds;
@@ -245,6 +274,8 @@ function safeInstantMs(iso: string, fallbackMs?: number): number {
 // Begin an in-flight pause on the active running event (the one with
 // endedAtUtc === null). No-op if the timeline has no active event or the
 // active event is already paused. Pause is event-state, not UI state.
+// For Assessment events, also opens a new AssessmentPauseIssue with
+// endedAtUtc=null so the UI can attach a reason/note while paused.
 export function pauseEvent(
   timeline: WorkTimelineEvent[] | undefined,
   id: UUID,
@@ -255,7 +286,45 @@ export function pauseEvent(
   if (!e || e.endedAtUtc !== null || e.pausedAtUtc) return t;
   const now = atUtc ?? Temporal.Now.instant().toString();
   return sortChronological(
-    t.map((x) => (x.id === id ? { ...x, pausedAtUtc: now } : x))
+    t.map((x) => {
+      if (x.id !== id) return x;
+      const next: WorkTimelineEvent = { ...x, pausedAtUtc: now };
+      if (x.type === "assessment") {
+        const openIssue: AssessmentPauseIssue = {
+          id: crypto.randomUUID(),
+          startedAtUtc: now,
+          endedAtUtc: null,
+        };
+        next.assessmentPauseIssues = [
+          ...(x.assessmentPauseIssues ?? []),
+          openIssue,
+        ];
+      }
+      return next;
+    })
+  );
+}
+
+// Patch the open (endedAtUtc === null) AssessmentPauseIssue on an event.
+// Does NOT set manuallyEdited — issue capture is automatic, not a manual
+// edit of the timeline event itself.
+export function updateOpenAssessmentPauseIssue(
+  timeline: WorkTimelineEvent[] | undefined,
+  eventId: UUID,
+  patch: Partial<Omit<AssessmentPauseIssue, "id" | "startedAtUtc" | "endedAtUtc">>
+): WorkTimelineEvent[] {
+  const t = timeline ?? [];
+  return sortChronological(
+    t.map((x) => {
+      if (x.id !== eventId) return x;
+      const issues = x.assessmentPauseIssues ?? [];
+      const openIdx = issues.findIndex((i) => i.endedAtUtc === null);
+      if (openIdx < 0) return x;
+      const nextIssues = issues.map((i, idx) =>
+        idx === openIdx ? { ...i, ...patch } : i
+      );
+      return { ...x, assessmentPauseIssues: nextIssues };
+    })
   );
 }
 
@@ -274,15 +343,21 @@ export function resumeEvent(
   const nowMs = safeInstantMs(nowIso);
   const delta = Math.max(0, nowMs - pausedFromMs);
   return sortChronological(
-    t.map((x) =>
-      x.id === id
-        ? {
-            ...x,
-            pausedAtUtc: null,
-            accumulatedPausedMs: Math.max(0, x.accumulatedPausedMs ?? 0) + delta,
-          }
-        : x
-    )
+    t.map((x) => {
+      if (x.id !== id) return x;
+      const next: WorkTimelineEvent = {
+        ...x,
+        pausedAtUtc: null,
+        accumulatedPausedMs: Math.max(0, x.accumulatedPausedMs ?? 0) + delta,
+      };
+      // Close any open assessment pause issue (assessment-only path).
+      if (x.type === "assessment" && x.assessmentPauseIssues?.some((i) => i.endedAtUtc === null)) {
+        next.assessmentPauseIssues = x.assessmentPauseIssues.map((i) =>
+          i.endedAtUtc === null ? { ...i, endedAtUtc: nowIso } : i
+        );
+      }
+      return next;
+    })
   );
 }
 
@@ -305,22 +380,32 @@ export function stopEvent(
     accumulated += Math.max(0, nowMs - pausedFromMs);
   }
   return sortChronological(
-    t.map((x) =>
-      x.id === id
-        ? { ...x, endedAtUtc: nowIso, pausedAtUtc: null, accumulatedPausedMs: accumulated }
-        : x
-    )
+    t.map((x) => {
+      if (x.id !== id) return x;
+      const next: WorkTimelineEvent = {
+        ...x,
+        endedAtUtc: nowIso,
+        pausedAtUtc: null,
+        accumulatedPausedMs: accumulated,
+      };
+      if (x.type === "assessment" && x.assessmentPauseIssues?.some((i) => i.endedAtUtc === null)) {
+        next.assessmentPauseIssues = x.assessmentPauseIssues.map((i) =>
+          i.endedAtUtc === null ? { ...i, endedAtUtc: nowIso } : i
+        );
+      }
+      return next;
+    })
   );
 }
 
-// Aggregate total *active work* minutes across the supplied events. Uses
-// live "now" for any event still running. Derived, never stored.
-// Spec Part 5: paused intervals are excluded — they never count toward
-// billing-relevant totals.
+// Aggregate total displayed-duration minutes across the supplied events.
+// Routes through `displayedDurationMs` so Assessment events count their
+// full wall-clock span (pause included) while other types continue to
+// exclude pause time. Uses live "now" for any event still running.
 export function totalMinutes(events: WorkTimelineEvent[]): number {
   const nowMs = Temporal.Now.instant().epochMilliseconds;
   return events.reduce(
-    (sum, e) => sum + Math.round(activeWorkMs(e, nowMs) / 60_000),
+    (sum, e) => sum + Math.round(displayedDurationMs(e, nowMs) / 60_000),
     0
   );
 }

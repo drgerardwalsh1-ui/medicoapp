@@ -1,4 +1,6 @@
 import { useMemo, useState, useEffect, useLayoutEffect, useRef } from "react";
+import { useScrollRestoration } from "../hooks/useScrollRestoration";
+import { useComposedRefs } from "../hooks/useComposedRefs";
 import { createPortal } from "react-dom";
 import { Temporal } from "@js-temporal/polyfill";
 import {
@@ -10,6 +12,7 @@ import {
   defaultTitleForType,
   totalTimelineMinutes,
   activeWorkMs,
+  displayedDurationMs,
   formatTime24,
   formatDateISO,
   getViewerTimeZone,
@@ -19,6 +22,8 @@ import {
   type WorkTimelineEventType,
 } from "../time";
 import { formatFullName, type Client } from "../types/client";
+import type { AssessmentPauseIssue } from "../time";
+import WorkTimelineCalendar from "./WorkTimelineCalendar";
 import { exportTimelineToPdf } from "../engine/exportTimelinePdf";
 
 // Spec Parts 2–8, 14, 15, 17–21. The Work Timeline is the authoritative
@@ -47,16 +52,43 @@ function typeLabel(t: WorkTimelineEventType): string {
   return TYPE_OPTIONS.find((o) => o.id === t)?.label ?? t;
 }
 
-// Active work duration label — pause-aware. The wall-clock span
-// [startedAt, endedAt] is preserved on the event for audit, but the
-// reported duration excludes paused intervals (spec Part 5).
-function activeDurationLabel(event: WorkTimelineEvent): string {
-  if (!event.endedAtUtc && !event.pausedAtUtc && event.startedAtUtc) {
-    // Running event with no pauses — show live, but a `running` pill is
-    // already rendered separately. Use whatever activeWorkMs reports.
+// Compute per-type totals (minutes) from the timeline. Uses
+// `displayedDurationMs` so Assessment events count their full wall-clock
+// span while non-assessment types continue to exclude pause time.
+// Returns the type rows in the same display order as TYPE_OPTIONS.
+function totalsByType(
+  timeline: WorkTimelineEvent[],
+): { type: WorkTimelineEventType; minutes: number; count: number }[] {
+  const nowMs = Date.now();
+  const rows = new Map<WorkTimelineEventType, { minutes: number; count: number }>();
+  for (const e of timeline) {
+    const row = rows.get(e.type) ?? { minutes: 0, count: 0 };
+    row.minutes += Math.round(displayedDurationMs(e, nowMs) / 60_000);
+    row.count += 1;
+    rows.set(e.type, row);
   }
-  const ms = activeWorkMs(event);
+  return TYPE_OPTIONS.flatMap((opt) => {
+    const r = rows.get(opt.id);
+    if (!r) return [];
+    return [{ type: opt.id, minutes: r.minutes, count: r.count }];
+  });
+}
+
+// Primary duration label. Routes through `displayedDurationMs`:
+// Assessment events report wall-clock (pauses are part of the session);
+// every other type reports active work (pauses excluded). The row also
+// shows the billable subset in smaller text for Assessment when pauses
+// were recorded — see Row() below.
+function activeDurationLabel(event: WorkTimelineEvent): string {
+  const ms = displayedDurationMs(event);
   if (event.endedAtUtc === null && ms === 0) return "—";
+  return durationLabel(Math.max(0, Math.round(ms / 60_000)));
+}
+
+// Active/billable duration for Assessment — exposed underneath the
+// primary (wall-clock) label so the user can see both values.
+function billableDurationLabel(event: WorkTimelineEvent): string {
+  const ms = activeWorkMs(event);
   return durationLabel(Math.max(0, Math.round(ms / 60_000)));
 }
 
@@ -110,7 +142,7 @@ export type WorkTimelinePageProps = {
 };
 
 export default function WorkTimelinePage({ client, onClientChange }: WorkTimelinePageProps) {
-  const [view, setView] = useState<"list" | "visual">("list");
+  const [view, setView] = useState<"list" | "visual" | "calendar">("list");
   // `printing` controls the portal-mounted PrintView. The screen UI stays
   // mounted but is hidden via @media print rules during the actual print.
   // We mount the portal only when about to print so the document body
@@ -120,6 +152,7 @@ export default function WorkTimelinePage({ client, onClientChange }: WorkTimelin
   const timeline = client.workTimeline ?? [];
 
   const totalMin = useMemo(() => totalTimelineMinutes(timeline), [timeline]);
+  const groupTotals = useMemo(() => totalsByType(timeline), [timeline]);
 
   function setTimeline(next: WorkTimelineEvent[]) {
     onClientChange({ ...client, workTimeline: next });
@@ -197,10 +230,25 @@ export default function WorkTimelinePage({ client, onClientChange }: WorkTimelin
           {/* Action row */}
           <div className="card flex flex-wrap items-center gap-3">
             <h2 className="section-title mb-0">Work Timeline</h2>
-            <span className="text-xs text-slate-500">
-              {timeline.length} event{timeline.length === 1 ? "" : "s"}
-              {timeline.length > 0 && ` · ${durationLabel(totalMin)}`}
-            </span>
+            <div className="flex flex-col min-w-0">
+              <span className="text-xs text-slate-500">
+                {timeline.length} event{timeline.length === 1 ? "" : "s"}
+                {timeline.length > 0 && ` · ${durationLabel(totalMin)}`}
+              </span>
+              {groupTotals.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1" data-testid="timeline-group-totals">
+                  {groupTotals.map((g) => (
+                    <span
+                      key={g.type}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 tabular-nums"
+                      title={`${g.count} event${g.count === 1 ? "" : "s"}`}
+                    >
+                      {typeLabel(g.type)}: {durationLabel(g.minutes)}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="ml-auto flex items-center gap-2">
               <div className="inline-flex rounded-md border border-slate-200 overflow-hidden text-xs">
                 <button
@@ -216,6 +264,13 @@ export default function WorkTimelinePage({ client, onClientChange }: WorkTimelin
                   className={`px-3 py-1.5 border-l border-slate-200 ${view === "visual" ? "bg-slate-100 text-violet-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}
                 >
                   Visual
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setView("calendar")}
+                  className={`px-3 py-1.5 border-l border-slate-200 ${view === "calendar" ? "bg-slate-100 text-violet-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}
+                >
+                  Calendar
                 </button>
               </div>
               <button
@@ -254,7 +309,7 @@ export default function WorkTimelinePage({ client, onClientChange }: WorkTimelin
           </div>
 
           {/* Body */}
-          {view === "list" ? (
+          {view === "list" && (
             <ListView
               client={client}
               timeline={timeline}
@@ -262,11 +317,20 @@ export default function WorkTimelinePage({ client, onClientChange }: WorkTimelin
               onPatch={patchEvent}
               onDelete={removeEvent}
             />
-          ) : (
+          )}
+          {view === "visual" && (
             <VisualView
               timeline={timeline}
               viewerTz={viewerTz}
               onClickEvent={() => setView("list")}
+              scrollKeyBase={`client:${client.id}:timeline`}
+            />
+          )}
+          {view === "calendar" && (
+            <WorkTimelineCalendar
+              timeline={timeline}
+              onPatch={patchEvent}
+              scrollKeyBase={`client:${client.id}:timeline-calendar`}
             />
           )}
         </div>
@@ -367,6 +431,15 @@ function Row({
   const startDate = formatDateISO(event.startedAtUtc, viewerTz);
   const endTime = event.endedAtUtc ? formatTime24(event.endedAtUtc, viewerTz) : "";
   const dur = activeDurationLabel(event);
+  // Surface billable subtotal under the wall-clock duration for
+  // Assessment events that actually recorded pause time. Skipped when
+  // there were no pauses (label would just duplicate `dur`).
+  const showBillableSubtotal =
+    event.type === "assessment" &&
+    ((event.assessmentPauseIssues?.length ?? 0) > 0 ||
+      (event.accumulatedPausedMs ?? 0) > 0 ||
+      !!event.pausedAtUtc);
+  const billable = showBillableSubtotal ? billableDurationLabel(event) : null;
   const validation = validateEvent(event);
   const linkedAppt = event.linkedAppointmentId
     ? client.appointments.find((a) => a.id === event.linkedAppointmentId)
@@ -423,8 +496,16 @@ function Row({
               disabled={event.endedAtUtc === null}
               title={event.endedAtUtc === null ? "Timer is still running" : ""}
             />
-            <span className="text-[11px] text-slate-400 tabular-nums w-10 text-right">{dur}</span>
+            <span className="text-[11px] text-slate-700 tabular-nums w-10 text-right font-medium">{dur}</span>
           </div>
+          {billable && (
+            <span
+              className="text-[10px] text-slate-400 tabular-nums pl-[2px]"
+              title="Active/billable time (excludes pause intervals)"
+            >
+              billable {billable}
+            </span>
+          )}
         </div>
 
         {/* Type + title + description */}
@@ -500,6 +581,13 @@ function Row({
               {validation.reason}
             </p>
           )}
+          {event.type === "assessment" &&
+            (event.assessmentPauseIssues?.length ?? 0) > 0 && (
+              <AssessmentPauseIssueList
+                issues={event.assessmentPauseIssues!}
+                viewerTz={viewerTz}
+              />
+            )}
         </div>
 
         {/* Delete */}
@@ -512,6 +600,79 @@ function Row({
           ×
         </button>
       </div>
+    </div>
+  );
+}
+
+// ── Assessment pause issue list ────────────────────────────────────────────
+// Only rendered under Assessment events. Each entry shows category/reason,
+// optional note, and the interval duration. An issue with endedAtUtc=null
+// is rendered as "ongoing" defensively (after Stop or normal Resume the
+// helper always closes it, but a future edit path could leave one open).
+
+function issueDurationLabel(issue: AssessmentPauseIssue): string {
+  try {
+    const startMs = Temporal.Instant.from(issue.startedAtUtc).epochMilliseconds;
+    const endMs = issue.endedAtUtc
+      ? Temporal.Instant.from(issue.endedAtUtc).epochMilliseconds
+      : Date.now();
+    const mins = Math.max(0, Math.round((endMs - startMs) / 60_000));
+    return durationLabel(mins);
+  } catch {
+    return "—";
+  }
+}
+
+function readIssueReasons(i: AssessmentPauseIssue): string[] {
+  if (i.reasons && i.reasons.length > 0) return i.reasons;
+  return i.reason ? [i.reason] : [];
+}
+
+function readIssueCategories(i: AssessmentPauseIssue): string[] {
+  if (i.categories && i.categories.length > 0) return i.categories;
+  return i.category ? [i.category] : [];
+}
+
+function AssessmentPauseIssueList({
+  issues,
+  viewerTz,
+}: {
+  issues: AssessmentPauseIssue[];
+  viewerTz: string;
+}) {
+  return (
+    <div className="mt-2 pl-3 border-l-2 border-amber-200 space-y-1">
+      <p className="text-[10px] uppercase tracking-wide text-amber-700 font-semibold">
+        Pause issues
+      </p>
+      {issues.map((i) => {
+        const startStr = (() => {
+          try { return formatTime24(i.startedAtUtc, viewerTz); } catch { return "—"; }
+        })();
+        const endStr = i.endedAtUtc
+          ? (() => {
+              try { return formatTime24(i.endedAtUtc!, viewerTz); } catch { return "—"; }
+            })()
+          : "ongoing";
+        const reasons = readIssueReasons(i);
+        const cats = readIssueCategories(i);
+        const label =
+          reasons.length > 0
+            ? reasons.join(", ")
+            : cats.length > 0
+            ? cats.join(", ")
+            : "Unspecified reason";
+        return (
+          <div key={i.id} className="text-[11px] text-slate-700">
+            <span className="font-medium text-amber-900">{label}</span>
+            <span className="text-slate-400"> · {startStr}–{endStr}</span>
+            <span className="text-slate-400"> · {issueDurationLabel(i)}</span>
+            {i.note && (
+              <div className="text-slate-600 italic">{i.note}</div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -579,10 +740,12 @@ function VisualView({
   timeline,
   viewerTz,
   onClickEvent,
+  scrollKeyBase,
 }: {
   timeline: WorkTimelineEvent[];
   viewerTz: string;
   onClickEvent: () => void;
+  scrollKeyBase?: string;
 }) {
   const [zoomIdx, setZoomIdx] = useState(DEFAULT_ZOOM_INDEX);
   const zoom = ZOOM_PRESETS[zoomIdx];
@@ -701,6 +864,7 @@ function VisualView({
             zoomIdx={zoomIdx}
             zoomPxPerMinute={zoom.pxPerMinute}
             setZoomIdx={setZoomIdx}
+            scrollKey={scrollKeyBase ? `${scrollKeyBase}:${dateKey}` : undefined}
           >
               <div
                 className="relative w-full"
@@ -794,6 +958,7 @@ function DayLane({
   zoomPxPerMinute,
   setZoomIdx,
   children,
+  scrollKey,
 }: {
   dateKey: string;
   dayHeightPx: number;
@@ -801,8 +966,17 @@ function DayLane({
   zoomPxPerMinute: number;
   setZoomIdx: React.Dispatch<React.SetStateAction<number>>;
   children: React.ReactNode;
+  scrollKey?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // Compose the local layout ref (used by pan-zoom mousedown handlers
+  // below) with the central scroll-restoration callback ref so the same
+  // node feeds both consumers.
+  const scrollRestoreRef = useScrollRestoration<HTMLDivElement>(scrollKey);
+  const composedContainerRef = useComposedRefs<HTMLDivElement>(
+    containerRef,
+    scrollRestoreRef,
+  );
   // Carry-over scroll target across a zoom step so we can place the
   // viewport such that the time under the cursor stays under the cursor.
   // We capture the anchor (time-at-pointer) BEFORE the zoom change and
@@ -895,7 +1069,7 @@ function DayLane({
     <div className="card">
       <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">{dateKey}</h3>
       <div
-        ref={containerRef}
+        ref={composedContainerRef}
         className="relative overflow-y-auto border border-slate-100 rounded select-none cursor-grab"
         style={{ maxHeight: "70vh" }}
         title="Ctrl/⌘ + scroll to zoom · click and drag to pan"

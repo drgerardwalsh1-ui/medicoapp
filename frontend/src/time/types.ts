@@ -83,6 +83,39 @@ export type WorkTimelineEventType =
   | "note"
   | "custom";
 
+// Pause-issue capture lives INSIDE the Assessment event (no separate
+// timer-type events). On Assessment pause we open an issue interval with
+// endedAtUtc=null; chip/note edits patch this open issue; resume/stop
+// close it by setting endedAtUtc. Multiple intervals are appended over
+// the event's lifetime if the user pauses multiple times.
+export type AssessmentPauseIssueCategory =
+  | "technicalIssues"
+  | "privacyConcerns"
+  | "clinicalConcerns"
+  | "communicationIssues"
+  | "environmentalInterruptions"
+  | "administrativeRequirements"
+  | "participantFactors"
+  | "breaks"
+  | "clinicalConsultation"
+  | "sessionRescheduling";
+
+// AssessmentPauseIssue supports multi-select: a single pause can record
+// several categories and several specific reasons. The legacy single
+// `category`/`reason` fields are retained for back-compat with persisted
+// data written before the multi-select UI shipped — renderers should
+// fold them into the arrays if the arrays are empty/absent.
+export type AssessmentPauseIssue = {
+  id: UUID;
+  startedAtUtc: string;
+  endedAtUtc: string | null;
+  category?: AssessmentPauseIssueCategory;
+  reason?: string;
+  categories?: AssessmentPauseIssueCategory[];
+  reasons?: string[];
+  note?: string;
+};
+
 export type WorkTimelineEvent = {
   id: UUID;
   type: WorkTimelineEventType;
@@ -104,4 +137,7 @@ export type WorkTimelineEvent = {
   // accumulatedPausedMs and pausedAtUtc is cleared. Survives reloads, so
   // a paused timer remains paused after app restart.
   pausedAtUtc?: string | null;
+  // Assessment-only: structured pause/issue intervals captured during
+  // Assessment pauses. Never used for non-assessment events.
+  assessmentPauseIssues?: AssessmentPauseIssue[];
 };

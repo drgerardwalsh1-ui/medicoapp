@@ -17,6 +17,7 @@ import {
   alertMessage,
   type Appointment,
 } from "../time";
+import { useScrollRestoration } from "../hooks/useScrollRestoration";
 
 export type AppLayoutProps = {
   currentView: string;
@@ -24,6 +25,12 @@ export type AppLayoutProps = {
   topBarProps: TopBarProps;
   children: React.ReactNode;
   upcomingAppointments?: Appointment[];
+  /**
+   * Stable key identifying the current scrollable view. When the user
+   * navigates away and back, the scroll position previously seen under
+   * this key is restored. Typically `app:<view>`.
+   */
+  scrollKey?: string;
 };
 
 export default function AppLayout({
@@ -32,11 +39,13 @@ export default function AppLayout({
   topBarProps,
   children,
   upcomingAppointments,
+  scrollKey,
 }: AppLayoutProps) {
   // Spec Part 6: viewer-tz is dynamically derived; this hook subscribes once
   // at the layout level and pushes changes into the module-level getter.
   const viewerTz = useViewerTimeZone();
   const alert = useAppointmentAlerts(upcomingAppointments ?? []);
+  const scrollRef = useScrollRestoration<HTMLElement>(scrollKey);
 
   return (
     <div className="flex h-screen">
@@ -58,7 +67,7 @@ export default function AppLayout({
             {alertMessage(alert, viewerTz)}
           </div>
         )}
-        <main className="flex-1 overflow-auto">{children}</main>
+        <main ref={scrollRef} className="flex-1 overflow-auto">{children}</main>
       </div>
     </div>
   );

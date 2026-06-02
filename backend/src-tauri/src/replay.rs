@@ -287,7 +287,6 @@ mod integration {
             version,
             Actor::System { component: "create_client".into() },
             EventPayload::ClientCreated(crate::events::ClientCreatedP {
-                name: "Jane Doe".into(),
                 demographics: demographics.clone(),
             }),
             None,
@@ -305,7 +304,6 @@ mod integration {
             .expect("client present");
         assert_eq!(view.id, client_id);
         assert_eq!(view.last_version, 1);
-        assert_eq!(view.name.as_deref(), Some("Jane Doe"));
         assert_eq!(view.demographics, Some(demographics));
         assert_eq!(view.document_count, 0);
 

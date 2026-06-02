@@ -9,6 +9,7 @@
 // Changes in DSM Assessment propagate here automatically.
 
 import { useState, useCallback, useRef } from "react";
+import { useScrollRestoration } from "../hooks/useScrollRestoration";
 import { SymptomWorkspace } from "./DSMAssessment";
 import { SYMPTOM_DOMAINS, getDsmRefsForEntity } from "../data/symptomDomains";
 import type { SymptomDomain, SymptomDomainSection } from "../data/symptomDomains";
@@ -169,13 +170,16 @@ function DomainNavigator({
   selectedId,
   onSelect,
   symptoms,
+  scrollKey,
 }: {
   selectedId: string;
   onSelect: (id: string) => void;
   symptoms: Record<string, SymptomEntity>;
+  scrollKey?: string;
 }) {
+  const scrollRef = useScrollRestoration<HTMLDivElement>(scrollKey);
   return (
-    <div className="h-full overflow-y-auto py-3 select-none">
+    <div ref={scrollRef} className="h-full overflow-y-auto py-3 select-none">
       <p className="px-3 text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
         Symptom Domains
       </p>
@@ -334,6 +338,7 @@ function SymptomList({
   onSelect,
   onPresenceChange,
   onSectionLabelChange,
+  scrollKey,
 }: {
   domain: SymptomDomain;
   symptoms: Record<string, SymptomEntity>;
@@ -341,6 +346,7 @@ function SymptomList({
   onSelect: (entityId: string | null) => void;
   onPresenceChange: (entityId: string, symptomType: string, next: boolean | undefined) => void;
   onSectionLabelChange: (leadEntityId: string, newLabel: string) => void;
+  scrollKey?: string;
 }) {
   const totalPresent = domain.symptoms.filter((s) => symptoms[s.symptomEntityId]?.currentPresence === true).length;
   const totalAbsent  = domain.symptoms.filter((s) => symptoms[s.symptomEntityId]?.currentPresence === false).length;
@@ -349,6 +355,7 @@ function SymptomList({
   // If domain has sections, render with section headers (no reordering within sections)
   // If no sections, render in unknown→present→absent order
   const renderWithSections = !!domain.sections?.length;
+  const scrollRef = useScrollRestoration<HTMLDivElement>(scrollKey);
 
   function renderRows(syms: typeof domain.symptoms) {
     return syms.map((symDef) => {
@@ -369,7 +376,7 @@ function SymptomList({
   }
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div ref={scrollRef} className="h-full overflow-y-auto">
       {/* Domain header */}
       <div className="sticky top-0 bg-white border-b border-slate-200 px-4 py-3 z-10">
         <h2 className="text-base font-semibold text-slate-900">{domain.label}</h2>
@@ -430,9 +437,16 @@ function SymptomList({
 export default function CurrentSymptoms({
   data: externalData,
   onChange,
+  scrollKeyBase,
 }: {
   data?: DSMAssessmentData;
   onChange: (data: DSMAssessmentData) => void;
+  /**
+   * Stable base for inner-panel scroll restoration. The domain
+   * navigator, symptom list, and symptom detail panel each append
+   * their own suffix.
+   */
+  scrollKeyBase?: string;
 }) {
   const data: DSMAssessmentData = externalData ?? defaultDSMAssessmentData();
 
@@ -536,6 +550,7 @@ export default function CurrentSymptoms({
             setSelectedEntityId(null);
           }}
           symptoms={data.symptoms}
+          scrollKey={scrollKeyBase ? `${scrollKeyBase}:domain-list` : undefined}
         />
       </div>
 
@@ -559,6 +574,11 @@ export default function CurrentSymptoms({
                 onSelect={setSelectedEntityId}
                 onPresenceChange={handlePresenceChange}
                 onSectionLabelChange={handleSectionLabelChange}
+                scrollKey={
+                  scrollKeyBase
+                    ? `${scrollKeyBase}:symptom-list:${selectedDomain.id}`
+                    : undefined
+                }
               />
             </>
           ) : (
@@ -587,6 +607,11 @@ export default function CurrentSymptoms({
                 )
               }
               onAddTimelineEvent={handleAddTimelineEvent}
+              scrollKey={
+                scrollKeyBase
+                  ? `${scrollKeyBase}:detail-panel:${selectedSymDef.symptomEntityId}`
+                  : undefined
+              }
             />
           )}
         </div>

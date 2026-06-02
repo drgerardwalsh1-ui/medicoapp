@@ -62,6 +62,7 @@ export default function CurrentSymptomsPage({ client, onClientChange }: CurrentS
           onChange={(d: DSMAssessmentData) =>
             onClientChange({ ...client, dsmAssessment: d })
           }
+          scrollKeyBase={`client:${client.id}:symptoms`}
         />
       </DSMErrorBoundary>
 

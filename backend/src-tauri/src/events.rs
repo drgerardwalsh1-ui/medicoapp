@@ -29,6 +29,26 @@ pub enum EventType {
     DemographicsUpdated,
     DocumentUploaded,
     ClientRestoredFromVersion,
+    ClientDeleted,
+    // ── Persistence-boundary event types (medico-legal audit) ──
+    /// Document text + chain-of-custody anchor (sha256 + pipeline
+    /// version + rule-corpus hash). The raw_text retained here is the
+    /// definitive forensic-replay source.
+    DocumentExtracted,
+    /// Boundary-layer ClinicalEvents derived from the cleaned text of a
+    /// single document. Persisted verbatim — every higher reasoning
+    /// layer is a deterministic projection of this list plus the
+    /// attribution payload.
+    ClinicalEventsRecorded,
+    /// Resolved participant + organisation + patient attribution for a
+    /// run. Keyed by `event_id` so each ClinicalEvent can be looked up
+    /// to its source clinician.
+    AttributionRecorded,
+    /// Metadata for a single extraction run (pipeline_version,
+    /// rule_corpus_hash, run_id, document set). Lets future audits
+    /// reproduce historical extractions even after the rule set has
+    /// evolved.
+    ExtractionRunRecorded,
 }
 
 impl EventType {
@@ -38,6 +58,11 @@ impl EventType {
             EventType::DemographicsUpdated => "demographics_updated",
             EventType::DocumentUploaded => "document_uploaded",
             EventType::ClientRestoredFromVersion => "client_restored_from_version",
+            EventType::ClientDeleted => "client_deleted",
+            EventType::DocumentExtracted => "document_extracted",
+            EventType::ClinicalEventsRecorded => "clinical_events_recorded",
+            EventType::AttributionRecorded => "attribution_recorded",
+            EventType::ExtractionRunRecorded => "extraction_run_recorded",
         }
     }
 }
@@ -65,6 +90,16 @@ pub struct ClientRestoredFromVersionP {
     pub demographics: serde_json::Value,
 }
 
+/// Client deletion payload. Marks a client as deleted; projection
+/// removes the row (and child rows) so it no longer appears in
+/// `list_clients`. Events for the client are retained for audit.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ClientDeletedP {
+    /// Optional reason supplied by the caller. Opaque to the reducer.
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
 /// Document upload payload — Step 3a.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocumentUploadedP {
@@ -72,6 +107,106 @@ pub struct DocumentUploadedP {
     pub file_name: String,
     pub char_count: usize,
     pub method: String,
+}
+
+// ── Persistence-boundary payloads ────────────────────────────────────────
+
+/// Document text + chain-of-custody anchor. Emitted by
+/// `process_and_persist_document` once OCR/parse has produced raw_text
+/// and the rule pipeline has produced clean_text.
+///
+/// ## Freeze-point contract
+///
+/// Once this event is appended, `clean_text` becomes IMMUTABLE — it is
+/// the canonical representation against which every
+/// `ClinicalEvent.source_snippet` is byte-equal. Downstream consumers
+/// MUST NOT re-normalise, re-trim, or otherwise mutate `clean_text` if
+/// they want offsets to remain valid. The append-only triggers on
+/// `events.db` enforce this at the storage layer; the `clean_text_sha256`
+/// field exposes a checksum so any caller can reverify the freeze.
+///
+/// ## Verification model (medico-legal audit)
+///
+/// The integrity guarantee is **normalised-text fidelity**, not raw-byte
+/// fidelity. Concretely:
+///   - `source_bytes_sha256` anchors the chain of custody to the original
+///     on-disk bytes (PDF/DOCX). It does NOT participate in snippet
+///     verification — its role is "this exact file produced this exact
+///     raw_text".
+///   - `raw_text` is the post-OCR / post-DOCX text. Retained so a future
+///     auditor with a different OCR engine can detect drift, and so
+///     `text_clean(raw_text, pipeline_version)` can be re-derived and
+///     compared against `clean_text_sha256`.
+///   - `clean_text` is the post `text_clean` normalisation form. It is
+///     the integrity canonical: every `ClinicalEvent.source_snippet` is
+///     verified against `clean_text[char_offset_start..char_offset_end]`.
+///   - `clean_text_sha256` lets any verifier (audit script, projection
+///     rebuild, future replay) confirm the freeze-point form has not
+///     drifted without re-shipping the full text.
+///
+/// `pipeline_version` + `rule_corpus_hash` pin the deterministic rule
+/// set used for this extraction, so re-deriving `clean_text` from
+/// `raw_text` under the same pinned versions must reproduce the same
+/// `clean_text_sha256`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentExtractedP {
+    pub document_id: String,
+    pub source_bytes_sha256: String,
+    pub raw_text: String,
+    pub clean_text: String,
+    /// SHA-256 of `clean_text` as bytes. Freeze-point digest — exposes
+    /// the canonical form's hash so callers can verify the freeze
+    /// without re-shipping the full text.
+    #[serde(default)]
+    pub clean_text_sha256: String,
+    pub method: String,
+    #[serde(default)]
+    pub ocr_engine_version: Option<String>,
+    pub pipeline_version: String,
+    pub rule_corpus_hash: String,
+}
+
+/// Boundary-layer ClinicalEvents for a single document. The events are
+/// stored verbatim — they are the lowest-complete-truth layer per the
+/// persistence-boundary specification. Higher layers (UnifiedEvent,
+/// PatientEvent, CanonicalPatientEvent, EvolutionTrack, ConditionState,
+/// ClinicalKnowledgeGraph) MUST be derived from this list and remain
+/// in-memory only.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClinicalEventsRecordedP {
+    pub document_id: String,
+    pub run_id: Uuid,
+    pub clinical_events: Vec<serde_json::Value>,
+}
+
+/// Resolved attribution for a run (one or more documents jointly resolved
+/// for participants, organisations, and the patient identity).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttributionRecordedP {
+    pub run_id: Uuid,
+    /// JSON-serialised `ParticipantResolutionPayload` from the
+    /// `participant_resolution` module. Carries:
+    ///   - patients
+    ///   - participants
+    ///   - organisations
+    ///   - document_maps (DocumentParticipantMap[])
+    ///   - attributions (ResolvedEventAttribution[] keyed by event_id)
+    pub payload: serde_json::Value,
+}
+
+/// Metadata for one extraction run. Pinning these stamps with the run
+/// lets a future audit replay the deterministic pipeline against the
+/// retained raw_text and validate that today's rule set would produce
+/// the same boundary state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtractionRunRecordedP {
+    pub run_id: Uuid,
+    pub executed_at: DateTime<Utc>,
+    pub pipeline_version: String,
+    pub rule_corpus_hash: String,
+    pub document_ids: Vec<String>,
+    pub clinical_event_count: usize,
+    pub attribution_count: usize,
 }
 
 /// Strongly-typed payload variants. Serialised into `payload_json`.
@@ -82,6 +217,11 @@ pub enum EventPayload {
     DemographicsUpdated(DemographicsUpdatedP),
     DocumentUploaded(DocumentUploadedP),
     ClientRestoredFromVersion(ClientRestoredFromVersionP),
+    ClientDeleted(ClientDeletedP),
+    DocumentExtracted(DocumentExtractedP),
+    ClinicalEventsRecorded(ClinicalEventsRecordedP),
+    AttributionRecorded(AttributionRecordedP),
+    ExtractionRunRecorded(ExtractionRunRecordedP),
 }
 
 impl EventPayload {
@@ -91,6 +231,11 @@ impl EventPayload {
             EventPayload::DemographicsUpdated(_) => EventType::DemographicsUpdated,
             EventPayload::DocumentUploaded(_) => EventType::DocumentUploaded,
             EventPayload::ClientRestoredFromVersion(_) => EventType::ClientRestoredFromVersion,
+            EventPayload::ClientDeleted(_) => EventType::ClientDeleted,
+            EventPayload::DocumentExtracted(_) => EventType::DocumentExtracted,
+            EventPayload::ClinicalEventsRecorded(_) => EventType::ClinicalEventsRecorded,
+            EventPayload::AttributionRecorded(_) => EventType::AttributionRecorded,
+            EventPayload::ExtractionRunRecorded(_) => EventType::ExtractionRunRecorded,
         }
     }
 }

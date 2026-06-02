@@ -1,4 +1,5 @@
-import { useMemo, useRef, useEffect, useCallback } from "react";
+import { useMemo } from "react";
+import { useScrollRestoration } from "../hooks/useScrollRestoration";
 import type { Client, MSEData, MSEDomainState } from "../types/client";
 import { defaultMSEData, defaultAttendees } from "../types/client";
 import type { SymptomEntity, MoodState } from "../types/dsm";
@@ -54,34 +55,6 @@ function pickAppointment(client: Client) {
     }
   });
   return todays ?? appts[0];
-}
-
-// ── Persistent UI view state ──────────────────────────────────────────────
-// Scroll positions of the two panels are kept in sessionStorage keyed by
-// clientId so navigating away (to another tab) and back restores the exact
-// scroll position and editing context. UI state ONLY — never report data.
-
-type MSEViewState = { leftScroll?: number; rightScroll?: number };
-
-function mseViewKey(clientId: string): string {
-  return `medicoapp:mseView:${clientId}`;
-}
-
-function loadMSEViewState(clientId: string): MSEViewState {
-  try {
-    const raw = sessionStorage.getItem(mseViewKey(clientId));
-    return raw ? (JSON.parse(raw) as MSEViewState) : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveMSEViewState(clientId: string, state: MSEViewState): void {
-  try {
-    sessionStorage.setItem(mseViewKey(clientId), JSON.stringify(state));
-  } catch {
-    // sessionStorage unavailable (private mode, quota) — fine to drop.
-  }
 }
 
 function Chip({
@@ -209,44 +182,17 @@ export default function MSEPage({
   }
 
   // ── Scroll-position persistence ─────────────────────────────────────────
-  const leftRef = useRef<HTMLTextAreaElement | null>(null);
-  const rightRef = useRef<HTMLDivElement | null>(null);
-  const scrollRafRef = useRef<number | null>(null);
-
-  // Restore both panels' scroll positions after the page has rendered.
-  useEffect(() => {
-    const restored = loadMSEViewState(client.id);
-    requestAnimationFrame(() => {
-      if (leftRef.current && restored.leftScroll)
-        leftRef.current.scrollTop = restored.leftScroll;
-      if (rightRef.current && restored.rightScroll)
-        rightRef.current.scrollTop = restored.rightScroll;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client.id]);
-
-  const persistScroll = useCallback(() => {
-    if (scrollRafRef.current != null) return;
-    scrollRafRef.current = requestAnimationFrame(() => {
-      scrollRafRef.current = null;
-      saveMSEViewState(client.id, {
-        leftScroll: leftRef.current?.scrollTop ?? 0,
-        rightScroll: rightRef.current?.scrollTop ?? 0,
-      });
-    });
-  }, [client.id]);
-
-  // Persist on unmount too — covers tab changes that unmount the page
-  // before a scroll event has flushed.
-  useEffect(() => {
-    return () => {
-      saveMSEViewState(client.id, {
-        leftScroll: leftRef.current?.scrollTop ?? 0,
-        rightScroll: rightRef.current?.scrollTop ?? 0,
-      });
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client.id]);
+  // The central hook (in-memory Map + sessionStorage mirror) handles both
+  // panels. The previous bespoke loadMSEViewState/saveMSEViewState block
+  // is gone — it had a bug where the right-panel restore branch called
+  // saveMSEViewState instead of writing rightRef.current.scrollTop, and
+  // it fought the central hook for ownership of the same DOM nodes.
+  const narrativeScrollRef = useScrollRestoration<HTMLTextAreaElement>(
+    `client:${client.id}:mse:narrative`,
+  );
+  const controlsScrollRef = useScrollRestoration<HTMLDivElement>(
+    `client:${client.id}:mse:controls`,
+  );
 
   // Live summary of a linked domain's present symptoms.
   function linkedSummary(def: MSEDomainDef): string[] {
@@ -291,8 +237,7 @@ export default function MSEPage({
           </div>
         </div>
         <textarea
-          ref={leftRef}
-          onScroll={persistScroll}
+          ref={narrativeScrollRef}
           className="flex-1 min-h-0 w-full resize-none px-5 py-4 text-sm leading-relaxed text-slate-800 font-serif outline-none"
           value={narrativeText}
           onChange={(e) => onNarrativeEdit(e.target.value)}
@@ -302,8 +247,7 @@ export default function MSEPage({
 
       {/* ── Right: grouped chip / input panel ── */}
       <div
-        ref={rightRef}
-        onScroll={persistScroll}
+        ref={controlsScrollRef}
         className="w-[420px] shrink-0 overflow-auto bg-slate-50"
       >
         <div className="p-4 space-y-5">

@@ -11,6 +11,8 @@
 // restores the exact subsection / entity that was open.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useScrollRestoration } from "../../hooks/useScrollRestoration";
+import { useComposedRefs } from "../../hooks/useComposedRefs";
 import type { Client } from "../../types/client";
 import {
   defaultPsychiatricHistory,
@@ -243,6 +245,18 @@ export type HistoryEditorProps = {
 export default function HistoryEditor({ client, onClientChange }: HistoryEditorProps) {
   const history: PsychiatricHistory = client.psychiatricHistory ?? defaultPsychiatricHistory();
 
+  // ── In-memory scroll restoration for all three panels. The middle
+  // panel already owns a ref (`middleScrollRef`) wired to a scroll-spy
+  // for section anchors — the hook layers on top by save+restore-only,
+  // it does not consume the scroll event itself, so the spy still fires.
+  const historyScrollBase = `client:${client.id}:backgroundHistory`;
+  const leftPanelScrollRef = useScrollRestoration<HTMLDivElement>(
+    `${historyScrollBase}:left-panel`,
+  );
+  const rightPanelScrollRef = useScrollRestoration<HTMLDivElement>(
+    `${historyScrollBase}:right-panel`,
+  );
+
   // ── Persistent view state ───────────────────────────────────────────────
   const restored = useMemo(() => loadViewState(client.id), [client.id]);
   // activeSection drives ONLY the left-nav highlight + scroll target — it
@@ -258,7 +272,18 @@ export default function HistoryEditor({ client, onClientChange }: HistoryEditorP
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
     new Set(restored.expandedGroups ?? allExpandableGroupKeys())
   );
+  // Middle panel: the existing `middleScrollRef` drives a scroll-spy that
+  // highlights the active section in the left nav. Compose it with the
+  // central scroll-restoration callback ref so both consumers see the
+  // same node.
   const middleScrollRef = useRef<HTMLDivElement | null>(null);
+  const middleScrollRestoreRef = useScrollRestoration<HTMLDivElement>(
+    `${historyScrollBase}:middle-panel`,
+  );
+  const composedMiddleScrollRef = useComposedRefs<HTMLDivElement>(
+    middleScrollRef,
+    middleScrollRestoreRef,
+  );
   // One ref per section block so the navigator can scrollIntoView.
   const sectionRefs = useRef<Partial<Record<SectionKey, HTMLDivElement | null>>>({});
   // One ref per treatment-category group so left-panel subtype rows can
@@ -458,7 +483,7 @@ export default function HistoryEditor({ client, onClientChange }: HistoryEditorP
               label → scrolls that section into view (navigation)
             Creation and navigation stay conceptually separate but share
             one row, removing the old duplicated Add / Sections lists. */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+        <div ref={leftPanelScrollRef} className="flex-1 overflow-y-auto p-2 space-y-0.5">
           {/* Treatments — parent navigates; subtype rows below create. */}
           <LeftRow
             label="Treatments"
@@ -570,7 +595,7 @@ export default function HistoryEditor({ client, onClientChange }: HistoryEditorP
 
       {/* ── MIDDLE panel — single continuous scrollable clinical document ─ */}
       <section
-        ref={middleScrollRef}
+        ref={composedMiddleScrollRef}
         onScroll={handleMiddleScroll}
         className="flex-1 overflow-y-auto p-4 min-w-0"
       >
@@ -599,7 +624,7 @@ export default function HistoryEditor({ client, onClientChange }: HistoryEditorP
             {selectedIds.size > 1 ? `Bulk edit (${selectedIds.size})` : "Detail editor"}
           </h3>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div ref={rightPanelScrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
           <RightPanel
             history={history}
             activeSection={selectionSection ?? activeSection}

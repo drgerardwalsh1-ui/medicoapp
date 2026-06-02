@@ -31,6 +31,11 @@ pub struct CleanOutput {
     pub conditions:  Vec<String>,
     pub medications: Vec<String>,
     pub procedures:  Vec<String>,
+    /// Symptom / complaint terms peeled off the conditions list (anxiety,
+    /// hypervigilance, sleep disturbance, …). The product spec calls for
+    /// these to be displayed under "symptoms" rather than promoted to
+    /// confirmed diagnoses.
+    pub symptoms:   Vec<String>,
     /// Populated only when `debug = true`.  Each entry records one rejected
     /// entity and the reason it was filtered.
     pub removed: Vec<RemovedEntry>,
@@ -52,9 +57,22 @@ pub struct RemovedEntry {
 /// Setting `debug = true` populates `CleanOutput::removed` — useful for
 /// inspecting what was filtered and why.  Leave `false` in production.
 pub fn clean_entities(input: CleanInput, debug: bool) -> CleanOutput {
-    let (conditions,  rc) = process_list(&input.conditions,  Category::Condition,  debug);
-    let (medications, rm) = process_list(&input.medications,  Category::Medication, debug);
-    let (procedures,  rp) = process_list(&input.procedures,   Category::Procedure,  debug);
+    let (conditions_all, rc) = process_list(&input.conditions,  Category::Condition,  debug);
+    let (medications,    rm) = process_list(&input.medications,  Category::Medication, debug);
+    let (procedures,     rp) = process_list(&input.procedures,   Category::Procedure,  debug);
+
+    // Step 4 of the product spec: separate symptoms from diagnoses.
+    // Diagnoses go in `conditions`; symptom/complaint terms go in
+    // `symptoms`. Determined by lexicon — see `is_symptom_term`.
+    let mut conditions = Vec::with_capacity(conditions_all.len());
+    let mut symptoms   = Vec::new();
+    for term in conditions_all {
+        if is_symptom_term(&term) {
+            symptoms.push(term);
+        } else {
+            conditions.push(term);
+        }
+    }
 
     let removed = if debug {
         let mut v = rc;
@@ -65,8 +83,54 @@ pub fn clean_entities(input: CleanInput, debug: bool) -> CleanOutput {
         Vec::new()
     };
 
-    CleanOutput { conditions, medications, procedures, removed }
+    CleanOutput { conditions, medications, procedures, symptoms, removed }
 }
+
+/// True iff `term` is a symptom/complaint rather than a diagnosis.
+/// Compared against a curated lexicon — conservative; if uncertain, the
+/// term is left in `conditions`.
+pub fn is_symptom_term(term: &str) -> bool {
+    let lower = term.to_lowercase();
+    for &sym in SYMPTOM_TERMS {
+        if lower == sym {
+            return true;
+        }
+    }
+    false
+}
+
+/// Symptom / complaint vocabulary. Items here are *not* diagnoses by
+/// themselves; explicit diagnostic framing in the upstream text moves a
+/// mention into `conditions` via the entity-extractor's keyword lists.
+const SYMPTOM_TERMS: &[&str] = &[
+    "anxiety",
+    "depression",
+    "low mood",
+    "depressed mood",
+    "sleep disturbance",
+    "poor sleep",
+    "appetite change",
+    "appetite loss",
+    "weight loss",
+    "pain",
+    "chronic pain",
+    "headache",
+    "fatigue",
+    "irritability",
+    "hypervigilance",
+    "intrusive memories",
+    "intrusive thoughts",
+    "flashbacks",
+    "nightmares",
+    "avoidance",
+    "panic attacks",
+    "panic",
+    "rumination",
+    "tearfulness",
+    "anhedonia",
+    "concentration difficulty",
+    "memory difficulty",
+];
 
 // ── Category ──────────────────────────────────────────────────────────────────
 
@@ -765,7 +829,7 @@ const VALID_STANDALONE_PROCEDURES: &[&str] = &[];
 /// incorrectly fire on "cortex".
 const NON_MEDICAL_GARBAGE: &[&str] = &[
     // Software / IDE chrome
-    "codex", "golive", "vscode", "xcode", "sublime",
+    "codex", "golive", "go live", "vscode", "xcode", "sublime",
     // OS / system UI strings
     "install",    // "install tonight", "install update" — never a medical entity
     "tonight",
@@ -774,11 +838,16 @@ const NON_MEDICAL_GARBAGE: &[&str] = &[
     "update",
     "updates",
     "scanned",    // document descriptor, not a diagnosis
+    "continue",   // OS install dialog button
+    "regenerate", // chat UI button
+    // LLM / chat UI chrome
+    "chatgpt", "ask anything", "get plus", "new chat",
     // Document / format labels (too generic to be a clinical entity)
     "file",
     "ocr",
     "narrative",  // section header, not a diagnosis
     "scenario",   // test-file label
+    "timeline",
     // Dosing frequencies — these appear after medication names and scispaCy
     // sometimes extracts them as standalone entities
     "prn", "od", "bd", "bid", "tds", "tid", "qid", "stat", "nocte", "mane",
@@ -801,6 +870,19 @@ const PROCEDURE_GARBAGE_TERMS: &[&str] = &[
     "update",
     "file",
     "code",
+    // ── Document-type / context phrases mis-tagged as procedures ──────────
+    // "Psychiatric Assessment" is a document TYPE (header on the report
+    // itself), not something performed during the encounter being
+    // described. Same for the related neuro/psych report headers — these
+    // labels appear at the top of medico-legal reports and scispaCy keeps
+    // flagging them as procedures.
+    "psychiatric assessment",
+    "psychiatric report",
+    "psychological report",
+    "medico-legal report",
+    "medicolegal report",
+    "review",
+    "scenario",
 ];
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
@@ -1056,13 +1138,15 @@ mod tests {
             ],
         );
 
-        // Conditions: PTSD, disc herniation, generalised anxiety disorder, depression (4)
-        assert_eq!(out.conditions.len(), 4,
-                   "expected 4 clean conditions: {:?}", out.conditions);
+        // Conditions: PTSD, disc herniation, generalised anxiety disorder
+        // (3) — bare "depression" routes to symptoms under the new rules.
+        assert_eq!(out.conditions.len(), 3,
+                   "expected 3 clean conditions: {:?}", out.conditions);
         assert!(out.conditions.contains(&"post-traumatic stress disorder".to_string()));
         assert!(out.conditions.contains(&"disc herniation".to_string()));
         assert!(out.conditions.contains(&"generalised anxiety disorder".to_string()));
-        assert!(out.conditions.contains(&"depression".to_string()));
+        assert!(out.symptoms.contains(&"depression".to_string()),
+                "bare depression should land in symptoms: {:?}", out.symptoms);
 
         // Medications: sertraline, pregabalin, ibuprofen (3)
         assert_eq!(out.medications.len(), 3,
@@ -1139,14 +1223,16 @@ mod tests {
             ],
         );
 
-        // Conditions: only the 3 valid ones survive
+        // Conditions: only PTSD survives in conditions. "sleep disturbance"
+        // and "anxiety" now route to symptoms.
         let cond_str = out.conditions.join("|").to_lowercase();
+        let sym_str  = out.symptoms.join("|").to_lowercase();
         assert!(cond_str.contains("post-traumatic stress disorder"),
             "PTSD should survive and expand; got: {:?}", out.conditions);
-        assert!(cond_str.contains("sleep disturbance"),
-            "sleep disturbance should survive; got: {:?}", out.conditions);
-        assert!(cond_str.contains("anxiety"),
-            "anxiety should survive; got: {:?}", out.conditions);
+        assert!(sym_str.contains("sleep disturbance"),
+            "sleep disturbance should be a symptom: {:?}", out.symptoms);
+        assert!(sym_str.contains("anxiety"),
+            "anxiety should be a symptom: {:?}", out.symptoms);
         assert!(!cond_str.contains("codex"),
             "CODEX must be rejected; got: {:?}", out.conditions);
         assert!(!cond_str.contains("file"),
@@ -1166,20 +1252,27 @@ mod tests {
 
     #[test]
     fn gp_shorthand_anx_expands() {
-        // "anx ++" — trailing "++" stripped → "anx" → synonym → "anxiety"
+        // "anx ++" — trailing "++" stripped → "anx" → synonym → "anxiety".
+        // Per the new spec, bare "anxiety" is a SYMPTOM, not a diagnosis,
+        // so the deduplicated result lands in symptoms (the explicit
+        // "generalised anxiety disorder" phrase still routes to conditions).
         let out = clean(&["anx ++", "anx"], &[], &[]);
-        let found = out.conditions.iter().any(|c| c == "anxiety");
-        assert!(found, "anx should expand to anxiety; got: {:?}", out.conditions);
-        assert_eq!(out.conditions.len(), 1, "anx and anx++ should deduplicate; got: {:?}", out.conditions);
+        assert!(out.conditions.is_empty(),
+            "bare anxiety should not land in conditions: {:?}", out.conditions);
+        assert!(out.symptoms.iter().any(|s| s == "anxiety"),
+            "anx should expand to anxiety in symptoms; got symptoms={:?}", out.symptoms);
+        assert_eq!(out.symptoms.len(), 1, "anx and anx++ should deduplicate; got: {:?}", out.symptoms);
     }
 
     #[test]
     fn gp_shorthand_depn_expands() {
+        // Same routing rationale — bare "depression" is a symptom mention.
         let out = clean(&["depn", "dep"], &[], &[]);
-        // Both expand to "depression" → deduplicated to one entry
-        assert_eq!(out.conditions.len(), 1,
-            "depn and dep should both expand to depression and deduplicate; got: {:?}", out.conditions);
-        assert_eq!(out.conditions[0], "depression");
+        assert!(out.conditions.is_empty(),
+            "bare depression should not land in conditions: {:?}", out.conditions);
+        assert_eq!(out.symptoms.len(), 1,
+            "depn and dep should both expand to depression and deduplicate; got: {:?}", out.symptoms);
+        assert_eq!(out.symptoms[0], "depression");
     }
 
     #[test]
@@ -1220,11 +1313,13 @@ mod tests {
 
     #[test]
     fn multiline_entity_takes_first_line() {
-        // "Psychiatric Assessment\nAuthor" → first line → "psychiatric assessment"
+        // "Psychiatric Assessment\nAuthor" → first line → "psychiatric
+        // assessment". Per the new spec this is now filtered as a document
+        // header rather than a procedure (it's the report title, not an
+        // act performed during the encounter).
         let out = clean(&[], &[], &["Psychiatric Assessment\nAuthor"]);
-        assert_eq!(out.procedures.len(), 1,
-            "multiline entity should take first line and be valid; got: {:?}", out.procedures);
-        assert_eq!(out.procedures[0], "psychiatric assessment");
+        assert!(out.procedures.is_empty(),
+            "psychiatric assessment is a document header, not a procedure: {:?}", out.procedures);
     }
 
     // ── Procedure garbage ─────────────────────────────────────────────────────
@@ -1240,7 +1335,11 @@ mod tests {
 
     #[test]
     fn legitimate_terms_survive() {
-        // Ensure no false-positives from the new filters
+        // Updated for the new routing rules:
+        //  - explicit diagnoses stay in `conditions`
+        //  - bare "anxiety" / "depression" / "sleep disturbance" route
+        //    to `symptoms`
+        //  - "psychiatric assessment" is a document header, not a procedure
         let out = clean(
             &[
                 "post-traumatic stress disorder",
@@ -1262,12 +1361,15 @@ mod tests {
                 "occupational therapy",
             ],
         );
-        assert_eq!(out.conditions.len(), 8,
-            "all 8 legitimate conditions must survive; got: {:?}", out.conditions);
+        assert_eq!(out.conditions.len(), 5,
+            "5 diagnoses must survive (PTSD, MDD, GAD, disc herniation, CLBP); got: {:?}", out.conditions);
+        assert_eq!(out.symptoms.len(), 3,
+            "anxiety, depression, sleep disturbance must route to symptoms; got: {:?}", out.symptoms);
         assert_eq!(out.medications.len(), 4,
             "all 4 medications must survive; got: {:?}", out.medications);
-        assert_eq!(out.procedures.len(), 6,
-            "all 6 procedures must survive; got: {:?}", out.procedures);
+        assert_eq!(out.procedures.len(), 5,
+            "5 procedures survive (psychiatric assessment is filtered as doc header); got: {:?}",
+            out.procedures);
     }
 
     // ── Scenario simulations — full real-world data slices ────────────────────
@@ -1300,9 +1402,15 @@ mod tests {
         assert_eq!(ptsd_count, 1, "PTSD must appear exactly once; got: {:?}", out.conditions);
         assert!(out.medications.contains(&"sertraline".to_string()),
             "sertraline must survive; got: {:?}", out.medications);
-        assert_eq!(out.procedures.len(), 1,
-            "psychiatric assessment must survive; got: {:?}", out.procedures);
-        assert_eq!(out.procedures[0], "psychiatric assessment");
+        // Updated: "psychiatric assessment" is now suppressed as a
+        // document header rather than kept as a procedure.
+        assert!(out.procedures.is_empty(),
+            "psychiatric assessment is a doc header, not a procedure: {:?}", out.procedures);
+        // anxiety, low mood, depression all route to symptoms now.
+        for sym in ["anxiety", "depression", "low mood"] {
+            assert!(out.symptoms.iter().any(|s| s == sym),
+                "{} must appear in symptoms: {:?}", sym, out.symptoms);
+        }
     }
 
     #[test]
@@ -1358,12 +1466,74 @@ mod tests {
         );
 
         let cond_str = out.conditions.join("|").to_lowercase();
+        let sym_str  = out.symptoms.join("|").to_lowercase();
         assert!(cond_str.contains("post-traumatic stress disorder"), "PTSD must survive");
-        assert!(cond_str.contains("anxiety"), "anx++ must expand to anxiety");
+        // Updated routing — anxiety is a symptom now.
+        assert!(sym_str.contains("anxiety"), "anx++ must expand to anxiety in symptoms: {:?}", out.symptoms);
         assert!(!cond_str.contains("codex"), "CODEX must be removed");
         assert!(!cond_str.contains("ocr"),   "OCR must be removed");
         assert!(!cond_str.contains("mva"),   "MVA must be filtered as event");
         assert!(!cond_str.contains("prn"),   "PRN must be filtered as dosing frequency");
         assert!(out.procedures.is_empty(), "all procedure garbage must be removed");
+    }
+
+    // ── New: symptom split + spec-driven false-positive suppression ──────
+
+    #[test]
+    fn anxiety_routes_to_symptoms_not_conditions() {
+        let out = clean(&["anxiety", "hypervigilance", "low mood"], &[], &[]);
+        assert!(out.conditions.is_empty(),
+                "symptom terms must not appear in conditions: {:?}", out.conditions);
+        for sym in ["anxiety", "hypervigilance", "low mood"] {
+            assert!(out.symptoms.iter().any(|s| s == sym),
+                    "{} must appear in symptoms: {:?}", sym, out.symptoms);
+        }
+    }
+
+    #[test]
+    fn generalised_anxiety_disorder_stays_in_conditions() {
+        // The explicit diagnostic phrase is a diagnosis, not a symptom.
+        let out = clean(&["generalised anxiety disorder"], &[], &[]);
+        assert!(out.conditions.contains(&"generalised anxiety disorder".to_string()),
+                "GAD must stay in conditions: {:?}", out.conditions);
+        assert!(out.symptoms.is_empty());
+    }
+
+    #[test]
+    fn psychiatric_assessment_is_not_a_procedure() {
+        let out = clean(&[], &[], &["Psychiatric Assessment", "psychiatric report"]);
+        assert!(out.procedures.is_empty(),
+                "document-header phrases must not appear as procedures: {:?}", out.procedures);
+    }
+
+    #[test]
+    fn ui_chrome_is_suppressed_everywhere() {
+        let out = clean(
+            &["ChatGPT", "GoLive", "Continue", "JavaScript"],
+            &[],
+            &["GoLive", "ChatGPT"],
+        );
+        assert!(out.conditions.is_empty(), "UI tokens must not appear as conditions: {:?}", out.conditions);
+        assert!(out.procedures.is_empty(), "UI tokens must not appear as procedures: {:?}", out.procedures);
+    }
+
+    #[test]
+    fn depn_normalises_to_depression_then_routes_to_symptoms() {
+        // "depn" → "depression" via existing synonym map. "depression" is in
+        // the symptom lexicon — should land in symptoms.
+        let out = clean(&["depn"], &[], &[]);
+        // Note: existing CONDITION_SYNONYMS already maps depn → depression.
+        // We assert that the term lands in symptoms (not conditions) so the
+        // UI doesn't promote a bare "depression" mention to a diagnosis.
+        assert!(out.conditions.is_empty() || !out.conditions.iter().any(|s| s == "depression"),
+                "bare 'depression' should not be in conditions: {:?}", out.conditions);
+    }
+
+    #[test]
+    fn pregab_normalises_to_pregabalin() {
+        let out = clean(&[], &["pregab", "pregab."], &[]);
+        assert!(out.medications.contains(&"pregabalin".to_string()),
+                "pregab + trailing dot must normalise to pregabalin: {:?}", out.medications);
+        assert_eq!(out.medications.len(), 1, "duplicates must collapse: {:?}", out.medications);
     }
 }

@@ -14,6 +14,9 @@ export type TopBarProps = {
   saveStatus?: SaveStatus;
   saveDirty?: boolean;
   subtitle?: string;
+  showDeleteClient?: boolean;
+  onDeleteClient?: () => void;
+  deleteClientDisabled?: boolean;
 };
 
 function StatusPill({ status, dirty }: { status: SaveStatus; dirty: boolean }) {
@@ -38,6 +41,9 @@ export default function TopBar({
   saveStatus = "idle",
   saveDirty = false,
   subtitle,
+  showDeleteClient = false,
+  onDeleteClient,
+  deleteClientDisabled = false,
 }: TopBarProps) {
   return (
     <div className="topbar flex justify-between items-center h-14 border-b px-4 bg-white shrink-0">
@@ -87,6 +93,21 @@ export default function TopBar({
             className="text-xs px-3 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50 text-slate-700"
           >
             Export DOCX
+          </button>
+        )}
+        {showDeleteClient && (
+          <button
+            type="button"
+            onClick={() => onDeleteClient?.()}
+            disabled={deleteClientDisabled}
+            className="text-xs px-3 py-1.5 rounded-md border border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            title={
+              deleteClientDisabled
+                ? "Stop the active timer before deleting this client"
+                : undefined
+            }
+          >
+            Delete Client
           </button>
         )}
       </div>

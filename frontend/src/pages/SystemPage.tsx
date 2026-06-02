@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { useScrollRestoration } from "../hooks/useScrollRestoration";
 import { TauriAPI, isTauri } from "../api/tauriApi";
 import { getViewerTimeZone } from "../time";
 import { Temporal } from "@js-temporal/polyfill";
@@ -293,6 +294,9 @@ function DatabaseExplorer({
     data: unknown;
   } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const queryResultScrollRef = useScrollRestoration<HTMLDivElement>(
+    "app:system:query-result",
+  );
 
   async function runQuery() {
     if (!isTauri) {
@@ -425,7 +429,10 @@ function DatabaseExplorer({
             </button>
           </div>
 
-          <div className="overflow-auto rounded-lg border border-slate-200">
+          <div
+            ref={queryResultScrollRef}
+            className="overflow-auto rounded-lg border border-slate-200"
+          >
             <table className="w-full text-xs text-left">
               <thead className="bg-slate-100 text-slate-600 font-semibold">
                 <tr>

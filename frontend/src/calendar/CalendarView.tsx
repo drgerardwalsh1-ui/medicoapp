@@ -105,11 +105,15 @@ function NewApptModal({ clients, initialStart, onSave, onCancel }: NewApptModalP
                 No clients — create one first
               </option>
             )}
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {formatFullName(c.identity) || c.id}
-              </option>
-            ))}
+            {clients
+              .filter((c) => formatFullName(c.identity).trim().length > 0)
+              .map((c) => (
+                <option key={c.id} value={c.id}>
+                  {/* Filtered above so a name is always present — never
+                      falls back to a raw UUID / "Unnamed" placeholder. */}
+                  {formatFullName(c.identity)}
+                </option>
+              ))}
           </select>
         </div>
 

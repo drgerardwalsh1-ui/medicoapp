@@ -13,7 +13,10 @@ import {
   pauseEvent,
   resumeEvent,
   stopEvent,
+  updateOpenAssessmentPauseIssue,
   activeWorkMs,
+  wallClockMs,
+  displayedDurationMs,
   totalMinutes,
 } from "./workTimeline";
 import { asViewerTimeZone } from "./types";
@@ -410,15 +413,21 @@ describe("workTimeline — pause / resume / stop math (CRITICAL: spec Part 1–5
     expect(tl[0]).toBe(e); // same reference: nothing changed
   });
 
-  it("totalMinutes excludes paused time across multiple events", () => {
-    // Two completed events: each wall-clock 20m, 5m paused. Active = 15m each.
+  it("totalMinutes excludes paused time across multiple non-assessment events", () => {
+    // For non-assessment types totalMinutes still uses active-work
+    // (pauses excluded). Two completed events: wall 20m, paused 5m each.
+    // Active per event = 15m → total 30m.
+    // Assessment events would use wall-clock (covered by a separate test
+    // in the "wallClockMs / displayedDurationMs" suite below).
     const a: WorkTimelineEvent = {
       ...open("2026-05-10T00:00:00Z"),
+      type: "prereading",
       endedAtUtc: "2026-05-10T00:20:00Z",
       accumulatedPausedMs: 5 * 60_000,
     };
     const b: WorkTimelineEvent = {
       ...open("2026-05-10T01:00:00Z"),
+      type: "prereading",
       endedAtUtc: "2026-05-10T01:20:00Z",
       accumulatedPausedMs: 5 * 60_000,
     };
@@ -449,5 +458,234 @@ describe("workTimeline — pause / resume / stop math (CRITICAL: spec Part 1–5
     const resumed = resumeEvent([wire], wire.id, "2026-05-10T00:08:00Z")[0];
     expect(resumed.accumulatedPausedMs).toBe(3 * 60_000);
     expect(activeWorkMs(resumed, Date.parse("2026-05-10T00:10:00Z"))).toBe(7 * 60_000);
+  });
+});
+
+// ── Assessment pause issue capture ─────────────────────────────────────
+// Pause reasons are stored INSIDE the Assessment event as
+// AssessmentPauseIssue intervals — never as separate timer events.
+
+describe("workTimeline — assessment pause issue capture", () => {
+  function openAssessment(startedAtUtc: string): WorkTimelineEvent {
+    return {
+      id: crypto.randomUUID(),
+      type: "assessment",
+      title: "A",
+      startedAtUtc,
+      endedAtUtc: null,
+      viewerTimeZone: TZ,
+      manuallyEdited: false,
+      createdAutomatically: true,
+      accumulatedPausedMs: 0,
+      pausedAtUtc: null,
+    };
+  }
+
+  it("pausing an assessment opens a new pause issue", () => {
+    const e = openAssessment("2026-05-10T00:00:00Z");
+    const tl = pauseEvent([e], e.id, "2026-05-10T00:05:00Z");
+    const issues = tl[0].assessmentPauseIssues ?? [];
+    expect(issues).toHaveLength(1);
+    expect(issues[0].startedAtUtc).toBe("2026-05-10T00:05:00Z");
+    expect(issues[0].endedAtUtc).toBeNull();
+    expect(issues[0].category).toBeUndefined();
+    expect(issues[0].reason).toBeUndefined();
+  });
+
+  it("updateOpenAssessmentPauseIssue patches the open issue without setting manuallyEdited", () => {
+    const e = openAssessment("2026-05-10T00:00:00Z");
+    let tl = pauseEvent([e], e.id, "2026-05-10T00:05:00Z");
+    tl = updateOpenAssessmentPauseIssue(tl, e.id, {
+      category: "technicalIssues",
+      reason: "Audio failure",
+    });
+    const issue = tl[0].assessmentPauseIssues![0];
+    expect(issue.category).toBe("technicalIssues");
+    expect(issue.reason).toBe("Audio failure");
+    expect(tl[0].manuallyEdited).toBe(false); // issue capture is not a manual edit
+    tl = updateOpenAssessmentPauseIssue(tl, e.id, { note: "Lost mic" });
+    expect(tl[0].assessmentPauseIssues![0].note).toBe("Lost mic");
+    // Earlier fields preserved across patches.
+    expect(tl[0].assessmentPauseIssues![0].reason).toBe("Audio failure");
+  });
+
+  it("resume closes the open issue and accumulates paused time", () => {
+    const e = openAssessment("2026-05-10T00:00:00Z");
+    let tl = pauseEvent([e], e.id, "2026-05-10T00:05:00Z");
+    tl = updateOpenAssessmentPauseIssue(tl, e.id, {
+      category: "privacyConcerns",
+      reason: "Unexpected visitor",
+    });
+    tl = resumeEvent(tl, e.id, "2026-05-10T00:08:00Z");
+    const closed = tl[0].assessmentPauseIssues![0];
+    expect(closed.endedAtUtc).toBe("2026-05-10T00:08:00Z");
+    expect(closed.reason).toBe("Unexpected visitor");
+    expect(tl[0].accumulatedPausedMs).toBe(3 * 60_000);
+    expect(tl[0].pausedAtUtc).toBeNull();
+  });
+
+  it("stop while paused closes the open issue at stop time", () => {
+    const e = openAssessment("2026-05-10T00:00:00Z");
+    let tl = pauseEvent([e], e.id, "2026-05-10T00:05:00Z");
+    tl = stopEvent(tl, e.id, "2026-05-10T00:10:00Z");
+    const stopped = tl[0];
+    expect(stopped.endedAtUtc).toBe("2026-05-10T00:10:00Z");
+    const issue = stopped.assessmentPauseIssues![0];
+    expect(issue.endedAtUtc).toBe("2026-05-10T00:10:00Z");
+  });
+
+  it("non-assessment pause does NOT create any issue", () => {
+    const e: WorkTimelineEvent = {
+      id: crypto.randomUUID(),
+      type: "prereading",
+      title: "P",
+      startedAtUtc: "2026-05-10T00:00:00Z",
+      endedAtUtc: null,
+      viewerTimeZone: TZ,
+      manuallyEdited: false,
+      createdAutomatically: true,
+      accumulatedPausedMs: 0,
+      pausedAtUtc: null,
+    };
+    const tl = pauseEvent([e], e.id, "2026-05-10T00:05:00Z");
+    expect(tl[0].assessmentPauseIssues).toBeUndefined();
+    expect(tl[0].pausedAtUtc).toBe("2026-05-10T00:05:00Z");
+  });
+
+  it("multiple pause cycles append issue intervals", () => {
+    const e = openAssessment("2026-05-10T00:00:00Z");
+    let tl = pauseEvent([e], e.id, "2026-05-10T00:05:00Z");
+    tl = resumeEvent(tl, e.id, "2026-05-10T00:06:00Z");
+    tl = pauseEvent(tl, e.id, "2026-05-10T00:10:00Z");
+    tl = resumeEvent(tl, e.id, "2026-05-10T00:12:00Z");
+    const issues = tl[0].assessmentPauseIssues!;
+    expect(issues).toHaveLength(2);
+    expect(issues[0].endedAtUtc).toBe("2026-05-10T00:06:00Z");
+    expect(issues[1].endedAtUtc).toBe("2026-05-10T00:12:00Z");
+  });
+
+  it("supports multi-select categories and reasons via array patches", () => {
+    const e = openAssessment("2026-05-10T00:00:00Z");
+    let tl = pauseEvent([e], e.id, "2026-05-10T00:05:00Z");
+    tl = updateOpenAssessmentPauseIssue(tl, e.id, {
+      categories: ["technicalIssues", "privacyConcerns"],
+      reasons: ["Audio failure", "Unexpected visitor"],
+    });
+    const issue = tl[0].assessmentPauseIssues![0];
+    expect(issue.categories).toEqual(["technicalIssues", "privacyConcerns"]);
+    expect(issue.reasons).toEqual(["Audio failure", "Unexpected visitor"]);
+    // Patching an unrelated field doesn't drop the arrays.
+    tl = updateOpenAssessmentPauseIssue(tl, e.id, { note: "see log" });
+    expect(tl[0].assessmentPauseIssues![0].categories).toEqual([
+      "technicalIssues",
+      "privacyConcerns",
+    ]);
+    expect(tl[0].assessmentPauseIssues![0].note).toBe("see log");
+  });
+
+  it("supports toggling categories/reasons by replacing the arrays", () => {
+    const e = openAssessment("2026-05-10T00:00:00Z");
+    let tl = pauseEvent([e], e.id, "2026-05-10T00:05:00Z");
+    tl = updateOpenAssessmentPauseIssue(tl, e.id, {
+      categories: ["technicalIssues"],
+      reasons: ["Audio failure"],
+    });
+    // Deselect technicalIssues, add clinicalConcerns.
+    tl = updateOpenAssessmentPauseIssue(tl, e.id, {
+      categories: ["clinicalConcerns"],
+    });
+    expect(tl[0].assessmentPauseIssues![0].categories).toEqual(["clinicalConcerns"]);
+    // Reasons array is independent — still present until cleared.
+    expect(tl[0].assessmentPauseIssues![0].reasons).toEqual(["Audio failure"]);
+  });
+
+  it("paused assessment survives serialization; resume closes the open issue", () => {
+    const e = openAssessment("2026-05-10T00:00:00Z");
+    let tl = pauseEvent([e], e.id, "2026-05-10T00:05:00Z");
+    tl = updateOpenAssessmentPauseIssue(tl, e.id, {
+      category: "breaks",
+      reason: "Comfort break",
+    });
+    const wire = JSON.parse(JSON.stringify(tl)) as WorkTimelineEvent[];
+    expect(wire[0].assessmentPauseIssues![0].endedAtUtc).toBeNull();
+    const resumed = resumeEvent(wire, e.id, "2026-05-10T00:08:00Z");
+    expect(resumed[0].assessmentPauseIssues![0].endedAtUtc).toBe(
+      "2026-05-10T00:08:00Z"
+    );
+    expect(resumed[0].assessmentPauseIssues![0].reason).toBe("Comfort break");
+  });
+});
+
+// ── Wall-clock vs active-work display routing ──────────────────────────
+// `wallClockMs` always includes pause time. `displayedDurationMs` is the
+// per-type selector used by every display call-site: Assessment → wall
+// clock; everything else → active work.
+
+describe("workTimeline — wallClockMs / displayedDurationMs", () => {
+  function open(type: WorkTimelineEvent["type"], startedAtUtc: string): WorkTimelineEvent {
+    return {
+      id: crypto.randomUUID(),
+      type,
+      title: "T",
+      startedAtUtc,
+      endedAtUtc: null,
+      viewerTimeZone: TZ,
+      manuallyEdited: false,
+      createdAutomatically: true,
+      accumulatedPausedMs: 0,
+      pausedAtUtc: null,
+    };
+  }
+
+  it("wallClockMs counts time even while paused", () => {
+    const e = open("assessment", "2026-05-10T00:00:00Z");
+    const tStart = Date.parse("2026-05-10T00:00:00Z");
+    const tl = pauseEvent([e], e.id, "2026-05-10T00:05:00Z"); // pause at T+5m
+    const paused = tl[0];
+    // Wall-clock should keep advancing during pause.
+    expect(wallClockMs(paused, tStart + 5 * 60_000)).toBe(5 * 60_000);
+    expect(wallClockMs(paused, tStart + 10 * 60_000)).toBe(10 * 60_000);
+    // activeWorkMs is still frozen during pause for the same input.
+    expect(activeWorkMs(paused, tStart + 10 * 60_000)).toBe(5 * 60_000);
+  });
+
+  it("displayedDurationMs picks wall-clock for assessment, active for others", () => {
+    const tStart = Date.parse("2026-05-10T00:00:00Z");
+    const a = open("assessment", "2026-05-10T00:00:00Z");
+    const p = open("prereading",  "2026-05-10T00:00:00Z");
+    const tlA = pauseEvent([a], a.id, "2026-05-10T00:05:00Z");
+    const tlP = pauseEvent([p], p.id, "2026-05-10T00:05:00Z");
+    const t = tStart + 10 * 60_000;
+    // Assessment: full 10 minutes (pauses count).
+    expect(displayedDurationMs(tlA[0], t)).toBe(10 * 60_000);
+    // Non-assessment: only 5 minutes of active work.
+    expect(displayedDurationMs(tlP[0], t)).toBe(5 * 60_000);
+  });
+
+  it("stopped assessment reports full wall-clock span as displayed duration", () => {
+    const a = open("assessment", "2026-05-10T00:00:00Z");
+    let tl = pauseEvent([a], a.id, "2026-05-10T00:05:00Z");
+    tl = resumeEvent(tl, a.id, "2026-05-10T00:08:00Z");
+    tl = stopEvent(tl, a.id, "2026-05-10T00:10:00Z");
+    const stopped = tl[0];
+    // Wall span 10m, paused 3m. Assessment display = wall 10m.
+    expect(displayedDurationMs(stopped)).toBe(10 * 60_000);
+    // Billable subset still available via activeWorkMs.
+    expect(activeWorkMs(stopped)).toBe(7 * 60_000);
+  });
+
+  it("totalMinutes uses per-type displayed duration", () => {
+    const assessment: WorkTimelineEvent = {
+      ...open("assessment", "2026-05-10T00:00:00Z"),
+      endedAtUtc: "2026-05-10T00:20:00Z",
+      accumulatedPausedMs: 5 * 60_000,
+    };
+    const prereading: WorkTimelineEvent = {
+      ...open("prereading", "2026-05-10T01:00:00Z"),
+      endedAtUtc: "2026-05-10T01:20:00Z",
+      accumulatedPausedMs: 5 * 60_000,
+    };
+    // Assessment: wall 20m. Prereading: active 15m. Total = 35.
+    expect(totalMinutes([assessment, prereading])).toBe(35);
   });
 });

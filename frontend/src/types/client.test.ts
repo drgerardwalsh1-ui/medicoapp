@@ -9,6 +9,8 @@ import {
   defaultAttendees,
   defaultInjury,
   parseClientBlob,
+  DRAFT_CLIENT_ID,
+  isPersistedClientId,
 } from "./client";
 
 // These tests lock in the isolation invariant that prevents the
@@ -19,10 +21,15 @@ import {
 // graph.
 
 describe("client factories — fresh object identity (regression-locked)", () => {
-  it("defaultClient() returns a distinct UUID on each call", () => {
+  it("defaultClient() carries the DRAFT sentinel id — NOT a real UUID", () => {
+    // Hardening change: defaultClient() must NOT mint crypto.randomUUID().
+    // A draft carries no real persistence identity. The sentinel is the
+    // same on every call and is never treated as a saved-client id.
     const a = defaultClient();
     const b = defaultClient();
-    expect(a.id).not.toBe(b.id);
+    expect(a.id).toBe(DRAFT_CLIENT_ID);
+    expect(b.id).toBe(DRAFT_CLIENT_ID);
+    expect(isPersistedClientId(a.id)).toBe(false);
   });
 
   it("defaultClient() returns distinct top-level object references on each call", () => {

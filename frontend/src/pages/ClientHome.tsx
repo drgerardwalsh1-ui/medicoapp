@@ -8,7 +8,12 @@ import {
   type ClientStateSnapshot,
   type EventHistoryItem,
 } from "../api/tauriApi";
-import DocumentCard, { type IngestedDoc } from "../components/DocumentCard";
+import DocumentCard, {
+  type IngestedDoc,
+  toIngestedDocs,
+  canonicalFromExtraction,
+  type DocumentExtractionInput,
+} from "../components/DocumentCard";
 import DSMAssessment from "../components/DSMAssessment";
 import type { DSMAssessmentData } from "../types/dsm";
 import RelationshipManager, {
@@ -27,10 +32,12 @@ import {
   calcAge,
   calcAgeAtDate,
   calcYearsSince,
+  isPersistedClientId,
   type Client,
   type Appointment,
   type InjuryData,
 } from "../types/client";
+import { validateClientName } from "../types/clientValidation";
 import {
   TimeService,
   TIMEZONE_OPTIONS,
@@ -123,26 +130,52 @@ export default function ClientHome({
   const [saveStatus, setSaveStatus] =
     useState<"idle" | "saving" | "saved" | "error">("idle");
 
+  // First-paint value from the projection-sourced document list (carried
+  // on the client object by `viewToClient`). The authoritative
+  // rehydration on navigation / client switch is the `useEffect([client.id])`
+  // below — this initializer just avoids an empty flash on first render.
   const [docs, setDocs] = useState<IngestedDoc[]>(() =>
-    ((client as any)?.documents || []).map((d: any): IngestedDoc => ({
-      fileName: d.fileName ?? d.file_name ?? "(unnamed)",
-      path: d.path ?? d.id ?? "",
-      method: d.method ?? "text",
-      charCount:
-        typeof d.charCount === "number"
-          ? d.charCount
-          : typeof d.char_count === "number"
-            ? d.char_count
-            : 0,
-      ocrAvailable: d.ocrAvailable ?? false,
-      text: d.text,
-      ner: d.ner,
-      sci: d.sci,
-      structured: d.structured,
-      canonical: d.canonical,
-      error: d.error,
-    }))
+    toIngestedDocs(client.documents),
   );
+
+  // STEP 3/4 FIX: rehydrate the document list from the projection-sourced
+  // `client.documents` on every client switch AND on remount (returning
+  // from another page). Keyed on `client.id` so it fires exactly when the
+  // identity changes — NOT on unrelated re-renders, so an in-session
+  // upload (same id, no remount) is never clobbered. This is the single
+  // projection-driven source of truth for the document list; the UI no
+  // longer depends on transient ingestion-response state surviving
+  // navigation.
+  useEffect(() => {
+    setDocs(toIngestedDocs(client.documents));
+
+    // Then rehydrate persisted EXTRACTION content (clinical events +
+    // attribution) from the projection via the dedicated read command.
+    // This is what makes clinical content survive navigation — the UI no
+    // longer depends on the `processPathAndPersist` response staying in
+    // memory. Read-only; no reprocessing.
+    if (!isPersistedClientId(client.id)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await TauriAPI.getClientExtraction(client.id);
+        const ext = JSON.parse(raw) as DocumentExtractionInput[];
+        if (cancelled || ext.length === 0) return;
+        const byId = new Map(ext.map((e) => [e.document_id, e]));
+        setDocs((prev) =>
+          prev.map((d) => {
+            if (d.canonical) return d;
+            const e = byId.get(d.path);
+            return e ? { ...d, canonical: canonicalFromExtraction(e) } : d;
+          }),
+        );
+      } catch (err) {
+        console.warn("[client-home] getClientExtraction failed:", err);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client.id]);
 
   const [ingesting, setIngesting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -381,6 +414,30 @@ export default function ClientHome({
 
   function hydrateFromView(v: ClientViewModel) {
     setViewState(v);
+
+    // Rehydrate the uploaded-documents list from the projection. THE FIX:
+    // the `docs` useState initializer reads `client.documents` exactly
+    // once on mount, but `viewToClient` → `parseClientBlob(demographics)`
+    // strips documents from the Client object, so on every navigation
+    // back the initializer yields []. The projection `documents` table is
+    // the source of truth for the document list; map it into `docs` here
+    // (this runs on mount and on every refetchView).
+    //
+    // NOTE: the projection's DocumentSummary carries only metadata
+    // (file_name / method / char_count). The richer in-session extraction
+    // payloads (text / ner / sci / structured / canonical) are NOT in this
+    // view, so rehydrated cards show the header + metadata; their
+    // extraction sub-views populate when the document is re-opened. We
+    // therefore PRESERVE any in-session docs (which already carry those
+    // payloads) and only append projection docs not already shown.
+    setDocs((prev) => {
+      const viewDocs = toIngestedDocs(v.documents);
+      if (prev.length === 0) return viewDocs;
+      const have = new Set(prev.map((d) => d.fileName));
+      const missing = viewDocs.filter((d) => !have.has(d.fileName));
+      return missing.length ? [...prev, ...missing] : prev;
+    });
+
     const parsed = parseClientBlob(v.id, v.demographics);
     setData((prev) => ({
       ...parsed,
@@ -531,6 +588,22 @@ export default function ClientHome({
     isSavingRef.current = true;
 
     console.log("SAVE BUTTON CLICKED / handleSave entered");
+
+    // STRICT: no "Unnamed Client". Name validation runs BEFORE the
+    // blob is built so a draft can't slip through with empty identity.
+    // Single-character names are allowed (see clientValidation.ts).
+    const nameCheck = validateClientName({
+      firstName: data.identity?.firstName,
+      lastName: data.identity?.lastName,
+    });
+    if (!nameCheck.ok) {
+      isSavingRef.current = false;
+      setSaveStatus("error");
+      alert(nameCheck.message);
+      setTimeout(() => setSaveStatus("idle"), 2000);
+      return;
+    }
+
     const blob = buildBlob();
     setSaveStatus("saving");
 
@@ -661,36 +734,73 @@ export default function ClientHome({
 
   async function ingestPath(path: string, fileName: string) {
     try {
-      const raw = await TauriAPI.extractFileContents(path);
-      const meta = JSON.parse(raw) as {
-        text: string; method: string; char_count: number; ocr_available: boolean;
-      };
-      const initial: IngestedDoc = {
-        fileName, path, method: meta.method,
-        charCount: meta.char_count, ocrAvailable: meta.ocr_available,
-        text: meta.text,
-      };
-      setDocs((prev) => { const u = [...prev, initial]; persistDocs(u); return u; });
-
-      if (data.id) {
-        try {
-          await TauriAPI.attachDocument(data.id, fileName, meta.method, meta.char_count);
-          await refetchView(data.id);
-        } catch (err) {
-          console.warn("[client-home] attachDocument failed:", err);
-        }
-      }
-
-      const [nerR, sciR, structR, canonR] = await Promise.allSettled([
-        TauriAPI.runNer(meta.text),
-        TauriAPI.extractNlpEntities(meta.text),
-        TauriAPI.extractStructuredData(meta.text, fileName),
-        TauriAPI.processDocument(meta.text, fileName),
-      ]);
-
       function safe<T>(s: string): T | undefined {
         try { return JSON.parse(s) as T; } catch { return undefined; }
       }
+
+      // ── STRICT DB-BACKED INGESTION GATE ────────────────────────────────
+      // The projection `clients` table is the SINGLE SOURCE OF TRUTH for
+      // whether a client may receive uploads. We do NOT consult the
+      // `isSaved` UI flag (which can desync from the DB on refresh /
+      // navigation). Cheap local pre-check first (rejects the draft
+      // sentinel / empty id), then the authoritative async existence
+      // check against the backend.
+      if (!isPersistedClientId(data.id)) {
+        alert("Please save the client before uploading documents.");
+        return;
+      }
+      let clientExists = false;
+      try {
+        clientExists = await TauriAPI.clientExists(data.id);
+      } catch (err) {
+        console.warn("[client-home] clientExists check failed:", err);
+        clientExists = false;
+      }
+      if (!clientExists) {
+        alert("Please save the client before uploading documents.");
+        return;
+      }
+
+      // ── Persistence-boundary ingestion (canonical production path) ─────
+      // The backend reads the raw file bytes, hashes them for chain-of-
+      // custody, extracts text, runs the rule pipeline, and emits
+      // DocumentExtracted + ClinicalEventsRecorded events.
+      const canonRaw = await TauriAPI.processPathAndPersist({
+        clientId: data.id,
+        path,
+        fileName,
+      });
+      const canonical = safe<Record<string, unknown>>(canonRaw);
+      if (!canonical) {
+        throw new Error("processPathAndPersist returned invalid JSON");
+      }
+      const text = (canonical.raw_text as string) ?? "";
+      const method = (canonical.method as string)
+        ?? (canonical.document_type as string)
+        ?? "text";
+      const cleanText = (canonical.clean_text as string) ?? "";
+      const charCount = cleanText.length || text.length;
+      const ocrAvailable = true;
+
+      const initial: IngestedDoc = {
+        fileName, path, method, charCount, ocrAvailable, text,
+      };
+      setDocs((prev) => { const u = [...prev, initial]; persistDocs(u); return u; });
+
+      try {
+        await refetchView(data.id);
+      } catch (err) {
+        console.warn("[client-home] refetchView failed:", err);
+      }
+
+      // NER / scispaCy / structured dev-mode views run in parallel as
+      // before — they are independent of the persistence boundary.
+      const [nerR, sciR, structR] = await Promise.allSettled([
+        TauriAPI.runNer(text),
+        TauriAPI.extractNlpEntities(text),
+        TauriAPI.extractStructuredData(text, fileName),
+      ]);
+
       const ner = nerR.status === "fulfilled"
         ? safe(nerR.value) ?? { error: "Invalid NER JSON" }
         : { error: nerR.reason?.toString() ?? "NER failed" };
@@ -698,7 +808,6 @@ export default function ClientHome({
         ? safe(sciR.value) ?? { error: "Invalid scispaCy JSON" }
         : { error: sciR.reason?.toString() ?? "scispaCy failed" };
       const structured = structR.status === "fulfilled" ? safe(structR.value) : undefined;
-      const canonical = canonR.status === "fulfilled" ? safe(canonR.value) : undefined;
 
       setDocs((prev) => {
         const u = prev.map((d) =>
@@ -709,6 +818,34 @@ export default function ClientHome({
         persistDocs(u);
         return u;
       });
+
+      // ── Persistence-boundary attribution ───────────────────────────────
+      // After each upload completes through the boundary path, resolve
+      // participants/organisations/patient identities across ALL of the
+      // client's canonical documents so the AttributionRecorded and
+      // ExtractionRunRecorded events stay in sync. Best-effort; failures
+      // here do not regress the upload itself.
+      {
+        try {
+          const allCanonical: unknown[] = [];
+          for (const d of docs) {
+            if (d.canonical) allCanonical.push(d.canonical);
+          }
+          allCanonical.push(canonical);
+          const runId =
+            (canonical.run_id as string)
+            ?? (typeof crypto !== "undefined" && "randomUUID" in crypto
+                  ? crypto.randomUUID()
+                  : `run-${Date.now()}`);
+          await TauriAPI.persistAttributionForRun({
+            clientId: data.id,
+            runId,
+            documents: allCanonical,
+          });
+        } catch (err) {
+          console.warn("[client-home] persistAttributionForRun failed:", err);
+        }
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setDocs((prev) => {
