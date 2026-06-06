@@ -96,7 +96,8 @@ pub fn reduce(events: &[EventEnvelope]) -> ClientState {
             EventPayload::DocumentExtracted(_)
             | EventPayload::ClinicalEventsRecorded(_)
             | EventPayload::AttributionRecorded(_)
-            | EventPayload::ExtractionRunRecorded(_) => {}
+            | EventPayload::ExtractionRunRecorded(_)
+            | EventPayload::DocumentDeleted(_) => {}
         }
     }
     state

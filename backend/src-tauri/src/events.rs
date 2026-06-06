@@ -5,6 +5,21 @@
 //!
 //! Foundation phase: only `DocumentUploaded` is wired. Additional payload
 //! variants are reserved here so the enum is exhaustive once producers land.
+//!
+//! ─── CROSS-LAYER IDENTITY CONTRACT (document_id) ──────────────────────────
+//! `document_id` is globally stable and IDENTICAL across every layer:
+//!   - `projection.documents.id`          (primary key of the read model)
+//!   - `DocumentSummary.id`               (get_client_view → frontend)
+//!   - event payload `document_id`        (DocumentExtractedP,
+//!                                          ClinicalEventsRecordedP,
+//!                                          DocumentDeletedP)
+//!   - `clinical_events.document_id`       (FK → documents.id)
+//!   - frontend `IngestedDoc.documentId`   (the ONLY operational identifier)
+//!
+//! It is minted once at upload (UUIDv7) and never re-assigned. Any
+//! document operation (notably deletion) keys strictly off `document_id`;
+//! the frontend `path` field is display/filesystem only and must never be
+//! used for identity (see `IngestedDoc` doc comment).
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -49,6 +64,13 @@ pub enum EventType {
     /// reproduce historical extractions even after the rule set has
     /// evolved.
     ExtractionRunRecorded,
+    /// Tombstone: a single document was deleted. Mirrors `ClientDeleted`
+    /// one level down — the projection hard-deletes the document + all
+    /// derived rows, while this event (and the original
+    /// DocumentExtracted/ClinicalEventsRecorded) remain in the immutable
+    /// log for audit. Honoured by `rebuild_from_events` so deleted
+    /// documents never reappear.
+    DocumentDeleted,
 }
 
 impl EventType {
@@ -63,6 +85,7 @@ impl EventType {
             EventType::ClinicalEventsRecorded => "clinical_events_recorded",
             EventType::AttributionRecorded => "attribution_recorded",
             EventType::ExtractionRunRecorded => "extraction_run_recorded",
+            EventType::DocumentDeleted => "document_deleted",
         }
     }
 }
@@ -151,6 +174,12 @@ pub struct DocumentUploadedP {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocumentExtractedP {
     pub document_id: String,
+    /// Original uploaded filename (e.g. "FakeClient2.pdf"). Carried from
+    /// ingestion so the projection persists it as the document's display
+    /// name. `Option` + `serde(default)` keeps backward compatibility:
+    /// events written before this field existed deserialise to `None`.
+    #[serde(default)]
+    pub file_name: Option<String>,
     pub source_bytes_sha256: String,
     pub raw_text: String,
     pub clean_text: String,
@@ -209,6 +238,17 @@ pub struct ExtractionRunRecordedP {
     pub attribution_count: usize,
 }
 
+/// Document deletion tombstone payload. The projection hard-deletes the
+/// document and every derived row keyed by `document_id`. The event is
+/// retained in the append-only log for audit (mirrors `ClientDeletedP`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentDeletedP {
+    pub document_id: String,
+    /// Optional free-form reason, opaque to the reducer/projection.
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
 /// Strongly-typed payload variants. Serialised into `payload_json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
@@ -222,6 +262,7 @@ pub enum EventPayload {
     ClinicalEventsRecorded(ClinicalEventsRecordedP),
     AttributionRecorded(AttributionRecordedP),
     ExtractionRunRecorded(ExtractionRunRecordedP),
+    DocumentDeleted(DocumentDeletedP),
 }
 
 impl EventPayload {
@@ -236,6 +277,7 @@ impl EventPayload {
             EventPayload::ClinicalEventsRecorded(_) => EventType::ClinicalEventsRecorded,
             EventPayload::AttributionRecorded(_) => EventType::AttributionRecorded,
             EventPayload::ExtractionRunRecorded(_) => EventType::ExtractionRunRecorded,
+            EventPayload::DocumentDeleted(_) => EventType::DocumentDeleted,
         }
     }
 }

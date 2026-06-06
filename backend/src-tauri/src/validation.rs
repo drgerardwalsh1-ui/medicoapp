@@ -561,9 +561,11 @@ pub fn classify_context(pre: &str, post: &str) -> ContextType {
         }
     }
 
-    // 2. Contradiction
+    // 2. Contradiction — markers like "inconsistent with" / "is disputed" often
+    //    follow the entity ("fracture is inconsistent with …"), so check both the
+    //    pre- and post-context.
     for &pattern in CONTRADICTION_PATTERNS {
-        if pre_lower.contains(pattern) {
+        if pre_lower.contains(pattern) || post_lower.contains(pattern) {
             return ContextType::Contradicted;
         }
     }

@@ -11,6 +11,16 @@ import DocumentCard, {
   canonicalFromExtraction,
   type DocumentExtractionInput,
 } from "../components/DocumentCard";
+import {
+  DocumentsSectionProvider,
+  useDocumentsSectionControls,
+} from "../components/DocumentsSection";
+import Step6DevPanel from "../components/Step6DevPanel";
+import Step6ObservabilitySection, {
+  Step6ObservabilityProvider,
+} from "../components/Step6ObservabilitySection";
+import { useStep6Observability } from "../components/step6ObservabilityContext";
+import { copyAllDocuments } from "../lib/documentExport";
 import AttendeesPanel from "../components/AttendeesPanel";
 import RelationshipManager, {
   type Relationship,
@@ -441,6 +451,33 @@ export default function DemographicsPage({
   // ── Document ingestion ─────────────────────────────────────────────────────
   function persistDocs(_updated: IngestedDoc[]) { /* projection is canonical */ }
 
+  /**
+   * Delete a document. PERSISTED docs (have `documentId`) are deleted on
+   * the backend first (DocumentDeleted event → projection cascade) so the
+   * deletion survives navigation and rebuild; only on success are they
+   * removed from the UI. NON-persisted docs (mid-upload / error — no
+   * `documentId`) are removed from local state only, since they have no
+   * projection row. The identifier is `documentId`, NEVER `path`.
+   */
+  async function handleRemoveDocument(doc: IngestedDoc, index: number) {
+    if (doc.documentId && data.id) {
+      try {
+        await TauriAPI.deleteDocument(data.id, doc.documentId);
+      } catch (err) {
+        // Keep the card if the backend delete failed — UI must stay
+        // consistent with the projection (the doc is still persisted).
+        console.warn("[demographics] deleteDocument failed:", err);
+        return;
+      }
+      setDocs((prev) => prev.filter((x) => x.documentId !== doc.documentId));
+      try { await refetchView(data.id); } catch { /* best-effort */ }
+      return;
+    }
+    // No documentId → never persisted → state-only removal (synchronous,
+    // so the captured index is stable).
+    setDocs((prev) => prev.filter((_, idx) => idx !== index));
+  }
+
   async function ingestPath(path: string, fileName: string) {
     try {
       function safe<T>(s: string): T | undefined {
@@ -488,6 +525,10 @@ export default function DemographicsPage({
 
       const initial: IngestedDoc = {
         fileName, path, method, charCount, ocrAvailable, text,
+        // Authoritative id for deletion — the persisted projection
+        // document id, available immediately because this runs AFTER
+        // processPathAndPersist completed.
+        documentId: (canonical.document_id as string) ?? undefined,
       };
       setDocs((prev) => { const u = [...prev, initial]; persistDocs(u); return u; });
 
@@ -1060,22 +1101,54 @@ export default function DemographicsPage({
           </div>
 
           {docs.length > 0 && (
-            <div className="space-y-3">
-              <h3 className="section-title">Documents</h3>
-              {docs.map((d, i) => (
-                <DocumentCard
-                  key={`${d.path}-${i}`}
-                  doc={d}
-                  onRemove={() => {
-                    setDocs((prev) => {
-                      const u = prev.filter((_, idx) => idx !== i);
-                      persistDocs(u);
-                      return u;
-                    });
-                  }}
-                />
-              ))}
-            </div>
+            // Provider scopes the expand/collapse broadcast store + section
+            // registry to THIS document list. Wraps both the toolbar (which
+            // drives expandAll/collapseAll) and the cards (whose
+            // CollapsibleSections subscribe).
+            <DocumentsSectionProvider>
+              {/* Step-6 observability is a CASE-level analysis block. The
+                  provider scopes a single lazy fetch + cache shared by the
+                  Copy All Data toolbar and the collapsible section. clientId is
+                  null when observability is unavailable (unpersisted / web). */}
+              <Step6ObservabilityProvider
+                key={data.id}
+                clientId={
+                  isTauri && isPersistedClientId(data.id) ? data.id : null
+                }
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <h3 className="section-title mb-0">Documents</h3>
+                    <DocumentsToolbar docs={docs} />
+                  </div>
+                  {docs.map((d, i) => (
+                    <DocumentCard
+                      key={`${d.path}-${i}`}
+                      doc={d}
+                      // Disable delete while an upload is in flight (no
+                      // documentId yet) — prevents the race where the backend
+                      // finishes persisting a doc the user just removed.
+                      canRemove={!!d.documentId || !!d.error}
+                      onRemove={() => handleRemoveDocument(d, i)}
+                    />
+                  ))}
+                  {/* STEP 6 OBSERVABILITY — collapsible analysis block at the
+                      same structural level as the per-document analysis
+                      sections. Default collapsed; lazy-loads on expand. */}
+                  <Step6ObservabilitySection />
+                  {/* STEP-6 production reachability (dev-gated): drives
+                      getClientExtraction → build_step6_case in the running app. */}
+                  {isPersistedClientId(data.id) &&
+                    (() => {
+                      try {
+                        return localStorage.getItem("medico.devMode") === "1";
+                      } catch {
+                        return false;
+                      }
+                    })() && <Step6DevPanel clientId={data.id} />}
+                </div>
+              </Step6ObservabilityProvider>
+            </DocumentsSectionProvider>
           )}
         </div>
       )}
@@ -1088,6 +1161,103 @@ export default function DemographicsPage({
 
 // Suppress unused-import lint without breaking the public formatter signature.
 void formatFullName;
+
+/**
+ * Document-list toolbar: Expand All / Collapse All / Copy All Data.
+ *
+ * MUST render inside <DocumentsSectionProvider>. Expand/Collapse drive the
+ * broadcast store (every CollapsibleSection across every card re-syncs). Copy
+ * All Data runs the model-driven export pipeline (lib/documentExport) — it
+ * reads ONLY `docs`, never the DOM, and is size-aware (clipboard for small
+ * payloads, file download for large ones). Generated on demand; never memoised.
+ */
+function DocumentsToolbar({ docs }: { docs: IngestedDoc[] }) {
+  const { expandAll, collapseAll } = useDocumentsSectionControls();
+  // Shared Step-6 cache: ensures Copy All Data includes the `step6` payload,
+  // fetching once (reused with the collapsible section) and never re-fetching.
+  const { ensure: ensureStep6 } = useStep6Observability();
+  const [notice, setNotice] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const disabled = docs.length === 0;
+
+  // Auto-clear the aria-live / toast notice.
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(""), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  async function handleCopyAll() {
+    if (disabled || busy) return;
+    setBusy(true);
+    try {
+      // Fetch-once Step-6 root (null when unavailable); included in the export
+      // payload as a top-level `step6` key without changing chip placement.
+      const step6 = await ensureStep6();
+      const result = await copyAllDocuments(docs, {
+        filenamePrefix: "documents",
+        step6: step6 ?? undefined,
+      });
+      const n = docs.length;
+      setNotice(
+        result.mode === "clipboard"
+          ? `Copied all ${n} document${n === 1 ? "" : "s"} to the clipboard.`
+          : `Export too large for clipboard — downloaded ${result.filename}.`,
+      );
+    } catch (err) {
+      setNotice(
+        `Copy failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const btn =
+    "text-xs px-2.5 py-1 rounded border border-slate-300 text-slate-600 " +
+    "hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition";
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={expandAll}
+          disabled={disabled}
+          aria-label="Expand all document sections"
+          className={btn}
+        >
+          Expand All
+        </button>
+        <button
+          type="button"
+          onClick={collapseAll}
+          disabled={disabled}
+          aria-label="Collapse all document sections"
+          className={btn}
+        >
+          Collapse All
+        </button>
+        <button
+          type="button"
+          onClick={handleCopyAll}
+          disabled={disabled || busy}
+          aria-label="Copy all document data"
+          className={btn}
+        >
+          {busy ? "Copying…" : "Copy All Data"}
+        </button>
+      </div>
+      {/* aria-live doubles as a lightweight toast for copy/download result. */}
+      <div
+        aria-live="polite"
+        className="text-[11px] text-slate-500 min-h-[1rem] text-right"
+      >
+        {notice}
+      </div>
+    </div>
+  );
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 const HOURS_24 = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0"));

@@ -884,6 +884,277 @@ fn accumulate_organisation(
 
 /// Lowercase + strip non-alphanumeric border, collapse whitespace into
 /// dashes. Used to build deterministic ids.
+// ── Identity ambiguity (advisory; strictly additive) ──────────────────────
+//
+// Surfaces DISTINCT resolved entities that MAY denote the same real person but
+// were retained separately (their normalised names differ, so the exact-name
+// merge did not act on them). This is WEAKER evidence than the merge — it
+// NEVER merges, never changes ids, never alters resolution outcomes. It exists
+// so downstream layers (e.g. `family_graph::build_family_contradictions`) can
+// raise Identity contradictions. Fully deterministic.
+//
+// CORRECTED SEMANTICS — identity ambiguity is "deterministic residual
+// uncertainty after resolution based on shared provenance or structured
+// attribute overlap", NOT fuzzy name matching. Because `participant_id =
+// "participant:" + normalise_name(name)`, distinct ids already imply distinct
+// normalised names; grouping on name similarity would invent ambiguity that
+// resolution deliberately did not assert. Therefore:
+//
+//   GROUPING KEYS (any one links two distinct entities):
+//     • shared date of birth
+//     • shared external identifier
+//     • shared address fragment
+//   (Structured-attribute / provenance overlap only. Transitive via union-find
+//    over shared keys — NOT surname buckets.)
+//
+//   SUPPORTING EVIDENCE ONLY (never a grouping key):
+//     • surname / given-initial similarity → recorded as display metadata only.
+//
+// Identity ambiguity stays rare and high-confidence: with no structured
+// overlap present, no group is formed.
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdentityAmbiguityGroup {
+    /// ≥2 distinct resolved ids that may denote the same person.
+    pub participant_ids: BTreeSet<String>,
+    /// Shared surname (last normalised token) — the linking evidence.
+    pub shared_surname: String,
+    /// Human-readable evidence chain (the matched display names).
+    pub evidence: Vec<String>,
+    /// Aggregated source-document ids across members (provenance).
+    pub source_document_ids: BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdentityAmbiguity {
+    pub groups: Vec<IdentityAmbiguityGroup>,
+}
+
+impl IdentityAmbiguity {
+    #[allow(dead_code)] // Public API for downstream consumers / future UI.
+    pub fn is_empty(&self) -> bool {
+        self.groups.is_empty()
+    }
+    /// Flattened set of every id participating in an ambiguity group — the
+    /// advisory signal consumed by the family contradiction binder.
+    pub fn participant_id_set(&self) -> BTreeSet<String> {
+        self.groups
+            .iter()
+            .flat_map(|g| g.participant_ids.iter().cloned())
+            .collect()
+    }
+}
+
+fn uf_find(parent: &mut [usize], mut x: usize) -> usize {
+    while parent[x] != x {
+        parent[x] = parent[parent[x]];
+        x = parent[x];
+    }
+    x
+}
+
+fn uf_union(parent: &mut [usize], a: usize, b: usize) {
+    let ra = uf_find(parent, a);
+    let rb = uf_find(parent, b);
+    if ra != rb {
+        parent[ra] = rb;
+    }
+}
+
+/// Read string values from a metadata field that may be a single string or an
+/// array of strings.
+fn collect_strings(v: &JsonValue) -> Vec<String> {
+    match v {
+        JsonValue::String(s) => vec![s.clone()],
+        JsonValue::Array(a) => a
+            .iter()
+            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn norm_value(s: &str) -> String {
+    s.trim().to_lowercase()
+}
+
+/// Deterministically extract the STRUCTURED grouping keys for one entity:
+/// date-of-birth, external identifiers, and address fragments. Name is NEVER a
+/// key. `explicit_dob` is the typed `PatientIdentity.date_of_birth`; otherwise
+/// DOB is read from `metadata`.
+fn structured_keys(explicit_dob: Option<&str>, metadata: &JsonValue) -> BTreeSet<String> {
+    let mut keys: BTreeSet<String> = BTreeSet::new();
+
+    // Date of birth (typed field or metadata).
+    let dob = explicit_dob.map(|s| s.to_string()).or_else(|| {
+        ["date_of_birth", "dob"]
+            .iter()
+            .find_map(|k| metadata.get(*k).and_then(|v| v.as_str()).map(|s| s.to_string()))
+    });
+    if let Some(d) = dob {
+        let d = norm_value(&d);
+        if !d.is_empty() {
+            keys.insert(format!("dob:{d}"));
+        }
+    }
+
+    // External identifiers (string or array).
+    for k in ["external_id", "external_ids", "identifier", "identifiers"] {
+        if let Some(v) = metadata.get(k) {
+            for id in collect_strings(v) {
+                let id = norm_value(&id);
+                if !id.is_empty() {
+                    keys.insert(format!("ext:{id}"));
+                }
+            }
+        }
+    }
+
+    // Address fragments (alphanumeric tokens ≥3 chars).
+    for k in ["address", "addresses"] {
+        if let Some(v) = metadata.get(k) {
+            for addr in collect_strings(v) {
+                for frag in addr.split(|c: char| !c.is_alphanumeric()).filter(|t| t.len() >= 3) {
+                    keys.insert(format!("addr:{}", frag.to_lowercase()));
+                }
+            }
+        }
+    }
+
+    keys
+}
+
+/// Last normalised name token (surname) — display metadata only.
+fn surname_of(name: &str) -> String {
+    normalise_name(name)
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .last()
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Build the advisory identity-ambiguity signal. Grouping is grounded ONLY in
+/// shared structured-attribute / provenance overlap (see module note above);
+/// name similarity is display-only evidence, never a grouping key.
+/// Deterministic; additive; mutates nothing.
+pub fn identity_ambiguity(
+    participants: &[Participant],
+    patients: &[PatientIdentity],
+) -> IdentityAmbiguity {
+    struct Ent {
+        id: String,
+        name: String,
+        surname: String,
+        docs: Vec<String>,
+        keys: BTreeSet<String>,
+    }
+
+    let mut ents: Vec<Ent> = Vec::new();
+    for p in participants {
+        ents.push(Ent {
+            id: p.participant_id.clone(),
+            surname: surname_of(&p.name),
+            name: p.name.clone(),
+            docs: p.source_document_ids.clone(),
+            keys: structured_keys(None, &p.metadata),
+        });
+    }
+    for p in patients {
+        let name = p.names.first().cloned().unwrap_or_default();
+        ents.push(Ent {
+            id: p.patient_id.clone(),
+            surname: surname_of(&name),
+            keys: structured_keys(p.date_of_birth.as_deref(), &p.metadata),
+            name,
+            docs: p.source_document_ids.clone(),
+        });
+    }
+
+    let n = ents.len();
+
+    // Union entities that SHARE a structured key (attribute/provenance overlap).
+    let mut key_to_ents: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    for (i, e) in ents.iter().enumerate() {
+        for k in &e.keys {
+            key_to_ents.entry(k.clone()).or_default().push(i);
+        }
+    }
+    let mut parent: Vec<usize> = (0..n).collect();
+    for members in key_to_ents.values() {
+        for w in members.windows(2) {
+            uf_union(&mut parent, w[0], w[1]);
+        }
+    }
+
+    // Components with ≥2 DISTINCT ids → ambiguity groups.
+    let mut comp: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
+    for k in 0..n {
+        let r = uf_find(&mut parent, k);
+        comp.entry(r).or_default().insert(k);
+    }
+
+    let mut groups: Vec<IdentityAmbiguityGroup> = Vec::new();
+    for idxs in comp.values() {
+        let ids: BTreeSet<String> = idxs.iter().map(|&i| ents[i].id.clone()).collect();
+        if ids.len() < 2 {
+            continue;
+        }
+
+        // Grounding evidence = structured keys shared by ≥2 members.
+        let mut key_counts: BTreeMap<String, usize> = BTreeMap::new();
+        for &i in idxs {
+            for k in &ents[i].keys {
+                *key_counts.entry(k.clone()).or_insert(0) += 1;
+            }
+        }
+        let mut evidence: Vec<String> = key_counts
+            .into_iter()
+            .filter(|(_, c)| *c >= 2)
+            .map(|(k, _)| format!("shared {k}"))
+            .collect();
+
+        // Secondary, display-only surname note (NOT a grouping key).
+        let surnames: BTreeSet<String> = idxs
+            .iter()
+            .map(|&i| ents[i].surname.clone())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let shared_surname = if surnames.len() == 1 {
+            let s = surnames.iter().next().unwrap().clone();
+            evidence.push(format!("name_support:surname={s}"));
+            s
+        } else {
+            String::new()
+        };
+        for &i in idxs {
+            evidence.push(format!("name:{}", ents[i].name));
+        }
+        evidence.sort();
+        evidence.dedup();
+
+        let source_document_ids: BTreeSet<String> =
+            idxs.iter().flat_map(|&i| ents[i].docs.iter().cloned()).collect();
+
+        groups.push(IdentityAmbiguityGroup {
+            participant_ids: ids,
+            shared_surname,
+            evidence,
+            source_document_ids,
+        });
+    }
+
+    // Deterministic order: by first id, then surname.
+    groups.sort_by(|a, b| {
+        a.participant_ids
+            .iter()
+            .next()
+            .cmp(&b.participant_ids.iter().next())
+            .then(a.shared_surname.cmp(&b.shared_surname))
+    });
+    IdentityAmbiguity { groups }
+}
+
 fn normalise_name(s: &str) -> String {
     let lower = s.to_lowercase();
     let cleaned: String = lower
@@ -1256,6 +1527,139 @@ mod tests {
         assert_eq!(
             trace.get("patient_ids").and_then(|v| v.as_array()).map(|a| a.len()),
             Some(1)
+        );
+    }
+
+    // ── Identity ambiguity producer (structured-overlap semantics) ──────────
+
+    fn amb_participant(name: &str, doc: &str, metadata: serde_json::Value) -> Participant {
+        Participant {
+            participant_id: stable_id("participant", &normalise_name(name)),
+            name: name.to_string(),
+            role: ParticipantRole::Unknown,
+            source_document_ids: vec![doc.to_string()],
+            organisations: vec![],
+            metadata,
+        }
+    }
+
+    // Acceptance criterion 1 + 2: same surname WITHOUT structured/provenance
+    // overlap must NOT group — name similarity is no longer a grouping key.
+    #[test]
+    fn identity_ambiguity_does_not_group_on_name_alone() {
+        // "John Smith" vs "Smith" (partial name) — no shared attributes.
+        let partial = vec![
+            amb_participant("John Smith", "d1", serde_json::json!({})),
+            amb_participant("Smith", "d2", serde_json::json!({})),
+        ];
+        assert!(identity_ambiguity(&partial, &[]).is_empty());
+
+        // "John Smith" vs "J Smith" (initial) — no shared attributes.
+        let initial = vec![
+            amb_participant("John Smith", "d1", serde_json::json!({})),
+            amb_participant("J Smith", "d2", serde_json::json!({})),
+        ];
+        assert!(identity_ambiguity(&initial, &[]).is_empty());
+    }
+
+    // Grouping requires structured overlap — here a shared DOB.
+    #[test]
+    fn identity_ambiguity_groups_on_shared_dob() {
+        let ps = vec![
+            amb_participant("John Smith", "d1", serde_json::json!({"date_of_birth": "1980-05-01"})),
+            // Different given name, SAME dob → grouped on the structured key.
+            amb_participant("Jane Smith", "d2", serde_json::json!({"date_of_birth": "1980-05-01"})),
+        ];
+        let amb = identity_ambiguity(&ps, &[]);
+        assert_eq!(amb.groups.len(), 1);
+        let g = &amb.groups[0];
+        assert_eq!(g.participant_ids.len(), 2);
+        // Evidence records the grounding structured signal.
+        assert!(g.evidence.iter().any(|e| e == "shared dob:1980-05-01"));
+        // Provenance preserved.
+        assert!(g.source_document_ids.contains("d1"));
+        assert!(g.source_document_ids.contains("d2"));
+        assert_eq!(amb.participant_id_set().len(), 2);
+    }
+
+    // A shared external identifier also grounds grouping — even across surnames.
+    #[test]
+    fn identity_ambiguity_groups_on_shared_external_id() {
+        let ps = vec![
+            amb_participant("John Smith", "d1", serde_json::json!({"external_id": "MRN-7788"})),
+            amb_participant("Jonathan Smithe", "d2", serde_json::json!({"external_id": "MRN-7788"})),
+        ];
+        let amb = identity_ambiguity(&ps, &[]);
+        assert_eq!(amb.groups.len(), 1);
+        assert!(amb.groups[0].evidence.iter().any(|e| e == "shared ext:mrn-7788"));
+    }
+
+    // Different DOBs (no shared structured key) → NOT grouped, even same surname.
+    #[test]
+    fn identity_ambiguity_distinct_dob_not_grouped() {
+        let ps = vec![
+            amb_participant("John Smith", "d1", serde_json::json!({"date_of_birth": "1980-05-01"})),
+            amb_participant("J Smith", "d2", serde_json::json!({"date_of_birth": "1990-09-09"})),
+        ];
+        assert!(identity_ambiguity(&ps, &[]).is_empty());
+    }
+
+    // A shared address fragment grounds grouping.
+    #[test]
+    fn identity_ambiguity_groups_on_shared_address_fragment() {
+        let ps = vec![
+            amb_participant("John Smith", "d1", serde_json::json!({"address": "12 Baker Street, London"})),
+            amb_participant("J Smith", "d2", serde_json::json!({"address": "12 Baker Street, London"})),
+        ];
+        let amb = identity_ambiguity(&ps, &[]);
+        assert_eq!(amb.groups.len(), 1);
+        assert!(amb.groups[0].evidence.iter().any(|e| e.starts_with("shared addr:")));
+    }
+
+    // Provenance overlap ALONE (shared source_document_ids, no structured key)
+    // must NOT group — co-occurrence in a document is not a same-person signal.
+    #[test]
+    fn identity_ambiguity_shared_docs_alone_does_not_group() {
+        let ps = vec![
+            amb_participant("John Smith", "shared-doc", serde_json::json!({})),
+            amb_participant("Mary Jones", "shared-doc", serde_json::json!({})),
+        ];
+        assert!(identity_ambiguity(&ps, &[]).is_empty());
+    }
+
+    #[test]
+    fn identity_ambiguity_empty_for_no_or_single_input() {
+        assert!(identity_ambiguity(&[], &[]).is_empty());
+        assert!(identity_ambiguity(
+            &[amb_participant("John Smith", "d1", serde_json::json!({"date_of_birth": "1980-05-01"}))],
+            &[]
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn identity_ambiguity_deterministic_ordering() {
+        // Two independent DOB-grounded groups; output order must be stable.
+        let dob_a = serde_json::json!({"date_of_birth": "1970-01-01"});
+        let dob_b = serde_json::json!({"date_of_birth": "1985-12-12"});
+        let ps1 = vec![
+            amb_participant("Alice Brown", "d1", dob_a.clone()),
+            amb_participant("Alicia Browne", "d2", dob_a.clone()),
+            amb_participant("John Smith", "d3", dob_b.clone()),
+            amb_participant("Jane Smith", "d4", dob_b.clone()),
+        ];
+        let ps2 = vec![
+            amb_participant("Jane Smith", "d4", dob_b.clone()),
+            amb_participant("John Smith", "d3", dob_b.clone()),
+            amb_participant("Alicia Browne", "d2", dob_a.clone()),
+            amb_participant("Alice Brown", "d1", dob_a.clone()),
+        ];
+        let a = identity_ambiguity(&ps1, &[]);
+        let b = identity_ambiguity(&ps2, &[]);
+        assert_eq!(a.groups.len(), 2);
+        assert_eq!(
+            serde_json::to_string(&a).unwrap(),
+            serde_json::to_string(&b).unwrap()
         );
     }
 }

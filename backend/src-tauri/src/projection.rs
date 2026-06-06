@@ -253,6 +253,15 @@ impl Projection {
             by_client.entry(env.client_id.clone()).or_default().push(env.clone());
         }
 
+        // INVARIANT (rebuild correctness): `rebuild_from_events` correctness
+        // depends on DocumentDeleted being REPLAYED — the original
+        // DocumentExtracted / ClinicalEventsRecorded events are never
+        // removed from the append-only log, so without replaying the
+        // tombstone a rebuild would resurrect the document. Within a client
+        // group, events fold in (timestamp, version) order, and
+        // DocumentDeleted is the highest-version event for its document
+        // (see `apply_boundary_events`), so the inline handler leaves the
+        // document removed at the end of the group.
         for (_cid, group) in by_client {
             let state = reduce(&group);
             // Rebuild path: skip deleted clients entirely so they don't
@@ -265,6 +274,32 @@ impl Projection {
                 upsert_document(&tx, &state.client_id, doc)?;
             }
             apply_boundary_events(&tx, &group)?;
+        }
+
+        // ── Tombstone sweep (order-independent deletion guarantee) ──────────
+        // INVARIANT: the tombstone sweep ensures DocumentDeleted DOMINATES
+        // any ordering anomalies (including legacy phantom DocumentUploaded
+        // artifacts). The inline handler above already removes a document's
+        // rows within its own client group — but a LEGACY phantom
+        // DocumentUploaded (client_id == doc_id, pre-ownership-fix) lives in
+        // a DIFFERENT client group whose `upsert_document` could re-create
+        // the row if that group is processed AFTER the real client's
+        // tombstone. By collecting every DocumentDeleted document_id across
+        // ALL events and re-running the cascade once more — after every
+        // group has been folded — deletion becomes strictly
+        // order-independent. Idempotent: re-deleting an absent document is
+        // a no-op.
+        {
+            let mut deleted_doc_ids: std::collections::BTreeSet<String> =
+                std::collections::BTreeSet::new();
+            for env in events {
+                if let crate::events::EventPayload::DocumentDeleted(p) = &env.payload {
+                    deleted_doc_ids.insert(p.document_id.clone());
+                }
+            }
+            for doc_id in &deleted_doc_ids {
+                cascade_delete_document(&tx, doc_id)?;
+            }
         }
 
         if let Some(last) = events.last() {
@@ -855,7 +890,7 @@ fn apply_boundary_events(
                            (id, client_id, file_name, method, char_count, uploaded_at,
                             source_bytes_sha256, raw_text, clean_text, clean_text_sha256,
                             ocr_engine_version, pipeline_version, rule_corpus_hash)
-                       VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
                        ON CONFLICT(id) DO UPDATE SET
                            -- DocumentExtracted is BOUNDARY-OWNED and therefore
                            -- AUTHORITATIVE for document ownership. If a legacy
@@ -865,6 +900,10 @@ fn apply_boundary_events(
                            -- the document stays attached to a phantom client and
                            -- never appears under the real client.
                            client_id           = excluded.client_id,
+                           -- Persist the uploaded filename. COALESCE so a NULL
+                           -- (legacy event without file_name) never wipes a
+                           -- name an earlier writer already set.
+                           file_name           = COALESCE(excluded.file_name, documents.file_name),
                            source_bytes_sha256 = excluded.source_bytes_sha256,
                            raw_text            = excluded.raw_text,
                            clean_text          = excluded.clean_text,
@@ -876,6 +915,7 @@ fn apply_boundary_events(
                     params![
                         p.document_id,
                         env.client_id,                       // client FK
+                        p.file_name,                         // uploaded filename (Option → NULL if legacy)
                         p.method,
                         p.raw_text.len() as i64,             // char_count (best-effort; legacy DocumentUploaded refines if it lands first)
                         env.timestamp.to_rfc3339(),          // uploaded_at
@@ -972,9 +1012,72 @@ fn apply_boundary_events(
                     ],
                 )?;
             }
+            EventPayload::DocumentDeleted(p) => {
+                // INVARIANT (event ordering): DocumentDeleted MUST be the
+                // highest-version event for a document within its client
+                // group. Because events replay in strict (timestamp,
+                // version) order, this guarantees the DocumentExtracted /
+                // ClinicalEventsRecorded / AttributionRecorded events for
+                // the same document have ALREADY been folded (rows exist)
+                // by the time this tombstone runs, so the cascade removes
+                // real rows. delete_document upholds this by appending the
+                // tombstone with the next monotonic version, strictly
+                // after the document's create/extract events.
+                //
+                // Hard-delete the document + every derived row keyed by
+                // document_id. Idempotent (0 rows is fine if already gone).
+                // The event itself stays in the append-only log for audit.
+                cascade_delete_document(tx, &p.document_id)?;
+            }
             _ => {} // non-boundary events handled by the base reducer
         }
     }
+    Ok(())
+}
+
+/// Hard-delete a single document and all derived projection rows, in
+/// FK-safe order (children → parent). Idempotent: deleting an absent
+/// document affects 0 rows and is not an error.
+///
+/// Scope (exactly the locked cascade): `resolved_attributions` (via its
+/// `clinical_events.event_id`), `clinical_events`, `document_participant_maps`,
+/// `entities`, then `documents`. Global tables (`participants`,
+/// `organisations`, `patient_identities`) and run metadata
+/// (`extraction_runs`) are intentionally left untouched.
+///
+/// INVARIANT (derived-data dependency): `resolved_attributions` is NOT
+/// directly keyed by `document_id`. It is bound to the document only
+/// INDIRECTLY, via `clinical_events.event_id → document_id`. Therefore
+/// deletion correctness depends on CASCADE ORDER, not on an FK
+/// constraint: `resolved_attributions` must be deleted FIRST (resolving
+/// its `event_id`s through `clinical_events` while those rows still
+/// exist), BEFORE `clinical_events` is deleted. Reordering these two
+/// statements would orphan attribution rows.
+fn cascade_delete_document(
+    tx: &rusqlite::Transaction<'_>,
+    document_id: &str,
+) -> rusqlite::Result<()> {
+    tx.execute(
+        "DELETE FROM resolved_attributions
+          WHERE event_id IN (SELECT event_id FROM clinical_events WHERE document_id = ?1)",
+        params![document_id],
+    )?;
+    tx.execute(
+        "DELETE FROM clinical_events WHERE document_id = ?1",
+        params![document_id],
+    )?;
+    tx.execute(
+        "DELETE FROM document_participant_maps WHERE document_id = ?1",
+        params![document_id],
+    )?;
+    tx.execute(
+        "DELETE FROM entities WHERE document_id = ?1",
+        params![document_id],
+    )?;
+    tx.execute(
+        "DELETE FROM documents WHERE id = ?1",
+        params![document_id],
+    )?;
     Ok(())
 }
 

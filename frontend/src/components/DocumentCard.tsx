@@ -14,7 +14,8 @@
  *   - structured analysis JSON (collapsible)
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { CollapsibleSection } from "./DocumentsSection";
 
 export type NerEntities = {
   PERSON?: string[];
@@ -173,7 +174,26 @@ export type ProcessedDocument = {
 
 export type IngestedDoc = {
   fileName: string;
+  /**
+   * INVARIANT (frontend identity contract):
+   * `path` may represent a filesystem path (in-session uploads) OR the
+   * projection `document_id` (rehydrated docs) depending on lifecycle
+   * state. It is OVERLOADED and is display/filesystem only — it must
+   * NEVER be used for backend operations. Only `documentId` is stable for
+   * backend operations (delete, etc.). Kept here for display + dedup +
+   * React keys.
+   */
   path: string;
+  /**
+   * Authoritative projection document id (`documents.id`). Present only
+   * for PERSISTED documents:
+   *   - rehydrated  → from `DocumentSummary.id`
+   *   - in-session  → from `canonical.document_id` after upload completes
+   * `undefined` while an upload is in progress or for error docs (those
+   * were never persisted, so they have no backend row to delete).
+   * This is the ONLY field used to key document deletion.
+   */
+  documentId?: string;
   method: string;
   charCount: number;
   ocrAvailable: boolean;
@@ -212,6 +232,10 @@ export function toIngestedDocs(
     fileName:
       (d.fileName as string) ?? (d.file_name as string) ?? "(unnamed)",
     path: (d.path as string) ?? (d.id as string) ?? "",
+    // Authoritative id for deletion: a rehydrated DocumentSummary exposes
+    // `id` (= projection document id); an already-rich in-session doc may
+    // carry an explicit `documentId`.
+    documentId: (d.documentId as string) ?? (d.id as string) ?? undefined,
     method: (d.method as string) ?? "text",
     charCount:
       typeof d.charCount === "number"
@@ -512,7 +536,7 @@ const EVENT_TYPE_STYLE: Record<ClinicalEvent["event_type"], string> = {
   document_date:         "bg-sky-50 text-sky-800 border-sky-200",
 };
 
-function EventInspector({ events }: { events?: ClinicalEvent[] }) {
+function EventInspector({ events, docId }: { events?: ClinicalEvent[]; docId: string }) {
   const [show, setShow] = useState<boolean>(() => readDevMode());
   useEffect(() => {
     // Pick up changes to the toggle (other cards may flip it).
@@ -523,27 +547,43 @@ function EventInspector({ events }: { events?: ClinicalEvent[] }) {
   if (!show) return null;
   if (!events || events.length === 0) {
     return (
-      <details className="border-t" open>
-        <summary className="cursor-pointer text-xs px-4 py-2 select-none text-slate-500 hover:bg-slate-50">
-          Event Inspector
-          <span className="ml-2 text-[10px] text-slate-400">
-            (canonical clinical event layer — additive)
-          </span>
-        </summary>
+      <CollapsibleSection
+        docId={docId}
+        sectionId="event-inspector"
+        title="Event Inspector"
+        kind="debug"
+        className="border-t"
+        summary={
+          <>
+            Event Inspector
+            <span className="ml-2 text-[10px] text-slate-400">
+              (canonical clinical event layer — additive)
+            </span>
+          </>
+        }
+      >
         <div className="px-4 py-2 text-[11px] text-slate-400 italic">
           No clinical events produced for this document.
         </div>
-      </details>
+      </CollapsibleSection>
     );
   }
   return (
-    <details className="border-t" open>
-      <summary className="cursor-pointer text-xs px-4 py-2 select-none text-slate-500 hover:bg-slate-50">
-        Event Inspector
-        <span className="ml-2 text-[10px] text-slate-400">
-          ({events.length} event{events.length === 1 ? "" : "s"})
-        </span>
-      </summary>
+    <CollapsibleSection
+      docId={docId}
+      sectionId="event-inspector"
+      title="Event Inspector"
+      kind="debug"
+      className="border-t"
+      summary={
+        <>
+          Event Inspector
+          <span className="ml-2 text-[10px] text-slate-400">
+            ({events.length} event{events.length === 1 ? "" : "s"})
+          </span>
+        </>
+      }
+    >
       <div className="px-4 py-2 max-h-96 overflow-auto">
         <table className="text-[11px] w-full">
           <thead className="text-slate-500 uppercase tracking-wide">
@@ -584,11 +624,11 @@ function EventInspector({ events }: { events?: ClinicalEvent[] }) {
           </tbody>
         </table>
       </div>
-    </details>
+    </CollapsibleSection>
   );
 }
 
-function UnifiedEventsPanel({ events }: { events?: UnifiedClinicalEvent[] }) {
+function UnifiedEventsPanel({ events, docId }: { events?: UnifiedClinicalEvent[]; docId: string }) {
   const [show, setShow] = useState<boolean>(() => readDevMode());
   useEffect(() => {
     const onStorage = () => setShow(readDevMode());
@@ -598,14 +638,25 @@ function UnifiedEventsPanel({ events }: { events?: UnifiedClinicalEvent[] }) {
   if (!show) return null;
   if (!events || events.length === 0) {
     return (
-      <details className="border-t">
-        <summary className="cursor-pointer text-xs px-4 py-2 select-none text-slate-500 hover:bg-slate-50">
-          Unified Events (debug)
-          <span className="ml-2 text-[10px] text-slate-400">
-            (post-processing aggregation — empty)
-          </span>
-        </summary>
-      </details>
+      <CollapsibleSection
+        docId={docId}
+        sectionId="unified-events"
+        title="Unified Events (debug)"
+        kind="debug"
+        className="border-t"
+        summary={
+          <>
+            Unified Events (debug)
+            <span className="ml-2 text-[10px] text-slate-400">
+              (post-processing aggregation — empty)
+            </span>
+          </>
+        }
+      >
+        <div className="px-4 py-2 text-[11px] text-slate-400 italic">
+          No unified events produced for this document.
+        </div>
+      </CollapsibleSection>
     );
   }
   // Group by event_type for readability.
@@ -621,13 +672,21 @@ function UnifiedEventsPanel({ events }: { events?: UnifiedClinicalEvent[] }) {
     "organisation", "document_date",
   ];
   return (
-    <details className="border-t">
-      <summary className="cursor-pointer text-xs px-4 py-2 select-none text-slate-500 hover:bg-slate-50">
-        Unified Events (debug)
-        <span className="ml-2 text-[10px] text-slate-400">
-          ({events.length} canonical entr{events.length === 1 ? "y" : "ies"})
-        </span>
-      </summary>
+    <CollapsibleSection
+      docId={docId}
+      sectionId="unified-events"
+      title="Unified Events (debug)"
+      kind="debug"
+      className="border-t"
+      summary={
+        <>
+          Unified Events (debug)
+          <span className="ml-2 text-[10px] text-slate-400">
+            ({events.length} canonical entr{events.length === 1 ? "y" : "ies"})
+          </span>
+        </>
+      }
+    >
       <div className="px-4 py-2 space-y-3 max-h-[28rem] overflow-auto">
         {order.flatMap((t) => {
           const items = groups.get(t);
@@ -688,7 +747,7 @@ function UnifiedEventsPanel({ events }: { events?: UnifiedClinicalEvent[] }) {
           ];
         })}
       </div>
-    </details>
+    </CollapsibleSection>
   );
 }
 
@@ -791,11 +850,13 @@ function TextToggle({
   cleanText,
   removedLines,
   warnings,
+  docId,
 }: {
   rawText?: string;
   cleanText?: string;
   removedLines?: RemovedLine[];
   warnings?: string[];
+  docId: string;
 }) {
   const [mode, setMode] = useState<"clean" | "raw">("clean");
   const hasBoth = !!(rawText && cleanText) && rawText !== cleanText;
@@ -840,10 +901,15 @@ function TextToggle({
         {shown}
       </div>
       {removedLines && removedLines.length > 0 && (
-        <details className="border-t">
-          <summary className="cursor-pointer text-[11px] text-slate-500 px-4 py-2 select-none">
-            Removed noise audit ({removedLines.length})
-          </summary>
+        <CollapsibleSection
+          docId={docId}
+          sectionId="removed-noise-audit"
+          title="Removed noise audit"
+          kind="text"
+          className="border-t"
+          summaryClassName="cursor-pointer text-[11px] text-slate-500 px-4 py-2 select-none"
+          summary={<>Removed noise audit ({removedLines.length})</>}
+        >
           <ul className="px-4 py-2 text-[11px] text-slate-600 space-y-0.5 max-h-48 overflow-auto">
             {removedLines.map((rl, i) => (
               <li key={i}>
@@ -852,21 +918,54 @@ function TextToggle({
               </li>
             ))}
           </ul>
-        </details>
+        </CollapsibleSection>
       )}
     </div>
+  );
+}
+
+/**
+ * Body for the "Structured analysis (JSON)" section. Stringification is
+ * memoised on the `blob` identity so repeated re-renders (while open) never
+ * re-serialise. Combined with the parent CollapsibleSection's lazy mount,
+ * the stringify cost is paid at most once per open, per document.
+ */
+function StructuredJsonBody({ blob }: { blob: unknown }) {
+  const json = useMemo(() => {
+    try {
+      return JSON.stringify(blob, null, 2) ?? "";
+    } catch {
+      return "/* structure not serialisable */";
+    }
+  }, [blob]);
+  return (
+    <pre className="bg-slate-900 text-emerald-300 text-[11px] leading-snug px-4 py-3 overflow-auto max-h-80 m-0">
+      {json}
+    </pre>
   );
 }
 
 export default function DocumentCard({
   doc,
   onRemove,
+  canRemove = true,
 }: {
   doc: IngestedDoc;
   onRemove?: () => void;
+  /**
+   * When false, the × is shown but disabled — used to block deletion of
+   * a document whose upload is still in flight (no document id yet), which
+   * would otherwise race the backend persist.
+   */
+  canRemove?: boolean;
 }) {
   const meta =
     METHOD_META[doc.method] ?? { label: doc.method, cls: "bg-slate-100 text-slate-700" };
+
+  // Stable per-card section namespace. `documentId` is the authoritative id;
+  // fall back to the overloaded `path` for in-flight / error docs that have no
+  // backend row yet. Used only to namespace section keys in the registry.
+  const docId = doc.documentId ?? doc.path;
 
   return (
     <div className="border rounded-xl bg-white overflow-hidden">
@@ -884,9 +983,15 @@ export default function DocumentCard({
         )}
         {onRemove && (
           <button
-            onClick={onRemove}
-            className="text-slate-400 hover:text-slate-700 text-lg leading-none px-1"
-            title="Remove"
+            onClick={canRemove ? onRemove : undefined}
+            disabled={!canRemove}
+            className={
+              "text-lg leading-none px-1 " +
+              (canRemove
+                ? "text-slate-400 hover:text-slate-700"
+                : "text-slate-200 cursor-not-allowed")
+            }
+            title={canRemove ? "Remove" : "Finishing upload…"}
           >
             ×
           </button>
@@ -955,29 +1060,36 @@ export default function DocumentCard({
                 labelled as advisory. Display order: canonical above,
                 raw below, so the trustworthy data wins the user's eye. */}
             {(doc.ner || doc.sci) && (
-              <details className="border-t group">
-                <summary className="cursor-pointer text-xs px-4 py-2 select-none text-slate-500 hover:bg-slate-50">
-                  Debug raw NLP output
-                  <span className="ml-2 text-[10px] text-slate-400">
-                    (unfiltered spaCy / scispaCy candidates — advisory only)
-                  </span>
-                </summary>
-                <div className="divide-y">
-                  <NerBlock ner={doc.ner} />
-                  <SciBlock sci={doc.sci} />
-                </div>
-              </details>
+              <CollapsibleSection
+                docId={docId}
+                sectionId="debug-nlp"
+                title="Debug raw NLP output"
+                kind="debug"
+                className="border-t group"
+                summary={
+                  <>
+                    Debug raw NLP output
+                    <span className="ml-2 text-[10px] text-slate-400">
+                      (unfiltered spaCy / scispaCy candidates — advisory only)
+                    </span>
+                  </>
+                }
+                bodyClassName="divide-y"
+              >
+                <NerBlock ner={doc.ner} />
+                <SciBlock sci={doc.sci} />
+              </CollapsibleSection>
             )}
 
             {/* Event Inspector — additive validation surface for the
                 Canonical Clinical Event Layer. Visible only when the
                 developer toggle (`medico.devMode === "1"`) is on. */}
-            <EventInspector events={canon?.clinical_events} />
+            <EventInspector events={canon?.clinical_events} docId={docId} />
 
             {/* Unified Events (debug) — post-processing aggregation of
                 raw clinical events into a per-document canonical graph.
                 Also gated by the developer toggle. */}
-            <UnifiedEventsPanel events={canon?.unified_clinical_events} />
+            <UnifiedEventsPanel events={canon?.unified_clinical_events} docId={docId} />
 
             {(rawText || cleanText) && (
               <TextToggle
@@ -985,6 +1097,7 @@ export default function DocumentCard({
                 cleanText={cleanText}
                 removedLines={canon?.removed_lines}
                 warnings={canon?.warnings}
+                docId={docId}
               />
             )}
           </>
@@ -993,18 +1106,28 @@ export default function DocumentCard({
 
       {/* structured analysis */}
       {(() => {
-        const blob = doc.structured ?? doc.canonical;
+        // Single source of truth: prefer the AUTHORITATIVE canonical blob
+        // (derived from clinical_events — incl. the resolved patient/parties)
+        // over the legacy `structured` store, which is retained only as a
+        // fallback for documents not yet reprocessed. This removes the
+        // duplicate patient-resolution path: the panel can no longer display a
+        // stale/blank `structured.parties.patient` that diverges from canonical.
+        const blob = doc.canonical ?? doc.structured;
         if (!blob) return null;
-        const json = JSON.stringify(blob, null, 2) ?? "";
         return (
-          <details className="border-t">
-            <summary className="cursor-pointer text-xs text-slate-500 px-4 py-2 select-none">
-              Structured analysis (JSON)
-            </summary>
-            <pre className="bg-slate-900 text-emerald-300 text-[11px] leading-snug px-4 py-3 overflow-auto max-h-80 m-0">
-              {json}
-            </pre>
-          </details>
+          <CollapsibleSection
+            docId={docId}
+            sectionId="structured-json"
+            title="Structured analysis (JSON)"
+            kind="json"
+            className="border-t"
+            summaryClassName="cursor-pointer text-xs text-slate-500 px-4 py-2 select-none"
+          >
+            {/* Lazy: this body only mounts while the section is open, so the
+                stringify below never runs for a collapsed card. Memoised per
+                `blob` so re-renders while open don't re-serialise. */}
+            <StructuredJsonBody blob={blob} />
+          </CollapsibleSection>
         );
       })()}
     </div>

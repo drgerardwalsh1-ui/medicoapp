@@ -3,7 +3,9 @@
 //! Every `ClinicalEvent` that flows into the persistent boundary table
 //! must satisfy:
 //!
-//!     clean_text[char_offset_start..char_offset_end] == source_snippet
+//! ```text
+//! clean_text[char_offset_start..char_offset_end] == source_snippet
+//! ```
 //!
 //! This module defines that check exactly once so all writers, debug
 //! assertions, and tests share a single canonical implementation.

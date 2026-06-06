@@ -54,6 +54,23 @@ describe("toIngestedDocs — projection → UI document mapping", () => {
     expect(toIngestedDocs([])).toEqual([]);
   });
 
+  it("sets documentId from DocumentSummary.id (deletion identifier, NOT path)", () => {
+    // Identifier-strategy lock: rehydrated docs must carry the authoritative
+    // documentId so deletion never relies on the overloaded `path`.
+    const out = toIngestedDocs([
+      { id: "019e-doc-uuid", file_name: "TEST CASE 3.docx", method: "text", char_count: 557 },
+    ]);
+    expect(out[0].documentId).toBe("019e-doc-uuid");
+    expect(out[0].path).toBe("019e-doc-uuid"); // path still mirrors id for rehydrated docs
+  });
+
+  it("leaves documentId undefined when no id is present (non-persisted doc)", () => {
+    const out = toIngestedDocs([
+      { fileName: "InProgress.pdf", path: "/tmp/InProgress.pdf", method: "text", charCount: 10 },
+    ]);
+    expect(out[0].documentId).toBeUndefined();
+  });
+
   it("falls back gracefully when fields are absent", () => {
     const out = toIngestedDocs([{}]);
     expect(out[0].fileName).toBe("(unnamed)");

@@ -79,6 +79,153 @@ mod clinical_knowledge_graph;
 // structure. New command: `reason_participant_resolution`.
 mod participant_resolution;
 
+// STEP 5 — Family Graph Model. A strictly-additive PROJECTION that turns
+// family events into a temporal, source-attributed relationship graph.
+// Contradictions are INHERITED (same reconciliation contract), never
+// recomputed; conflicting family facts are preserved as separate edges,
+// never collapsed. Plugs into CanonicalCase.family_graph. Not wired to a
+// command.
+mod family_graph;
+
+// Canonical Case Reconstruction — the top-of-stack legal-grade case
+// envelope (CanonicalCase) assembled ADDITIVELY from the layers above.
+// This pass implements Contradiction Surfacing only: a flattened
+// contradictions[] view (canonical value + retained alternatives +
+// conflict_flag), unresolved_questions[], and a confidence_summary,
+// derived from the LongitudinalPatientGraph's assertion_distribution.
+// No re-extraction, no inference, no model calls. Not yet wired to a
+// command (mirrors the longitudinal / GCKG rollout pattern).
+mod canonical_case;
+
+// Case event-type extension — InjuryEvent / FamilyEvent / LegalStatusEvent.
+// Strictly-additive pure data carriers that LOWER deterministically into the
+// EXISTING graphs: InjuryEvent → ClinicalEvent (clinical contradiction
+// pipeline), FamilyEvent → the existing family carrier, LegalStatusEvent →
+// TimelineEntry (record only, no contradiction). No new engine, no math change.
+mod case_events;
+
+// Event extension dispatch — a PURE ROUTING BOUNDARY over the case_events
+// lowerings (Injury→Clinical, Legal→Timeline, Family→passthrough, Unknown→
+// Ignored). No domain logic; the single insertion point for future event
+// types so the core pipelines stay untouched. Deterministic, no HashMap.
+mod event_dispatch;
+
+// STEP-6 enrichment — a PURE, POST-PROCESSING VIEW LAYER over the assembled
+// CaseContradiction stream. Adds presentational derived fields (severity_rank,
+// presentation_group, cross_domain_tag) without mutating input, recomputing
+// confidence, or touching any engine. Deterministic, BTreeMap-only.
+mod step6_enrichment;
+
+// STEP-6 semantic graph — a PURE DERIVATION LAYER over Step6View: nodes per
+// enriched contradiction, edges from cross_namespace_relations, with traversal,
+// clustering (connected components), and filtered queries. Vec-only output, no
+// HashMap; reads the view by reference and mutates nothing.
+mod step6_graph;
+
+// STEP-6 graph analytics — PURE deterministic analysis over Step6Graph:
+// node metrics (degree / cluster / bridge_score / centrality_rank), cluster
+// metrics (+ clinical significance), graph summary, and top-N queries. Reads
+// the graph by reference; mutates nothing; Vec-only, no HashMap, no ML.
+mod step6_graph_analysis;
+
+// STEP-6 graph narratives — PURE deterministic summarisation of GraphAnalytics
+// into fixed-template human-readable strings (cluster headline/summary/dominant
+// node + graph summary). No AI, no inference, no scoring; reads by reference,
+// mutates nothing.
+mod step6_graph_narrative;
+
+// Canonical STEP-6 report — the single aggregation object (view + graph +
+// analytics + narrative) for future UI/PDF/REST/export surfaces. Pure
+// aggregation: calls the existing builders in sequence, no recomputation, no
+// mutation. Plus pure queries + read-only integrity validation.
+mod step6_report;
+
+// STEP-6 report snapshot — durable, versioned, serializable artifact wrapping
+// Step6Report. Adds schema_version + deterministic report_id + caller-supplied
+// timestamp. Pure wrapping; no hashing/UUIDs/internal timestamps.
+mod step6_report_snapshot;
+
+// STEP-6 snapshot persistence boundary — SnapshotRepository trait + deterministic
+// in-memory (BTreeMap) reference implementation. Contract only; no DB/FS/REST.
+mod step6_snapshot_repository;
+
+// STEP-6 snapshot filesystem backend — concrete SnapshotRepository writing one
+// JSON file per snapshot ({report_id}.json). std + serde only; sync; no DB/net.
+mod step6_snapshot_file_repository;
+
+// STEP-6 report diff — deterministic, read-only comparison of two snapshots
+// (exact contradiction_id identity). Pure derivation; no report/graph changes.
+mod step6_report_diff;
+
+// STEP-6 report evolution — deterministic, read-only analysis of contradiction
+// modifications (confidence/subject), graph + narrative evolution between two
+// snapshots. Pure derivation; no engine/report/snapshot/diff changes.
+mod step6_report_evolution;
+
+// STEP-6 report history — deterministic, read-only longitudinal analysis across
+// ALL snapshots in a repository (first/last seen, appearances, persistent/
+// resolved/recurring). Pure derivation; no engine/report/snapshot/repo changes.
+mod step6_report_history;
+
+// STEP-6 report trends — deterministic, read-only confidence-trajectory analysis
+// over ReportHistory (Increasing/Decreasing/Stable/Intermittent). Pure
+// derivation; no engine/report/snapshot/repo/diff/evolution/history changes.
+mod step6_report_trends;
+
+// STEP-6 forecast readiness — deterministic classification of historical
+// SUFFICIENCY (InsufficientHistory/LimitedHistory/Ready). Does NOT forecast,
+// predict, or extrapolate. Pure derivation over history + trends.
+mod step6_forecast_readiness;
+
+// STEP-6 monitoring queue — deterministic watchlist organising contradictions by
+// observation priority (Ready→High, Limited→Medium, Insufficient→Low). No
+// forecasting/prediction; pure derivation over forecast-readiness.
+mod step6_monitoring_queue;
+
+// STEP-6 monitoring dashboard — deterministic, read-only aggregation over a
+// MonitoringQueue (priority/trend/readiness distributions + consistency check).
+// Pure summary; no forecasting, reprioritisation, or reordering.
+mod step6_monitoring_dashboard;
+
+// STEP-6 observability root — composition-only aggregator bundling snapshot +
+// history + trends + readiness + queue + dashboard into one inspectable object.
+// Computes nothing new; calls existing builders in strict order.
+mod step6_observability_root;
+
+// STEP-6 export — deterministic, read-only PROJECTIONS (rows / CSV lines /
+// per-group summary) of the enriched Step6View. No graph/engine/dispatch/event
+// access, no mutation, no recomputation. BTreeMap-only; no filesystem.
+mod step6_export;
+
+// STEP-6 pipeline — the single end-to-end orchestration seam (audit F1+F2):
+// EventEnvelope → dispatch → clinical/family/timeline accumulation → assemble
+// (timeline passed through) → enrich → export. Orchestration only; reuses every
+// existing builder, no new business logic. Deterministic, BTreeMap grouping.
+mod step6_pipeline;
+
+// Fact-assertion pipeline — first-class non-clinical factual statements
+// (marital/work/smoking/driving/vital-status/dates). `fact_assertion` is the
+// model, `fact_extract` lifts facts deterministically from clean_text, and
+// `fact_contradiction` turns disagreeing values (same subject+attribute,
+// different value) into CaseContradictions — even when both are affirmed.
+mod fact_assertion;
+mod fact_extract;
+mod fact_contradiction;
+
+// Production input adapter (closes audit F-1/F-2): converts the real persisted
+// extraction payload (clinical_events JSON) + caller-supplied family/legal
+// facts into Vec<EventEnvelope> and invokes build_step6_pipeline. Pure adapter
+// + thin entrypoint; no new business logic. Surfaced via the `build_step6_case`
+// command.
+mod adapter_step6_input;
+
+// Clinical event routing + preservation layer (additive, preparation only):
+// the deterministic `Diagnosis → Injury, else Unsupported` routing extracted
+// from the adapter (byte-identical), plus pure preservation/visibility helpers
+// (clinical_event_metadata_snapshot, clinical_coverage_report). No new coverage,
+// no behavioural change.
+mod clinical_event_adapter;
+
 // Persistence-boundary snippet-integrity verification module. Owns the
 // single canonical implementation of
 //   `clean_text[ev.char_offset_start..ev.char_offset_end] == ev.source_snippet`
@@ -93,6 +240,15 @@ mod validation;
 // Foundation phase: modules wired, schema initialised, single optional emission
 // behind a feature flag. Reducer + verification land in subsequent steps.
 pub mod events;
+// Event Contract Registry — declarative semantics per EventType (no runtime
+// behaviour). Exhaustive `match` makes an unregistered new event a compile
+// error; the single source of truth for event identity/replay/cascade.
+pub mod event_contracts;
+// Projection Contract Registry — declarative per-EventType projection effect
+// (targets / operation / rebuild / idempotency). Exhaustive `match` + a
+// conformance test lock it against event_contracts so projection behaviour is
+// derivable from contracts, not from reading projection.rs.
+pub mod event_projection_contracts;
 pub mod event_store;
 pub mod projection;
 pub mod reducer;
@@ -712,6 +868,45 @@ fn delete_client(client_id: String) -> Result<u64, String> {
     Ok(version)
 }
 
+/// Delete a single document. Mirrors `delete_client` one level down:
+/// appends an immutable `DocumentDeleted` tombstone and projects it
+/// forward, which hard-deletes the document + all derived projection
+/// rows (clinical_events, resolved_attributions, document_participant_maps,
+/// entities). The original DocumentExtracted/ClinicalEventsRecorded
+/// events remain in the append-only log for audit; `rebuild_from_events`
+/// honours the tombstone so the document never reappears.
+///
+/// Idempotent: deleting an already-deleted document still appends a
+/// (harmless) tombstone and the cascade affects 0 rows.
+#[tauri::command(rename_all = "camelCase")]
+fn delete_document(client_id: String, document_id: String) -> Result<u64, String> {
+    let (store, proj) = init_event_store_strict()?;
+
+    // Guard the client (single source of truth). We do NOT require the
+    // document to still exist — deletion is idempotent.
+    ensure_client_exists(&client_id)?;
+
+    let version = store.next_version(&client_id).map_err(|e| e.to_string())?;
+    let env = events::EventEnvelope::new(
+        client_id.clone(),
+        version,
+        events::Actor::System { component: "delete_document".into() },
+        events::EventPayload::DocumentDeleted(events::DocumentDeletedP {
+            document_id: document_id.clone(),
+            reason: None,
+        }),
+        None,
+        None,
+    );
+    store
+        .append_event(&env)
+        .map_err(|e| format!("delete_document: append failed: {e}"))?;
+    proj.project_forward(std::slice::from_ref(&env))
+        .map_err(|e| format!("delete_document: project_forward failed: {e}"))?;
+
+    Ok(version)
+}
+
 /// Attach an already-extracted document to a client. The frontend runs the
 /// existing extraction pipeline (`extract_file_contents`, NER, scispaCy, etc.)
 /// and then calls this command with the metadata so the projection records it.
@@ -869,9 +1064,12 @@ fn extract_docx(path: &str) -> Result<String, String> {
 /// Unified text extraction command.
 ///
 /// Routes by file extension:
+///
+/// ```text
 ///   .pdf  → pdf-extract crate (text-layer extraction)
 ///   .docx → zip + word/document.xml parse
 ///   *     → raw UTF-8 read (TXT, MD, LOG, etc.)
+/// ```
 ///
 /// Returns Ok(empty string) rather than Err on extraction failures so the
 /// frontend always receives a usable result and can display a graceful message.
@@ -5056,6 +5254,140 @@ fn reason_participant_resolution(
     serde_json::to_string(&payload).map_err(|e| e.to_string())
 }
 
+/// Shared STEP-6 input-identity fingerprint. INPUT-IDENTITY HASH ONLY — it is
+/// NOT semantic/analytical. Both `build_step6_case` and `build_step6_observability`
+/// MUST call this with the SAME serialization boundary so `FP_case == FP_obs`
+/// reflects one consistent notion of "same input": the raw `clinical_events`
+/// JSON, and nothing else (no `clean_texts`, no enriched/view structures, no
+/// pipeline-specific transforms). Any remaining mismatch is a serialization bug.
+fn build_step6_input_fp(clinical_events: &[serde_json::Value]) -> String {
+    let bytes = serde_json::to_vec(clinical_events).expect("stable serialization");
+    sha256_hex(&bytes)
+}
+
+// ── STEP-6 case build — the single production entrypoint (closes F-1/F-2) ──
+//
+// Receives the REAL persisted extraction (`clinical_events` JSON, exactly as
+// `get_client_extraction` returns it) plus any caller-supplied family/legal
+// facts, adapts them into EventEnvelopes (adapter_step6_input), and runs the
+// EXISTING build_step6_pipeline. Returns CanonicalCase + Step6View +
+// Step6Export + csv_lines as JSON. Strictly additive — no engine,
+// contradiction, confidence, identity, temporal, enrichment, or export logic
+// is changed; this only routes real data into the already-built pipeline.
+#[tauri::command(rename_all = "camelCase")]
+fn build_step6_case(
+    clinical_events: Vec<serde_json::Value>,
+    family_events: Vec<family_graph::FamilyEvent>,
+    legal_events: Vec<case_events::LegalStatusEvent>,
+    participants: Vec<participant_resolution::Participant>,
+) -> Result<String, String> {
+    let output = adapter_step6_input::run_step6_from_extraction(
+        &clinical_events,
+        family_events,
+        legal_events,
+        &participants,
+    );
+    let result = adapter_step6_input::Step6Result::from(output);
+
+    // DEBUG: DevPanel fingerprint + contradiction stream (reads case.contradictions ONLY).
+    // FP is an INPUT-IDENTITY hash over raw clinical_events ONLY (shared boundary).
+    let input_fp = build_step6_input_fp(&clinical_events);
+    let case_contradiction_ids: Vec<(String, String, String, String)> = result
+        .case
+        .contradictions
+        .iter()
+        .map(|c| {
+            (
+                c.contradiction_id.clone(),
+                c.conflict_label.clone(),
+                c.domain.as_str().to_string(),
+                c.subject.clone(),
+            )
+        })
+        .collect();
+
+    let mut v = serde_json::to_value(&result).map_err(|e| e.to_string())?;
+    if let serde_json::Value::Object(ref mut m) = v {
+        m.insert(
+            "debug".to_string(),
+            serde_json::json!({
+                "input_fp": input_fp,
+                "case_contradiction_ids": case_contradiction_ids,
+            }),
+        );
+    }
+    serde_json::to_string(&v).map_err(|e| e.to_string())
+}
+
+// ── STEP-6 observability — single composed view for the Demographics UI ────
+//
+// Same real inputs as `build_step6_case`, but composes the full deterministic
+// observability stack and returns it as ONE object:
+//   pipeline → Step6View → Step6Report → Step6ReportSnapshot →
+//   Step6ObservabilityRoot { snapshot, history, trends, readiness, queue, dashboard }
+//
+// Strictly additive: it reuses the existing pipeline + the pure, read-only
+// composition layer (`build_observability_root`). No engine/contradiction/
+// confidence/enrichment logic is changed; nothing is recomputed in the UI.
+// `created_at_epoch_ms` is caller-supplied (snapshot identity is count-derived
+// and independent of it).
+#[tauri::command(rename_all = "camelCase")]
+fn build_step6_observability(
+    clinical_events: Vec<serde_json::Value>,
+    family_events: Vec<family_graph::FamilyEvent>,
+    legal_events: Vec<case_events::LegalStatusEvent>,
+    participants: Vec<participant_resolution::Participant>,
+    created_at_epoch_ms: u64,
+    // Optional per-document clean text `[ [docId, cleanText], … ]`. When present,
+    // factual assertions (marital/work/smoking/driving/vital-status/dates) are
+    // extracted and folded into value-disagreement contradictions. Empty by
+    // default → behaviour identical to before (clinical/family/legal only).
+    clean_texts: Option<Vec<(String, String)>>,
+) -> Result<String, String> {
+    let clean_texts = clean_texts.unwrap_or_default();
+    let output = adapter_step6_input::run_step6_from_extraction_with_text(
+        &clinical_events,
+        &clean_texts,
+        family_events,
+        legal_events,
+        &participants,
+    );
+    // DEBUG: Observability fingerprint + enriched stream
+    // (reads view.enriched_contradictions ONLY; captured BEFORE output.view is moved).
+    // FP is an INPUT-IDENTITY hash over raw clinical_events ONLY — identical
+    // boundary to build_step6_case; clean_texts is deliberately EXCLUDED.
+    let input_fp = build_step6_input_fp(&clinical_events);
+    let node_ids: Vec<(String, String, String, String)> = output
+        .view
+        .enriched_contradictions
+        .iter()
+        .map(|e| {
+            (
+                e.base.contradiction_id.clone(),
+                e.base.conflict_label.clone(),
+                e.base.domain.as_str().to_string(),
+                e.base.subject.clone(),
+            )
+        })
+        .collect();
+
+    let report = step6_report::build_step6_report(output.view);
+    let snapshot = step6_report_snapshot::build_report_snapshot(report, created_at_epoch_ms);
+    let root = step6_observability_root::build_observability_root(snapshot);
+
+    let mut v = serde_json::to_value(&root).map_err(|e| e.to_string())?;
+    if let serde_json::Value::Object(ref mut m) = v {
+        m.insert(
+            "debug".to_string(),
+            serde_json::json!({
+                "input_fp": input_fp,
+                "node_ids": node_ids,
+            }),
+        );
+    }
+    serde_json::to_string(&v).map_err(|e| e.to_string())
+}
+
 // ─── Persistence-boundary commands (medico-legal audit) ─────────────────
 //
 // These commands run IN PARALLEL with the existing `process_document` and
@@ -5202,6 +5534,8 @@ fn process_and_persist_document(
         },
         events::EventPayload::DocumentExtracted(events::DocumentExtractedP {
             document_id: doc_id.clone(),
+            // Persist the real uploaded filename so it survives rehydration.
+            file_name: Some(file_name.clone()),
             source_bytes_sha256: source_sha,
             raw_text,
             clean_text,
@@ -5533,6 +5867,8 @@ fn process_path_and_persist(
         },
         events::EventPayload::DocumentExtracted(events::DocumentExtractedP {
             document_id: doc_id.clone(),
+            // Persist the real uploaded filename so it survives rehydration.
+            file_name: Some(file_name.clone()),
             source_bytes_sha256: source_bytes_sha256.clone(),
             raw_text,
             clean_text: clean_text.clone(),
@@ -5880,6 +6216,8 @@ pub fn run() {
             reason_longitudinal_reconciliation,  // LongitudinalPatientGraph (additive — not wired into ingestion)
             build_clinical_knowledge_graph,      // GCKG + medico-legal summary (additive — not wired into ingestion)
             reason_participant_resolution,       // Patient identity + participant resolution (additive — not wired into ingestion)
+            build_step6_case,                    // STEP-6 production entrypoint: real extraction → adapter → pipeline → case/view/export/csv
+            build_step6_observability,           // STEP-6 observability root: composed snapshot/history/trends/readiness/queue/dashboard (read-only)
             // ── Persistence-boundary commands (medico-legal audit) ─────────
             // Parallel to process_document: the boundary tables are written
             // here (clinical_events + resolved_attributions etc.). Existing
@@ -5899,6 +6237,7 @@ pub fn run() {
             // ── Step 5 — projection-driven UI binding ────────────────────────
             update_client_demographics,
             delete_client,
+            delete_document,
             attach_document,
             list_clients,
             // ── Step 6 — Version History ─────────────────────────────────────
@@ -5979,6 +6318,7 @@ mod boundary_integration {
             Actor::System { component: "test".into() },
             EventPayload::DocumentExtracted(events::DocumentExtractedP {
                 document_id: doc_id.to_string(),
+                file_name: Some(format!("{doc_id}.pdf")),
                 source_bytes_sha256: sha256_hex(bytes),
                 raw_text,
                 clean_text: clean_text.clone(),
@@ -6360,6 +6700,7 @@ mod boundary_integration {
         let clean = canonical["clean_text"].as_str().unwrap().to_string();
         let event_payload = events::DocumentExtractedP {
             document_id: "doc-rch".into(),
+            file_name: Some("doc-rch.pdf".into()),
             source_bytes_sha256: sha256_hex(REAL_DOC.as_bytes()),
             raw_text: canonical["raw_text"].as_str().unwrap_or("").to_string(),
             clean_text: clean.clone(),
@@ -6729,6 +7070,460 @@ mod boundary_integration {
         eprintln!("READ1 — get_client_extraction:");
         eprintln!("  clinical_events = {}", d.clinical_events.len());
         eprintln!("  attributions    = {}", d.attributions.len());
+    }
+
+    #[test]
+    fn filename1_persists_through_documentextracted_and_survives_rehydration() {
+        // The uploaded filename must be persisted by the DocumentExtracted
+        // projection handler and returned by BOTH read paths, so it
+        // survives navigation/rehydration (no more "(unnamed)").
+        let root = temp_root("fn1");
+        let events_path = root.join("events.db");
+        let proj_path = root.join("projection.db");
+        let store = event_store::EventStore::init(&events_path).unwrap();
+        let proj = projection::Projection::init(&proj_path).unwrap();
+
+        let client_id = "client-fn1";
+        let doc_id = "doc-fn1";
+        let expected_name = format!("{doc_id}.pdf"); // build_upload_events sets this
+
+        let create = EventEnvelope::new(
+            client_id.into(),
+            store.next_version(client_id).unwrap(),
+            Actor::System { component: "test".into() },
+            EventPayload::ClientCreated(events::ClientCreatedP {
+                demographics: serde_json::json!({"identity": {"firstName": "Fn"}}),
+            }),
+            None, None,
+        );
+        store.append_event(&create).unwrap();
+
+        let (extracted_proto, ces_proto, _canonical) =
+            build_upload_events(client_id, doc_id, REAL_DOC, REAL_DOC.as_bytes());
+        let extracted = EventEnvelope { version: store.next_version(client_id).unwrap(), ..extracted_proto };
+        store.append_event(&extracted).unwrap();
+        let ces = EventEnvelope { version: store.next_version(client_id).unwrap(), ..ces_proto };
+        store.append_event(&ces).unwrap();
+        proj.project_forward(&[create, extracted, ces]).unwrap();
+
+        // 1. Raw projection row carries the filename (NOT NULL).
+        {
+            let conn = rusqlite::Connection::open(&proj_path).unwrap();
+            let name: Option<String> = conn.query_row(
+                "SELECT file_name FROM documents WHERE id = ?1",
+                rusqlite::params![doc_id], |r| r.get(0)).unwrap();
+            assert_eq!(name.as_deref(), Some(expected_name.as_str()),
+                "documents.file_name must be persisted, not NULL");
+        }
+
+        // 2. get_client_view returns the filename.
+        let view = proj.get_client_view(client_id).unwrap().unwrap();
+        assert_eq!(view.documents.len(), 1);
+        assert_eq!(view.documents[0].file_name.as_deref(), Some(expected_name.as_str()),
+            "get_client_view must return the persisted filename");
+
+        // 3. get_client_extraction returns the filename too.
+        let ext = proj.get_client_extraction(client_id).unwrap();
+        assert_eq!(ext.len(), 1);
+        assert_eq!(ext[0].file_name.as_deref(), Some(expected_name.as_str()),
+            "get_client_extraction must return the persisted filename");
+
+        // 4. COALESCE guard: a later legacy-style DocumentExtracted with
+        //    file_name = None must NOT wipe the existing name.
+        let mut legacy_proto = build_upload_events(client_id, doc_id, REAL_DOC, REAL_DOC.as_bytes()).0;
+        if let EventPayload::DocumentExtracted(ref mut p) = legacy_proto.payload {
+            p.file_name = None; // simulate an event written before file_name existed
+        }
+        let legacy = EventEnvelope { version: store.next_version(client_id).unwrap(), ..legacy_proto };
+        store.append_event(&legacy).unwrap();
+        proj.project_forward(&[legacy]).unwrap();
+
+        let conn = rusqlite::Connection::open(&proj_path).unwrap();
+        let name_after: Option<String> = conn.query_row(
+            "SELECT file_name FROM documents WHERE id = ?1",
+            rusqlite::params![doc_id], |r| r.get(0)).unwrap();
+        assert_eq!(name_after.as_deref(), Some(expected_name.as_str()),
+            "COALESCE must preserve the existing filename against a NULL update");
+
+        eprintln!("FILENAME1 — persisted + survives read path: {expected_name}");
+    }
+
+    /// Helper: count rows in a boundary table for a document.
+    fn count_rows(proj_path: &std::path::Path, sql: &str, doc_id: &str) -> i64 {
+        let conn = rusqlite::Connection::open(proj_path).unwrap();
+        conn.query_row(sql, rusqlite::params![doc_id], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn contract1_cross_layer_document_id_identity() {
+        // CONTRACT (Invariant 2): document_id is IDENTICAL across every
+        // layer — projection.documents.id, clinical_events.document_id FK,
+        // DocumentSummary.id (get_client_view), DocumentExtraction.document_id
+        // (get_client_extraction), and the DocumentExtracted event payload.
+        // CI must fail if any layer diverges.
+        let root = temp_root("contract1");
+        let events_path = root.join("events.db");
+        let proj_path = root.join("projection.db");
+        let store = event_store::EventStore::init(&events_path).unwrap();
+        let proj = projection::Projection::init(&proj_path).unwrap();
+
+        let client_id = "client-contract1";
+        let doc_id = "doc-contract1";
+
+        let create = EventEnvelope::new(
+            client_id.into(), store.next_version(client_id).unwrap(),
+            Actor::System { component: "test".into() },
+            EventPayload::ClientCreated(events::ClientCreatedP {
+                demographics: serde_json::json!({"identity": {"firstName": "Id"}}),
+            }),
+            None, None,
+        );
+        store.append_event(&create).unwrap();
+        let (extracted_proto, ces_proto, _c) =
+            build_upload_events(client_id, doc_id, REAL_DOC, REAL_DOC.as_bytes());
+        // Append each before computing the next version so the
+        // monotonic-per-client constraint is satisfied.
+        let extracted = EventEnvelope { version: store.next_version(client_id).unwrap(), ..extracted_proto };
+        store.append_event(&extracted).unwrap();
+        let ces = EventEnvelope { version: store.next_version(client_id).unwrap(), ..ces_proto };
+        store.append_event(&ces).unwrap();
+        proj.project_forward(&[create, extracted.clone(), ces]).unwrap();
+
+        // Source of truth: the DocumentExtracted event payload document_id.
+        let payload_doc_id = match &extracted.payload {
+            EventPayload::DocumentExtracted(p) => p.document_id.clone(),
+            _ => panic!("expected DocumentExtracted"),
+        };
+        assert_eq!(payload_doc_id, doc_id, "event payload carries the canonical document_id");
+
+        let conn = rusqlite::Connection::open(&proj_path).unwrap();
+
+        // Layer 1: projection.documents.id == event payload document_id.
+        let documents_id: String = conn.query_row(
+            "SELECT id FROM documents WHERE id = ?1",
+            rusqlite::params![payload_doc_id], |r| r.get(0)).unwrap();
+        assert_eq!(documents_id, payload_doc_id, "documents.id == event payload document_id");
+
+        // Layer 2: EVERY clinical_events.document_id FK equals documents.id —
+        // no row diverges.
+        let distinct_doc_fks: Vec<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT document_id FROM clinical_events WHERE document_id = ?1").unwrap();
+            let rows: Vec<String> = stmt.query_map(rusqlite::params![payload_doc_id], |r| r.get(0)).unwrap()
+                .collect::<Result<_, _>>().unwrap();
+            rows
+        };
+        assert_eq!(distinct_doc_fks, vec![payload_doc_id.clone()],
+            "all clinical_events.document_id FKs equal documents.id");
+        let orphan_events: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM clinical_events ce
+              LEFT JOIN documents d ON d.id = ce.document_id
+             WHERE d.id IS NULL", [], |r| r.get(0)).unwrap();
+        assert_eq!(orphan_events, 0, "no clinical_events reference a non-existent documents.id");
+
+        // Layer 3: get_client_view → DocumentSummary.id == payload document_id.
+        let view = proj.get_client_view(client_id).unwrap().unwrap();
+        assert_eq!(view.documents.len(), 1);
+        assert_eq!(view.documents[0].id, payload_doc_id,
+            "DocumentSummary.id == event payload document_id");
+
+        // Layer 4: get_client_extraction → DocumentExtraction.document_id matches.
+        let ext = proj.get_client_extraction(client_id).unwrap();
+        assert_eq!(ext.len(), 1);
+        assert_eq!(ext[0].document_id, payload_doc_id,
+            "DocumentExtraction.document_id == event payload document_id");
+
+        // Single, undivided identity across all four layers.
+        let all_ids = [
+            documents_id,
+            view.documents[0].id.clone(),
+            ext[0].document_id.clone(),
+            payload_doc_id.clone(),
+        ];
+        assert!(all_ids.iter().all(|x| *x == payload_doc_id),
+            "document_id identity is undivided across layers: {all_ids:?}");
+    }
+
+    #[test]
+    fn contract2_documentdeleted_replay_dominance() {
+        // CONTRACT (Invariant 1 + 4): the replay sequence
+        //   DocumentExtracted → ClinicalEventsRecorded → AttributionRecorded
+        //   → DocumentDeleted
+        // must leave the document ABSENT after BOTH project_forward and a
+        // full rebuild_from_events. DocumentDeleted dominates because it is
+        // the highest-version event for the document within its client group.
+        let root = temp_root("contract2");
+        let events_path = root.join("events.db");
+        let proj_path = root.join("projection.db");
+        let store = event_store::EventStore::init(&events_path).unwrap();
+        let proj = projection::Projection::init(&proj_path).unwrap();
+
+        let client_id = "client-contract2";
+        let doc_id = "doc-contract2";
+
+        let create = EventEnvelope::new(
+            client_id.into(), store.next_version(client_id).unwrap(),
+            Actor::System { component: "test".into() },
+            EventPayload::ClientCreated(events::ClientCreatedP {
+                demographics: serde_json::json!({"identity": {"firstName": "Dom"}}),
+            }),
+            None, None,
+        );
+        store.append_event(&create).unwrap();
+        let (extracted_proto, ces_proto, canonical) =
+            build_upload_events(client_id, doc_id, REAL_DOC, REAL_DOC.as_bytes());
+        let extracted = EventEnvelope { version: store.next_version(client_id).unwrap(), ..extracted_proto };
+        store.append_event(&extracted).unwrap();
+        let ces = EventEnvelope { version: store.next_version(client_id).unwrap(), ..ces_proto };
+        store.append_event(&ces).unwrap();
+        let payload = participant_resolution::build_participant_resolution(&[canonical]);
+        let attr = EventEnvelope::new(
+            client_id.into(), store.next_version(client_id).unwrap(),
+            Actor::System { component: "test".into() },
+            EventPayload::AttributionRecorded(events::AttributionRecordedP {
+                run_id: uuid::Uuid::now_v7(), payload: serde_json::to_value(&payload).unwrap(),
+            }),
+            Some(ces.id), None,
+        );
+        store.append_event(&attr).unwrap();
+        let del = EventEnvelope::new(
+            client_id.into(), store.next_version(client_id).unwrap(),
+            Actor::System { component: "delete_document".into() },
+            EventPayload::DocumentDeleted(events::DocumentDeletedP { document_id: doc_id.into(), reason: None }),
+            None, None,
+        );
+        store.append_event(&del).unwrap();
+
+        // ── Ordering assertion: DocumentDeleted version dominates all
+        //    document-derived events in the same client group. ──
+        let log = store.get_events(client_id).unwrap();
+        let max_derived_version = log.iter()
+            .filter(|e| matches!(e.payload,
+                EventPayload::DocumentExtracted(_)
+                | EventPayload::ClinicalEventsRecorded(_)
+                | EventPayload::AttributionRecorded(_)))
+            .map(|e| e.version)
+            .max()
+            .unwrap();
+        let delete_version = log.iter()
+            .find(|e| matches!(e.payload, EventPayload::DocumentDeleted(_)))
+            .map(|e| e.version)
+            .unwrap();
+        assert!(delete_version > max_derived_version,
+            "DocumentDeleted (v{delete_version}) must dominate all derived events (max v{max_derived_version})");
+
+        // ── Path A: incremental project_forward. ──
+        proj.project_forward(&[create.clone(), extracted.clone(), ces.clone(), attr.clone(), del.clone()]).unwrap();
+        let assert_absent = |proj_path: &std::path::Path, label: &str| {
+            let conn = rusqlite::Connection::open(proj_path).unwrap();
+            let n = |sql: &str| conn.query_row(sql, rusqlite::params![doc_id], |r| r.get::<_, i64>(0)).unwrap();
+            assert_eq!(n("SELECT COUNT(*) FROM documents WHERE id=?1"), 0, "{label}: documents");
+            assert_eq!(n("SELECT COUNT(*) FROM clinical_events WHERE document_id=?1"), 0, "{label}: clinical_events");
+            assert_eq!(n("SELECT COUNT(*) FROM document_participant_maps WHERE document_id=?1"), 0, "{label}: document_participant_maps");
+            assert_eq!(n("SELECT COUNT(*) FROM resolved_attributions WHERE event_id IN (SELECT event_id FROM clinical_events WHERE document_id=?1)"), 0, "{label}: resolved_attributions");
+        };
+        assert_absent(&proj_path, "project_forward");
+
+        // ── Path B: full rebuild_from_events. ──
+        let all = vec![create, extracted, ces, attr, del];
+        proj.rebuild_from_events(&all).unwrap();
+        assert_absent(&proj_path, "rebuild_from_events");
+
+        // The events themselves remain in the immutable log (audit intact).
+        let log_after = store.get_events(client_id).unwrap();
+        assert!(log_after.iter().any(|e| matches!(e.payload, EventPayload::DocumentExtracted(_))));
+        assert!(log_after.iter().any(|e| matches!(e.payload, EventPayload::DocumentDeleted(_))));
+    }
+
+    #[test]
+    fn delete1_cascade_removes_derived_rows_preserves_globals() {
+        let root = temp_root("del1");
+        let events_path = root.join("events.db");
+        let proj_path = root.join("projection.db");
+        let store = event_store::EventStore::init(&events_path).unwrap();
+        let proj = projection::Projection::init(&proj_path).unwrap();
+
+        let client_id = "client-del1";
+        let doc_id = "doc-del1";
+
+        // Seed a full upload (document + clinical_events + attributions +
+        // participants/organisations).
+        let create = EventEnvelope::new(
+            client_id.into(), store.next_version(client_id).unwrap(),
+            Actor::System { component: "test".into() },
+            EventPayload::ClientCreated(events::ClientCreatedP {
+                demographics: serde_json::json!({"identity": {"firstName": "Del"}}),
+            }),
+            None, None,
+        );
+        store.append_event(&create).unwrap();
+        let (extracted_proto, ces_proto, canonical) =
+            build_upload_events(client_id, doc_id, REAL_DOC, REAL_DOC.as_bytes());
+        let extracted = EventEnvelope { version: store.next_version(client_id).unwrap(), ..extracted_proto };
+        store.append_event(&extracted).unwrap();
+        let ces = EventEnvelope { version: store.next_version(client_id).unwrap(), ..ces_proto };
+        store.append_event(&ces).unwrap();
+        let payload = participant_resolution::build_participant_resolution(&[canonical]);
+        let attr = EventEnvelope::new(
+            client_id.into(), store.next_version(client_id).unwrap(),
+            Actor::System { component: "test".into() },
+            EventPayload::AttributionRecorded(events::AttributionRecordedP {
+                run_id: uuid::Uuid::now_v7(), payload: serde_json::to_value(&payload).unwrap(),
+            }),
+            Some(ces.id), None,
+        );
+        store.append_event(&attr).unwrap();
+        proj.project_forward(&[create, extracted, ces, attr]).unwrap();
+
+        // Pre-delete: derived rows + globals exist.
+        assert!(count_rows(&proj_path, "SELECT COUNT(*) FROM documents WHERE id=?1", doc_id) == 1);
+        assert!(count_rows(&proj_path, "SELECT COUNT(*) FROM clinical_events WHERE document_id=?1", doc_id) > 0);
+        let parts_before: i64 = rusqlite::Connection::open(&proj_path).unwrap()
+            .query_row("SELECT COUNT(*) FROM participants", [], |r| r.get(0)).unwrap();
+        let orgs_before: i64 = rusqlite::Connection::open(&proj_path).unwrap()
+            .query_row("SELECT COUNT(*) FROM organisations", [], |r| r.get(0)).unwrap();
+        assert!(parts_before > 0 && orgs_before > 0, "globals seeded");
+
+        // Delete.
+        let del = EventEnvelope::new(
+            client_id.into(), store.next_version(client_id).unwrap(),
+            Actor::System { component: "test".into() },
+            EventPayload::DocumentDeleted(events::DocumentDeletedP {
+                document_id: doc_id.into(), reason: None,
+            }),
+            None, None,
+        );
+        store.append_event(&del).unwrap();
+        proj.project_forward(&[del]).unwrap();
+
+        // Post-delete: all 5 derived tables empty for the doc.
+        assert_eq!(count_rows(&proj_path, "SELECT COUNT(*) FROM documents WHERE id=?1", doc_id), 0);
+        assert_eq!(count_rows(&proj_path, "SELECT COUNT(*) FROM clinical_events WHERE document_id=?1", doc_id), 0);
+        assert_eq!(count_rows(&proj_path, "SELECT COUNT(*) FROM document_participant_maps WHERE document_id=?1", doc_id), 0);
+        assert_eq!(count_rows(&proj_path,
+            "SELECT COUNT(*) FROM resolved_attributions WHERE event_id IN (SELECT event_id FROM clinical_events WHERE document_id=?1)", doc_id), 0);
+
+        // Globals + run metadata preserved.
+        let conn = rusqlite::Connection::open(&proj_path).unwrap();
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM participants", [], |r| r.get::<_, i64>(0)).unwrap(), parts_before,
+            "participants preserved");
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM organisations", [], |r| r.get::<_, i64>(0)).unwrap(), orgs_before,
+            "organisations preserved");
+
+        // Read paths no longer return the document.
+        let view = proj.get_client_view(client_id).unwrap().unwrap();
+        assert_eq!(view.documents.len(), 0, "get_client_view excludes deleted doc");
+        let ext = proj.get_client_extraction(client_id).unwrap();
+        assert_eq!(ext.len(), 0, "get_client_extraction excludes deleted doc");
+
+        // The events all remain in the append-only log (audit preserved).
+        let evs = store.get_events(client_id).unwrap();
+        assert!(evs.iter().any(|e| matches!(e.payload, EventPayload::DocumentExtracted(_))),
+            "DocumentExtracted retained in log");
+        assert!(evs.iter().any(|e| matches!(e.payload, EventPayload::DocumentDeleted(_))),
+            "DocumentDeleted tombstone retained in log");
+    }
+
+    #[test]
+    fn delete2_idempotent_double_delete() {
+        let root = temp_root("del2");
+        let events_path = root.join("events.db");
+        let proj_path = root.join("projection.db");
+        let store = event_store::EventStore::init(&events_path).unwrap();
+        let proj = projection::Projection::init(&proj_path).unwrap();
+
+        let client_id = "client-del2";
+        let doc_id = "doc-del2";
+        let create = EventEnvelope::new(
+            client_id.into(), store.next_version(client_id).unwrap(),
+            Actor::System { component: "test".into() },
+            EventPayload::ClientCreated(events::ClientCreatedP { demographics: serde_json::json!({}) }),
+            None, None,
+        );
+        store.append_event(&create).unwrap();
+        let (extracted_proto, ces_proto, _c) =
+            build_upload_events(client_id, doc_id, REAL_DOC, REAL_DOC.as_bytes());
+        let extracted = EventEnvelope { version: store.next_version(client_id).unwrap(), ..extracted_proto };
+        store.append_event(&extracted).unwrap();
+        let ces = EventEnvelope { version: store.next_version(client_id).unwrap(), ..ces_proto };
+        store.append_event(&ces).unwrap();
+        proj.project_forward(&[create, extracted, ces]).unwrap();
+
+        let mk_del = |v: u64| EventEnvelope::new(
+            client_id.into(), v,
+            Actor::System { component: "test".into() },
+            EventPayload::DocumentDeleted(events::DocumentDeletedP { document_id: doc_id.into(), reason: None }),
+            None, None,
+        );
+        let d1 = mk_del(store.next_version(client_id).unwrap());
+        store.append_event(&d1).unwrap();
+        proj.project_forward(&[d1]).unwrap();
+        // Second delete — must not error, cascade affects 0 rows.
+        let d2 = mk_del(store.next_version(client_id).unwrap());
+        store.append_event(&d2).unwrap();
+        proj.project_forward(&[d2]).unwrap();
+
+        assert_eq!(count_rows(&proj_path, "SELECT COUNT(*) FROM documents WHERE id=?1", doc_id), 0);
+    }
+
+    #[test]
+    fn delete3_survives_rebuild_and_resists_phantom_resurrection() {
+        // The hardest case: a deleted document, PLUS a legacy phantom
+        // DocumentUploaded (client_id == doc_id), must stay deleted after
+        // a full rebuild_from_events — proven by the tombstone sweep.
+        let root = temp_root("del3");
+        let events_path = root.join("events.db");
+        let proj_path = root.join("projection.db");
+        let store = event_store::EventStore::init(&events_path).unwrap();
+        let proj = projection::Projection::init(&proj_path).unwrap();
+
+        // Use a doc_id that sorts BEFORE the real client so the phantom
+        // group is processed first in BTreeMap order — the resurrection-
+        // prone ordering.
+        let real_client = "zzz-real-client-del3";
+        let doc_id = "aaa-doc-del3";
+
+        let create = EventEnvelope::new(
+            real_client.into(), 1,
+            Actor::System { component: "test".into() },
+            EventPayload::ClientCreated(events::ClientCreatedP { demographics: serde_json::json!({}) }),
+            None, None,
+        );
+        // Legacy phantom DocumentUploaded under client_id == doc_id.
+        let phantom = EventEnvelope::new(
+            doc_id.into(), 1,
+            Actor::System { component: "process_document".into() },
+            EventPayload::DocumentUploaded(events::DocumentUploadedP {
+                document_id: doc_id.into(), file_name: doc_id.into(),
+                char_count: 100, method: "process_document".into(),
+            }),
+            None, None,
+        );
+        let (extracted_proto, ces_proto, _c) =
+            build_upload_events(real_client, doc_id, REAL_DOC, REAL_DOC.as_bytes());
+        let extracted = EventEnvelope { version: 2, ..extracted_proto };
+        let ces = EventEnvelope { version: 3, ..ces_proto };
+        let del = EventEnvelope::new(
+            real_client.into(), 4,
+            Actor::System { component: "delete_document".into() },
+            EventPayload::DocumentDeleted(events::DocumentDeletedP { document_id: doc_id.into(), reason: None }),
+            None, None,
+        );
+
+        let all = vec![create, phantom, extracted, ces, del];
+        for e in &all { store.append_event(e).unwrap(); }
+
+        // Full rebuild from events.
+        proj.rebuild_from_events(&all).unwrap();
+
+        // The document must NOT exist after rebuild, despite the phantom
+        // upsert_document that ran in the phantom's (earlier) group.
+        assert_eq!(count_rows(&proj_path, "SELECT COUNT(*) FROM documents WHERE id=?1", doc_id), 0,
+            "tombstone sweep keeps the document deleted after rebuild (no phantom resurrection)");
+        assert_eq!(count_rows(&proj_path, "SELECT COUNT(*) FROM clinical_events WHERE document_id=?1", doc_id), 0,
+            "no orphan clinical_events after rebuild");
+
+        eprintln!("DELETE3 — deleted doc stays gone after rebuild even with phantom DocumentUploaded");
     }
 
     #[test]

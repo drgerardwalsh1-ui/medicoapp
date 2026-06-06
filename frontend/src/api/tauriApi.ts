@@ -211,6 +211,51 @@ export const TauriAPI = {
   getClientExtraction: (clientId: string): Promise<JsonString> =>
     guarded("get_client_extraction", { clientId }),
 
+  /**
+   * STEP-6 production entrypoint. Routes the real persisted `clinical_events`
+   * (plus any family/legal facts and participants) through the existing
+   * backend pipeline and returns the CanonicalCase + enriched view + export +
+   * csv_lines as a JSON string. Backend command: `build_step6_case`
+   * (rename_all = camelCase). No business logic here — pure IPC binding.
+   */
+  buildStep6Case: (
+    clinicalEvents: unknown[],
+    familyEvents: unknown[],
+    legalEvents: unknown[],
+    participants: unknown[],
+  ): Promise<JsonString> =>
+    guarded("build_step6_case", {
+      clinicalEvents,
+      familyEvents,
+      legalEvents,
+      participants,
+    }),
+
+  /**
+   * STEP-6 OBSERVABILITY entrypoint. Same real inputs as `buildStep6Case`, but
+   * the backend composes the full deterministic observability stack and returns
+   * ONE object as JSON: `Step6ObservabilityRoot` (snapshot + history + trends +
+   * readiness + queue + dashboard). Read-only; nothing is recomputed in the UI.
+   * Backend command: `build_step6_observability` (rename_all = camelCase).
+   */
+  buildStep6Observability: (
+    clinicalEvents: unknown[],
+    familyEvents: unknown[],
+    legalEvents: unknown[],
+    participants: unknown[],
+    createdAtEpochMs: number,
+    /** `[ [docId, cleanText], … ]` — enables fact/value-disagreement detection. */
+    cleanTexts: [string, string][] = [],
+  ): Promise<JsonString> =>
+    guarded("build_step6_observability", {
+      clinicalEvents,
+      familyEvents,
+      legalEvents,
+      participants,
+      createdAtEpochMs,
+      cleanTexts,
+    }),
+
   /** List every client in the projection (full views). */
   listClients: (): Promise<ClientViewModel[]> => guarded("list_clients"),
 
@@ -312,6 +357,16 @@ export const TauriAPI = {
    */
   deleteClient: (clientId: string): Promise<number> =>
     guarded("delete_client", { clientId }),
+
+  /**
+   * Delete a single document. Appends an immutable `DocumentDeleted`
+   * tombstone and hard-deletes the document + all derived projection
+   * rows (clinical_events, attributions, participant maps). Honoured by
+   * projection rebuild, so the document never reappears. Idempotent.
+   * Returns the new event version.
+   */
+  deleteDocument: (clientId: string, documentId: string): Promise<number> =>
+    guarded("delete_document", { clientId, documentId }),
 
   // ── Psychiatric History (event-sourced via the omnibus blob) ───────────
   // The existing `update_client_demographics` Rust command persists the
