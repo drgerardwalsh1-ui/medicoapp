@@ -212,6 +212,16 @@ mod fact_assertion;
 mod fact_extract;
 mod fact_contradiction;
 
+// Structured medico-legal fact layer (additive). `structured_fact` is the
+// durable schema (5 domains: medications/symptoms/injuries/treatments/functional
+// impacts) with per-fact confidence + evidence + offsets + date span;
+// `structured_normalise` canonicalises surface forms; `structured_extract` lifts
+// `StructuredFact`s from clean_text. Emitted on the canonical store under
+// `structured_facts`. Touches no existing output, type, or pipeline.
+mod structured_fact;
+mod structured_normalise;
+mod structured_extract;
+
 // Production input adapter (closes audit F-1/F-2): converts the real persisted
 // extraction payload (clinical_events JSON) + caller-supplied family/legal
 // facts into Vec<EventEnvelope> and invokes build_step6_pipeline. Pure adapter
@@ -4864,6 +4874,13 @@ fn process_document_core(
         (events_json, unified_json)
     };
 
+    // ── Structured medico-legal fact layer (additive) ─────────────────────────
+    // Lifts typed facts (medications/symptoms/injuries/treatments/functional)
+    // from clean_text, each with confidence + evidence snippet + offsets + date
+    // span. Purely additive: emitted under `structured_facts`; nothing else reads
+    // or depends on it yet, so timelines/contradiction/graph/exports are intact.
+    let structured_facts = structured_extract::extract_structured_facts(&clean_text, &doc_id);
+
     // ── Canonical store — single source of truth ──────────────────────────────
     Ok(serde_json::json!({
         "doc_id":     doc_id,
@@ -4903,6 +4920,13 @@ fn process_document_core(
         // One entry per (event_type, normalised concept) — fully reversible
         // via source_event_ids on each UnifiedEvent.
         "unified_clinical_events": unified_clinical_events,
+        // ── Structured medico-legal fact layer (additive, see structured_fact.rs).
+        // Typed per-domain facts (medications/symptoms/injuries/treatments/
+        // functional impacts), each with confidence + evidence snippet + offsets
+        // + optional date span. Consumed by no existing reader yet — a foundation
+        // for later reporting / contradiction / timeline / forecasting layers.
+        "structured_facts": serde_json::to_value(&structured_facts)
+            .unwrap_or(serde_json::Value::Null),
     })
     .to_string())
 }

@@ -197,6 +197,13 @@ fn boundary_ok(lower: &str, start: usize, end: usize) -> bool {
     left_ok && right_ok
 }
 
+/// Crate-internal reuse hook: find the first ISO-ish date anywhere in an
+/// already-lowercased slice. Used by the structured-fact extractor so date
+/// parsing has a single implementation. Additive; does not change extraction.
+pub(crate) fn first_date_in_lower(lower_slice: &str) -> Option<String> {
+    find_date_after(lower_slice, 0, lower_slice.len())
+}
+
 /// Find the first date in `lower[from .. from+window]`. Recognises
 /// `D Mon YYYY`, `Mon YYYY`, `D/M/YYYY`, `YYYY-MM-DD`. Returns ISO-ish
 /// (`YYYY-MM-DD` or `YYYY-MM`).
