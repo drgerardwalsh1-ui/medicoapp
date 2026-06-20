@@ -10,6 +10,7 @@ import ReportPage from "./pages/ReportPage";
 import WorkTimelinePage from "./pages/WorkTimelinePage";
 import MSEPage from "./pages/MSEPage";
 import LiveAssessmentPage from "./pages/LiveAssessmentPage";
+import CaptureWorkspace from "./pages/CaptureWorkspace";
 import CalendarView from "./calendar/CalendarView";
 import SystemPage from "./pages/SystemPage";
 import { TauriAPI, isTauri, type ClientViewModel } from "./api/tauriApi";
@@ -868,6 +869,15 @@ function Root() {
               key={activeClient.id}
               client={activeClient}
               onNavigateToTab={(tab) => setActiveClientTab(tab)}
+              onClientChange={handleActiveClientChange}
+            />
+          );
+        }
+        if (activeClientTab === "capture") {
+          return (
+            <CaptureWorkspace
+              key={activeClient.id}
+              client={activeClient}
               onClientChange={handleActiveClientChange}
             />
           );

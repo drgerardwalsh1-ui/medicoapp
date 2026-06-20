@@ -18,6 +18,7 @@ import { TauriAPI } from "../api/tauriApi";
 import type { ClinicalState } from "../engine/state";
 import { deserialiseState } from "../engine/state";
 import type { Observation } from "../types/observation";
+import { shadowEmitFromObservation } from "../capture/shadowRefStore"; // dev/test-only shadow probe (inert in prod)
 
 // Review-item kinds the backend accepts (clinical_fact_store::REVIEW_KINDS).
 export const REVIEW_KINDS = [
@@ -51,6 +52,7 @@ export async function appendObservation(
   clientId: string,
   observation: Observation,
 ): Promise<number> {
+  shadowEmitFromObservation(observation, clientId); // dev/test-only shadow probe; no-op in prod; cannot affect capture
   return TauriAPI.recordClinicalObservation(clientId, observation);
 }
 

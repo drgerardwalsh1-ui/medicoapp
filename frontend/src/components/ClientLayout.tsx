@@ -73,6 +73,8 @@ export function clientTabs(client: Client | null): ClientTab[] {
   // Sits directly after Demographics: it is the hub during the interview;
   // section tabs remain the structured review/editing surfaces.
   const liveTab: ClientTab = { id: "live", label: "Live Assessment", disabledForNewClient: true };
+  // Capture Workspace — free-text → structured history/treatment/work capture.
+  const captureTab: ClientTab = { id: "capture", label: "Capture Workspace", disabledForNewClient: true };
 
   // Splice schema tabs around our inserted tabs:
   //   [..before history+1] (= Demographics through "History of Injury")
@@ -92,6 +94,7 @@ export function clientTabs(client: Client | null): ClientTab[] {
   return [
     { id: "demographics", label: "Demographics", disabledForNewClient: false },
     liveTab,
+    captureTab,
     ...beforeBackground,
     backgroundHistoryTab,
     ...betweenBackgroundAndDsm,
