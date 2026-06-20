@@ -2,11 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "frontend",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "cwd": "frontend",
-      "port": 5173
+      "name": "prototype",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["-e", "const http=require('http'),fs=require('fs'),path=require('path');const root=path.join(process.cwd(),'Prototype mockup');http.createServer((req,res)=>{let u=decodeURIComponent((req.url||'/').split('?')[0]);if(u==='/')u='/timeline-prototype.html';fs.readFile(path.join(root,u),(e,d)=>{if(e){res.writeHead(404);res.end('nf');return;}const ct=u.endsWith('.html')?'text/html':u.endsWith('.css')?'text/css':u.endsWith('.js')?'text/javascript':'application/octet-stream';res.writeHead(200,{'content-type':ct});res.end(d);});}).listen(8777,()=>console.log('serving on 8777'));"],
+      "port": 8777
     }
   ]
 }

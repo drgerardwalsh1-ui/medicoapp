@@ -86,6 +86,25 @@ pub fn clean_entities(input: CleanInput, debug: bool) -> CleanOutput {
     CleanOutput { conditions, medications, procedures, symptoms, removed }
 }
 
+/// Canonical cleaned form of ONE raw entity, if it survives the cleaning
+/// pipeline for its category. Used by the extraction layer to re-key
+/// `_evidence` entries to the same canonical values that appear in the
+/// final entity lists (synonym expansion means the raw surface form —
+/// "Zoloft", "PTSD" — often differs from the emitted value).
+pub fn canonical_condition(term: &str) -> Option<String> {
+    canonical_one(term, Category::Condition)
+}
+pub fn canonical_medication(term: &str) -> Option<String> {
+    canonical_one(term, Category::Medication)
+}
+pub fn canonical_procedure(term: &str) -> Option<String> {
+    canonical_one(term, Category::Procedure)
+}
+fn canonical_one(term: &str, category: Category) -> Option<String> {
+    let (vals, _removed) = process_list(&[term.to_string()], category, false);
+    vals.into_iter().next()
+}
+
 /// True iff `term` is a symptom/complaint rather than a diagnosis.
 /// Compared against a curated lexicon — conservative; if uncertain, the
 /// term is left in `conditions`.

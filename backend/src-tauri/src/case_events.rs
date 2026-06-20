@@ -350,10 +350,10 @@ mod tests {
         assert_ne!(cs[0].conflict_type.as_str(), "identity");
     }
 
-    // 6. STEP-6 unified stream stays byte-identical across re-runs with the
+    // 6. Contradiction Engine unified stream stays byte-identical across re-runs with the
     //    new event-derived contradictions present.
     #[test]
-    fn step6_ordering_stable_with_new_events() {
+    fn contradiction_ordering_stable_with_new_events() {
         use crate::canonical_case::{assemble_canonical_case, SubjectProfile};
 
         // Clinical contradictions sourced from conflicting injuries.
@@ -493,10 +493,10 @@ mod tests {
         assert!((cs[0].resolution_confidence - 0.5).abs() < 1e-6);
     }
 
-    // 3. STEP-6 determinism lock: two streams differing ONLY in attribute
+    // 3. Contradiction Engine determinism lock: two streams differing ONLY in attribute
     //    insertion order must serialise byte-identically.
     #[test]
-    fn step6_byte_identical_under_attribute_insertion_order() {
+    fn contradiction_byte_identical_under_attribute_insertion_order() {
         use crate::canonical_case::{assemble_canonical_case, SubjectProfile};
 
         let make_case = |order_ab: bool| {

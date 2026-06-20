@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Case Workspace v2 — evolving findings (experimental)</title>
+<style>
+  :root{
+    --bg:#eef1f5;--surface:#fff;--surface2:#f5f7fa;--ink:#1f2733;--ink2:#566173;--ink3:#8a93a3;
+    --line:#dde3ec;--line2:#c7cfdb;--accent:#5b4ad6;--accent-bg:#efedfc;--accent-line:#cdc6f4;
+    --green:#1f9d63;--green-bg:#e6f6ee;--red:#c0392b;--red-bg:#fbecea;--amber:#b9770e;--amber-bg:#fdf3e3;
+    --blue:#2563a8;--blue-bg:#e7f0fa;--radius:10px;--radius-sm:7px;--shadow:0 1px 2px rgba(20,30,50,.06),0 2px 8px rgba(20,30,50,.05);
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}html,body{height:100%}
+  body{margin:0;font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:13.5px;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;overflow:hidden}
+  .topbar{display:flex;align-items:center;gap:14px;padding:9px 16px;background:#161b27;color:#fff;flex:0 0 auto}
+  .topbar .brand{font-weight:600;font-size:14px}.topbar .tag{font-size:10.5px;color:#aeb6c6;border:1px solid #38404f;border-radius:20px;padding:2px 9px}
+  .tabs{display:flex;gap:4px;margin-left:8px}.tab{font-size:12.5px;color:#c2c9d6;background:transparent;border:0;padding:6px 13px;border-radius:7px;cursor:pointer}
+  .tab.active{background:#2b3242;color:#fff}.tab:hover:not(.active){background:#222838}.topbar .spacer{flex:1}
+  .kbd{font-family:var(--mono);font-size:10px;background:#2b3242;color:#cdd4e0;border:1px solid #3a4253;border-radius:5px;padding:1px 5px}
+  .topbar .hint{font-size:11px;color:#9aa3b4;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+
+  .view{flex:1;min-height:0;display:none}.view.active{display:flex;flex-direction:column}
+  .workspace{flex:1;min-height:0;display:grid;grid-template-columns:230px 1fr 320px;gap:12px;padding:12px}
+  .col{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  .stack{display:flex;flex-direction:column;gap:12px;min-height:0}
+  .col-h{padding:9px 13px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;flex:0 0 auto}
+  .col-h h2{margin:0;font-size:10.5px;font-weight:700;letter-spacing:.7px;color:var(--ink2);text-transform:uppercase}
+  .col-body{overflow-y:auto;padding:11px;flex:1;min-height:0}
+  .muted{color:var(--ink3)}.pill{font-size:10px;font-weight:600;border-radius:20px;padding:2px 8px}
+
+  /* topic rail */
+  .topic{display:flex;align-items:center;gap:9px;width:100%;text-align:left;border:1px solid transparent;background:transparent;border-radius:8px;padding:7px 9px;cursor:pointer;margin-bottom:2px;font-family:var(--sans)}
+  .topic:hover{background:var(--surface2)}
+  .topic.focus{background:var(--accent-bg);border-color:var(--accent-line)}
+  .topic .nm{flex:1;font-size:12.5px;font-weight:600;color:var(--ink)}
+  .topic.focus .nm{color:var(--accent)}
+  .topic .ct{font-size:10px;color:var(--ink3);font-family:var(--mono)}
+  .topic .fdot{width:7px;height:7px;border-radius:50%;background:var(--accent);visibility:hidden}
+  .topic.focus .fdot{visibility:visible}
+  .focusbar{font-size:11px;color:var(--accent);background:var(--accent-bg);border:1px solid var(--accent-line);border-radius:7px;padding:5px 9px;margin-bottom:8px;font-weight:600}
+
+  /* narrative stream */
+  .ncard{border:1px solid var(--line);border-left:3px solid var(--accent-line);border-radius:var(--radius-sm);padding:7px 9px;margin-bottom:7px;background:var(--surface2);font-size:12px}
+  .ncard .ts{font-size:9.5px;color:var(--ink3);font-family:var(--mono)}
+  .ncard .txt{margin-top:2px;line-height:1.4}
+  .ncard .op{margin-top:4px;font-size:10px;color:var(--accent);font-family:var(--mono)}
+
+  /* capture */
+  .capwrap{padding:13px 13px 0}
+  .omnibox{display:flex;align-items:center;gap:10px;border:2px solid var(--accent-line);border-radius:12px;background:var(--surface);padding:0 14px;height:48px}
+  .omnibox:focus-within{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-bg)}
+  .omnibox .cmd{font-family:var(--mono);color:var(--accent);font-size:15px}
+  .omnibox input{flex:1;border:0;outline:0;font-size:15px;background:transparent;color:var(--ink);font-family:var(--sans)}
+  .examples{display:flex;flex-wrap:wrap;gap:6px;padding:8px 2px 0}
+  .ex-chip{font-size:11px;font-family:var(--mono);background:var(--surface2);border:1px solid var(--line);color:var(--ink2);border-radius:6px;padding:3px 8px;cursor:pointer}
+  .ex-chip:hover{border-color:var(--accent-line);color:var(--accent)}
+
+  /* increment preview */
+  .preview{margin:10px 13px 0;border:1px solid var(--accent-line);background:var(--accent-bg);border-radius:9px;padding:9px 12px;font-size:12.5px;display:none}
+  .preview.show{display:block}
+  .preview .act{font-weight:600;color:var(--accent)}
+  .preview .keys{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+  .preview.ambig{border-color:#e8b6af;background:var(--red-bg)}
+  .preview.ambig .act{color:var(--red)}
+  .chooser{display:flex;flex-direction:column;gap:5px;margin-top:7px}
+  .choice{display:flex;align-items:center;gap:9px;background:#fff;border:1px solid var(--line);border-radius:7px;padding:6px 9px;font-size:12.5px}
+  .choice .num{font-family:var(--mono);font-weight:700;background:var(--accent);color:#fff;width:18px;height:18px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;font-size:11px}
+
+  .section-label{font-size:10.5px;font-weight:700;letter-spacing:.6px;color:var(--ink2);text-transform:uppercase;margin:16px 0 9px;display:flex;align-items:center;gap:8px}
+  .section-label .count{background:var(--line);color:var(--ink2);border-radius:20px;font-size:10px;padding:1px 7px}
+
+  /* evolving finding cards */
+  .fcard{border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:9px;background:var(--surface);cursor:pointer}
+  .fcard:hover{border-color:var(--line2)}
+  .fcard.flash{animation:flash .6s}
+  @keyframes flash{0%{background:var(--accent-bg)}100%{background:#fff}}
+  .fcard .row1{display:flex;align-items:center;gap:8px}
+  .fcard .lab{font-weight:600;font-size:13.5px}
+  .topictag{font-size:9.5px;font-weight:700;letter-spacing:.3px;border-radius:5px;padding:1px 6px;background:var(--surface2);color:var(--ink2);border:1px solid var(--line)}
+  .fcard .ver{font-size:10px;color:var(--ink3);font-family:var(--mono);margin-left:auto}
+  .fcard .proj{margin-top:6px;font-size:12px;color:var(--ink2);display:flex;flex-wrap:wrap;gap:5px 12px}
+  .fcard .proj b{color:var(--ink);font-weight:600}
+  .fcard .course{margin-top:5px;font-size:11.5px;color:var(--accent)}
+  .fcard .course .arr{color:var(--ink3)}
+  .fcard .tx{margin-top:4px;font-size:11px;color:#0f7a63}
+  .spark{font-family:var(--mono);letter-spacing:1px;color:var(--accent)}
+
+  /* threads */
+  .thread{border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:var(--radius-sm);padding:9px 11px;margin-bottom:9px;background:var(--surface2)}
+  .thread .seed{font-size:11px;color:var(--ink2);font-style:italic;margin-bottom:6px}
+  .thread .chain{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+  .tnode{font-size:11.5px;border-radius:6px;padding:2px 8px;font-weight:600}
+  .tnode.event{background:var(--red-bg);color:var(--red)}
+  .tnode.finding{background:var(--accent-bg);color:var(--accent)}
+  .tarrow{color:var(--ink3);font-size:12px}
+  .thread .note{margin-top:6px;font-size:10px;color:var(--ink3)}
+
+  /* hypotheses + coverage */
+  .hyp{margin-bottom:11px}.hyp .hl{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px}
+  .bar{height:8px;background:var(--line);border-radius:6px;overflow:hidden}.bar>span{display:block;height:100%;border-radius:6px;transition:width .25s}
+  .bar.PTSD>span{background:var(--blue)}.bar.MDD>span{background:var(--accent)}.bar.AUD>span{background:var(--amber)}
+  .cov-dx{margin-bottom:10px}.cov-dx h4{margin:0 0 4px;font-size:11px;font-weight:700}
+  .cov-item{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink2);padding:1px 0}
+  .cov-box{width:14px;height:14px;border:1.5px solid var(--line2);border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;color:#fff}
+  .cov-item.done .cov-box{background:var(--green);border-color:var(--green)}.cov-item.done{color:var(--ink3);text-decoration:line-through}
+
+  /* timeline dock */
+  .dock{background:var(--surface);border-top:1px solid var(--line);padding:10px 16px 12px;flex:0 0 auto}
+  .dock h2{margin:0 0 8px;font-size:10.5px;font-weight:700;letter-spacing:.7px;color:var(--ink2);text-transform:uppercase}
+  .tl{position:relative;height:78px;margin:0 8px}
+  .tl .axis{position:absolute;left:0;right:0;top:40px;height:2px;background:var(--line2)}
+  .tl .mk{position:absolute;top:26px;transform:translateX(-50%);text-align:center}
+  .tl .mk .dot{width:11px;height:11px;border-radius:50%;margin:0 auto;border:2px solid #fff;box-shadow:0 0 0 1px var(--line2)}
+  .tl .mk .lab{font-size:10px;color:var(--ink2);margin-top:4px;white-space:nowrap}.tl .mk .wk{font-size:9px;color:var(--ink3);font-family:var(--mono)}
+  .tl .mk.event .dot{background:var(--red)}.tl .mk.f .dot{background:var(--accent)}.tl .mk.tx .dot{background:var(--green)}.tl .mk.cc .dot{background:var(--amber)}
+  .tl .traj{position:absolute;top:46px;height:5px;background:linear-gradient(90deg,var(--accent),#9fb4c9);border-radius:3px;opacity:.5}
+
+  /* synthesis */
+  .synth{flex:1;min-height:0;overflow-y:auto;padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-content:start}
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px}
+  .panel h3{margin:0 0 10px;font-size:10.5px;font-weight:700;letter-spacing:.6px;color:var(--ink2);text-transform:uppercase}
+  .panel.wide{grid-column:1 / -1}
+  .kv{font-size:12.5px;padding:3px 0;display:flex;gap:8px}.kv .k{color:var(--ink3);min-width:120px}
+  .dxline{display:flex;align-items:center;gap:10px;margin-bottom:7px;font-size:13px}.dxline .nm{min-width:120px;font-weight:600}
+  .canvas{position:relative;height:280px;border:1px dashed var(--line2);border-radius:8px;background:radial-gradient(var(--line) 1px,transparent 1px);background-size:18px 18px;overflow:hidden}
+  .node{position:absolute;padding:7px 11px;border-radius:9px;font-size:12.5px;font-weight:600;cursor:grab;user-select:none;border:1.5px solid;background:#fff;box-shadow:var(--shadow);z-index:2}
+  .node.event{border-color:var(--red);color:var(--red);background:var(--red-bg)}.node.dx{border-color:var(--accent);color:var(--accent);background:var(--accent-bg)}
+  .node.sel{outline:3px solid var(--accent);outline-offset:2px}
+  .canvas svg{position:absolute;inset:0;z-index:1;pointer-events:none;width:100%;height:100%}
+  .edge-controls{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+  .edge-controls select{font-size:12px;padding:4px 6px;border:1px solid var(--line2);border-radius:6px;background:#fff}
+  .appt{margin-bottom:14px}.appt .nm{font-weight:600;font-size:13px;margin-bottom:6px}
+  .appt .sl{display:grid;grid-template-columns:90px 1fr 40px;gap:8px;align-items:center;margin-bottom:5px;font-size:12px}
+  .appt input[type=range]{width:100%}.stk{height:14px;border-radius:7px;overflow:hidden;display:flex;margin-top:6px;border:1px solid var(--line)}
+  .stk .s-i{background:var(--red)}.stk .s-p{background:var(--amber)}.stk .s-o{background:var(--ink3)}
+  .ready-item{margin-bottom:9px}.ready-item .rl{display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px}
+
+  .btn{font-size:11.5px;border:1px solid var(--line2);background:var(--surface);color:var(--ink);border-radius:6px;padding:5px 11px;cursor:pointer;font-family:var(--sans)}
+  .btn:hover{background:var(--surface2)}.btn.sm{padding:3px 8px;font-size:10.5px}.btn .k{font-family:var(--mono);font-size:9px;opacity:.7;margin-left:4px}
+  .btn.prim{background:var(--accent);border-color:var(--accent);color:#fff}
+
+  /* modal */
+  .overlay{position:fixed;inset:0;background:rgba(22,27,39,.45);display:none;align-items:center;justify-content:center;z-index:50}
+  .overlay.open{display:flex}
+  .modal{background:#fff;border-radius:14px;width:min(620px,94vw);max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  .modal-h{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff}
+  .modal-h h3{margin:0;font-size:15px}.modal-b{padding:16px 18px}
+  .xbtn{border:0;background:transparent;color:var(--ink3);cursor:pointer;font-size:18px}
+  . insp-cur,.insp-block{margin-bottom:16px}
+  .evlog{border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .evrow{display:grid;grid-template-columns:34px 1fr auto;gap:8px;font-size:11.5px;padding:7px 10px;border-bottom:1px solid var(--line);background:var(--surface2)}
+  .evrow:last-child{border-bottom:0}.evrow .vn{font-family:var(--mono);font-weight:700;color:var(--accent)}
+  .evrow.sup{opacity:.5;text-decoration:line-through}
+  .evrow .src{color:var(--ink3);font-family:var(--mono);font-size:10px}
+  @media (max-width:1180px){.workspace{grid-template-columns:1fr;overflow-y:auto}.col{min-height:220px}.synth{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="brand">Case Workspace v2</span>
+  <span class="tag">evolving findings · experimental · not MedicoApp</span>
+  <div class="tabs"><button class="tab active" data-tab="ws">Interview</button><button class="tab" data-tab="syn">Case Synthesis</button></div>
+  <span class="spacer"></span>
+  <span class="hint"><span class="kbd">⌘K</span> capture · <span class="kbd">↵</span> commit · <span class="kbd">1–3</span> resolve binding · <span class="kbd">⌘Z</span> undo · <span class="kbd">⌘S</span> synthesis</span>
+</div>
+
+<!-- INTERVIEW WORKSPACE -->
+<div class="view active" id="view-ws">
+  <div class="workspace">
+    <!-- LEFT: topic rail + narrative stream -->
+    <div class="stack">
+      <section class="col" style="flex:0 0 auto">
+        <div class="col-h"><h2>Topics</h2></div>
+        <div class="col-body" id="topic-rail"></div>
+      </section>
+      <section class="col" style="flex:1">
+        <div class="col-h"><h2>Interview narrative</h2><span class="pill muted" id="narr-count">0</span></div>
+        <div class="col-body" id="narr-stream"><p class="muted" style="font-size:12px">Each utterance you capture appears here with the action it produced.</p></div>
+      </section>
+    </div>
+
+    <!-- CENTRE: capture + preview + evolving findings -->
+    <section class="col">
+      <div class="capwrap">
+        <div class="focusbar" id="focusbar">FOCUS ▶ — <span style="font-weight:400;color:var(--ink3)">(bare modifiers will bind here)</span></div>
+        <div class="omnibox"><span class="cmd">⌘</span><input id="capture" placeholder="Capture… e.g. cant sleep since injury" autocomplete="off" spellcheck="false"></div>
+        <div class="examples" id="examples"></div>
+      </div>
+      <div class="preview" id="preview"></div>
+      <div class="col-body">
+        <div class="section-label">Evolving findings <span class="count" id="f-count">0</span></div>
+        <div id="findings"><p class="muted" style="font-size:12px">Findings build up here and re-project as new information arrives. A finding is never duplicated.</p></div>
+      </div>
+    </section>
+
+    <!-- RIGHT: threads + coverage + hypotheses -->
+    <section class="col">
+      <div class="col-h"><h2>Narrative threads · coverage · hypotheses</h2></div>
+      <div class="col-body">
+        <div class="section-label">Narrative threads <span class="count" id="t-count">0</span></div>
+        <div id="threads"><p class="muted" style="font-size:12px">Patient-attribution stories (e.g. “after the injury I withdrew, drank, became depressed”) are preserved here — evidence of the claimant’s account, not expert opinion.</p></div>
+        <div class="section-label">Working hypotheses</div>
+        <div id="hypotheses"></div>
+        <div class="section-label">Missing information</div>
+        <div id="coverage"></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="dock">
+    <h2>Timeline preview <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0">— projected from findings, course changes, treatments & narrative events (read-only)</span></h2>
+    <div class="tl" id="timeline"></div>
+  </div>
+</div>
+
+<!-- SYNTHESIS -->
+<div class="view" id="view-syn"><div class="synth" id="synth"></div></div>
+
+<!-- HISTORY INSPECTOR -->
+<div class="overlay" id="overlay"><div class="modal">
+  <div class="modal-h"><h3 id="insp-title">Finding history</h3><button class="xbtn" id="insp-close">✕</button></div>
+  <div class="modal-b" id="insp-body"></div>
+</div></div>
+
+<script>
+"use strict";
+let uid=1; const nid=()=>uid++;
+const TOPICS=[
+  {id:"sleep",label:"Sleep"},{id:"mood",label:"Mood"},{id:"trauma",label:"Trauma"},
+  {id:"alcohol",label:"Alcohol"},{id:"function",label:"Function"},{id:"anxiety",label:"Anxiety"},{id:"psychosis",label:"Psychosis"},
+];
+const DXNAME={PTSD:"PTSD",MDD:"Depression (MDD)",AUD:"Alcohol use"};
+const S={ claims:[], findings:[], threads:[], focusTopic:null, pending:null, lastApplied:null,
+  causation:{nodes:[],edges:[]}, apportionment:{} };
+
+/* lexicon: phrase -> symptom (label, topic, dx) */
+const LEX=[
+  {re:/\b(couldn'?t sleep|can'?t sleep|cant sleep|not sleeping|insomnia|poor sleep|trouble sleeping|broken sleep)\b/i,label:"Sleep disturbance",topic:"sleep",dx:"PTSD"},
+  {re:/\b(low mood|depressed|depression|feeling down|became depressed|flat)\b/i,label:"Low mood",topic:"mood",dx:"MDD"},
+  {re:/\b(hopeless|no future)\b/i,label:"Hopelessness",topic:"mood",dx:"MDD"},
+  {re:/\b(anhedonia|no interest|lost interest|no enjoyment)\b/i,label:"Anhedonia",topic:"mood",dx:"MDD"},
+  {re:/\b(nightmare|nightmares|bad dreams)\b/i,label:"Nightmares",topic:"trauma",dx:"PTSD"},
+  {re:/\b(flashback|flashbacks|reliving|intrusive)\b/i,label:"Flashbacks",topic:"trauma",dx:"PTSD"},
+  {re:/\b(avoid|avoidance)\b/i,label:"Avoidance",topic:"trauma",dx:"PTSD"},
+  {re:/\b(hypervigil|on edge|on guard|startle|jumpy)\b/i,label:"Hypervigilance",topic:"trauma",dx:"PTSD"},
+  {re:/\b(drink|drinking|alcohol|relapse|booze)\b/i,label:"Alcohol use",topic:"alcohol",dx:"AUD"},
+  {re:/\b(stopped seeing friends|social withdrawal|withdrew|withdrawn|stopped going out|isolat)\b/i,label:"Social withdrawal",topic:"function",dx:"MDD"},
+  {re:/\b(lost job|lost my job|stopped working|off work|sacked)\b/i,label:"Lost job / not working",topic:"function",dx:"MDD"},
+];
+const TREAT=[
+  {re:/\bemdr\b/i,name:"EMDR",type:"therapy"},{re:/\bcbt\b/i,name:"CBT",type:"therapy"},
+  {re:/\b(sertraline|fluoxetine|fluox|mirtazapine|ssri|antidepressant)\b/i,name:"Antidepressant",type:"medication"},
+];
+
+/* parse one utterance */
+function parse(text){
+  const t=text.toLowerCase();
+  const syms=[]; const seen=new Set();
+  LEX.forEach(l=>{ if(l.re.test(t)&&!seen.has(l.label)){seen.add(l.label);syms.push({label:l.label,topic:l.topic,dx:l.dx});} });
+  const m={};
+  const fr=/\b(nightly|every night|daily|every day|weekly|fortnightly|once a fortnight|most days|constant|occasional(?:ly)?)\b/i.exec(t);
+  if(fr){ let f=fr[1].toLowerCase(); if(/every night/.test(f))f="nightly"; if(/every day/.test(f))f="daily"; if(/once a fortnight/.test(f))f="fortnightly"; m.frequency=f; }
+  const sv=/\b(severe|moderate|mild)\b/i.exec(t); if(sv) m.severity=sv[1].toLowerCase();
+  if(/since (the )?injury|after (the )?injury|post.?injury|after the accident/i.test(t)){m.onset="post-injury";m.onsetWeeks=0;m.attribution="injury";m.eventRef="Injury";}
+  const wk=/\+?\s*(\d+)\s*(?:wk|week|weeks)\b/i.exec(t); if(wk){m.onset="+"+wk[1]+"wk";m.onsetWeeks=+wk[1];}
+  const tr=TREAT.find(x=>x.re.test(t)); if(tr) m.treatment=tr;
+  if(/\b(improved|better|easier|settled|reduced)\b/i.test(t)) m.direction="improved";
+  if(/\b(worse|worsened|deteriorated|escalat)\b/i.test(t)) m.direction="worsened";
+  if(/\b(now|these days|currently|nowadays)\b/i.test(t)) m.courseCue=true;
+  if(/\b(actually|sorry|i meant|no,? )\b/i.test(t)) m.correction=true;
+  if(/\bagain\b|\brelapse/i.test(t)) m.note="recurrence";
+  return {syms,m};
+}
+
+/* projection: fold events -> current */
+function project(f){
+  const cur={onset:"",onsetWeeks:null,frequency:"",severity:"",attribution:"",treatments:[],course:[],direction:""};
+  f.events.forEach(ev=>{ if(ev.superseded)return;
+    if(ev.type==="create"){cur.onset=ev.value.onset||"";cur.onsetWeeks=(ev.value.onsetWeeks!=null?ev.value.onsetWeeks:cur.onsetWeeks);cur.attribution=ev.value.attribution||"";}
+    else if(ev.type==="set"){cur[ev.facet]=ev.value;}
+    else if(ev.type==="course"){cur.course.push({facet:ev.facet,from:ev.prev,to:ev.value,ts:ev.ts});cur[ev.facet]=ev.value;}
+    else if(ev.type==="correction"){cur[ev.facet]=ev.value;}
+    else if(ev.type==="treatment"){cur.treatments.push(ev.value);if(ev.direction)cur.direction=ev.direction;}
+  });
+  return cur;
+}
+function addEvent(f,ev){ ev.v=f.events.length+1; ev.ts=ev.ts||new Date(); f.events.push(ev); return ev; }
+
+/* find candidate findings for a bare modifier */
+function candidates(){ return S.findings.filter(f=>!f.tombstoned); }
+
+/* classify an utterance's modifiers into operations on a finding */
+function buildOps(f,m){
+  const cur=project(f); const ops=[];
+  if(m.treatment){ ops.push({type:"treatment",value:{name:m.treatment.name,kind:m.treatment.type},direction:m.direction||"",label:`link ${m.treatment.name}`+(m.direction?` · ${m.direction}`:"")}); }
+  ["frequency","severity"].forEach(facet=>{
+    if(m[facet]){
+      const prior=cur[facet];
+      if(m.correction){ ops.push({type:"correction",facet,value:m[facet],prev:prior,label:`correct ${facet} → ${m[facet]}`}); }
+      else if(prior && (m.courseCue||prior!==m[facet])){ ops.push({type:"course",facet,prev:prior,value:m[facet],label:`course change · ${facet} ${prior} → ${m[facet]}`}); }
+      else if(!prior){ ops.push({type:"set",facet,value:m[facet],label:`set ${facet} = ${m[facet]}`}); }
+    }
+  });
+  if(m.direction && !m.treatment && !m.frequency && !m.severity){ ops.push({type:"course",facet:"severity",prev:cur.severity,value:m.direction,label:`course change · ${m.direction}`}); }
+  return ops;
+}
+
+/* commit an utterance */
+function submit(){
+  const inp=document.getElementById("capture"); const text=inp.value.trim(); if(!text) return;
+  const claim={id:nid(),text,ts:new Date()}; S.claims.unshift(claim);
+  const {syms,m}=parse(text);
+  let opSummary=[];
+
+  // NARRATIVE THREAD: 2+ symptoms in one utterance => patient-attribution chain
+  if(syms.length>=2){
+    const nodes=[]; if(m.eventRef) nodes.push({label:m.eventRef,kind:"event"});
+    syms.forEach(s=>nodes.push({label:s.label,kind:"finding"}));
+    S.threads.unshift({id:nid(),seed:text,nodes});
+    opSummary.push("narrative thread ("+nodes.length+" nodes)");
+  }
+
+  if(syms.length>=1){
+    // explicit symptom(s): create or update each
+    syms.forEach((s,i)=>{
+      let f=S.findings.find(x=>x.label===s.label && !x.tombstoned);
+      if(!f){ f={id:nid(),label:s.label,topic:s.topic,dx:s.dx,events:[],tombstoned:false};
+        S.findings.push(f);
+        addEvent(f,{type:"create",value:{onset:m.onset||"",onsetWeeks:(m.onsetWeeks!=null?m.onsetWeeks:null),attribution:m.attribution||""},claimRef:claim.id,note:"create"});
+        opSummary.push("create "+s.label);
+      }
+      // apply modifiers only to the LAST symptom when several (the one being elaborated), or to single
+      if(syms.length===1 || i===syms.length-1){
+        buildOps(f,m).forEach(op=>{ applyOp(f,op,claim.id); opSummary.push(op.label); });
+      }
+      S.focusTopic=f.topic; S.lastApplied={fid:f.id};
+    });
+    claim.op=opSummary.join(" · ");
+    finishCommit(inp);
+    return;
+  }
+
+  // no explicit symptom: bare modifiers bind to focus / candidates
+  const hasMod=m.frequency||m.severity||m.treatment||m.direction;
+  if(hasMod){
+    const cands=candidates();
+    // prefer focus-topic candidate(s)
+    const focusCands=S.focusTopic?cands.filter(f=>f.topic===S.focusTopic):[];
+    let target=null, pool=cands;
+    if(focusCands.length===1){ target=focusCands[0]; }
+    else if(focusCands.length>1){ pool=focusCands; }
+    else if(cands.length===1){ target=cands[0]; }
+    if(target){ buildOps(target,m).forEach(op=>{ applyOp(target,op,claim.id); opSummary.push(op.label); });
+      S.focusTopic=target.topic; S.lastApplied={fid:target.id}; claim.op=opSummary.join(" · "); finishCommit(inp); return; }
+    if(pool.length>1){ // AMBIGUOUS — do not choose
+      S.pending={claimId:claim.id, m, pool:pool.map(f=>f.id), text}; claim.op="(awaiting binding)";
+      renderPreviewAmbiguous(); renderAll(); inp.value=""; return; }
+  }
+  // nothing actionable -> narrative-only
+  claim.op = opSummary.length?opSummary.join(" · "):"(narrative only — no finding)";
+  finishCommit(inp);
+}
+function finishCommit(inp){ inp.value=""; renderAll(); renderPreviewApplied(); }
+
+function applyOp(f,op,claimRef){
+  if(op.type==="correction"){
+    // supersede latest event setting the same facet, keep it
+    for(let i=f.events.length-1;i>=0;i--){ const e=f.events[i]; if(!e.superseded && (e.facet===op.facet)){ e.superseded=true; break; } }
+    addEvent(f,{type:"correction",facet:op.facet,value:op.value,prev:op.prev,claimRef,note:op.label});
+  } else if(op.type==="course"){
+    addEvent(f,{type:"course",facet:op.facet,value:op.value,prev:op.prev,claimRef,note:op.label});
+  } else if(op.type==="set"){
+    addEvent(f,{type:"set",facet:op.facet,value:op.value,claimRef,note:op.label});
+  } else if(op.type==="treatment"){
+    addEvent(f,{type:"treatment",value:op.value,direction:op.direction,claimRef,note:op.label});
+  }
+}
+function resolveAmbiguous(idx){
+  if(!S.pending) return; const f=S.findings.find(x=>x.id===S.pending.pool[idx]); if(!f) return;
+  const claim=S.claims.find(c=>c.id===S.pending.claimId);
+  const ops=buildOps(f,S.pending.m); ops.forEach(op=>applyOp(f,op,S.pending.claimId));
+  if(claim) claim.op=ops.map(o=>o.label).join(" · ")+`  → ${f.label}`;
+  S.focusTopic=f.topic; S.lastApplied={fid:f.id}; S.pending=null;
+  document.getElementById("preview").classList.remove("show","ambig"); renderAll();
+}
+function undoLast(){
+  if(!S.lastApplied) return; const f=S.findings.find(x=>x.id===S.lastApplied.fid); if(!f) return;
+  // remove last non-create event; if only create remains, remove finding
+  if(f.events.length>1){ const e=f.events.pop(); if(e&&e.type==="correction"){ // un-supersede
+      for(let i=f.events.length-1;i>=0;i--){ if(f.events[i].facet===e.facet&&f.events[i].superseded){f.events[i].superseded=false;break;} } } }
+  else { S.findings=S.findings.filter(x=>x.id!==f.id); }
+  S.lastApplied=null; document.getElementById("preview").classList.remove("show"); renderAll();
+}
+
+/* ───── renders ───── */
+function renderTopicRail(){
+  const el=document.getElementById("topic-rail");
+  el.innerHTML=TOPICS.map(t=>{
+    const fs=S.findings.filter(f=>f.topic===t.id&&!f.tombstoned);
+    const foc=S.focusTopic===t.id?"focus":"";
+    return `<button class="topic ${foc}" data-topic="${t.id}"><span class="fdot"></span><span class="nm">${t.label}</span><span class="ct">${fs.length||""}</span></button>`;
+  }).join("");
+  const ft=TOPICS.find(t=>t.id===S.focusTopic);
+  document.getElementById("focusbar").innerHTML = ft
+    ? `FOCUS ▶ ${ft.label} <span style="font-weight:400;color:var(--ink3)">— bare modifiers bind here</span>`
+    : `FOCUS ▶ — <span style="font-weight:400;color:var(--ink3)">(bare modifiers will bind here)</span>`;
+}
+function renderNarr(){
+  document.getElementById("narr-count").textContent=S.claims.length;
+  const el=document.getElementById("narr-stream"); if(!S.claims.length)return;
+  el.innerHTML=S.claims.map(c=>`<div class="ncard"><div class="ts">#${c.id} · ${time(c.ts)}</div><div class="txt">${esc(c.text)}</div><div class="op">▸ ${esc(c.op||"")}</div></div>`).join("");
+}
+function fProj(f){
+  const c=project(f); const bits=[];
+  if(c.onset) bits.push(`onset <b>${c.onset}</b>`);
+  if(c.frequency) bits.push(`freq <b>${c.frequency}</b>`);
+  if(c.severity) bits.push(`severity <b>${c.severity}</b>`);
+  if(c.attribution) bits.push(`attrib <b>${c.attribution}</b>`);
+  return {c,bits};
+}
+function spark(c){
+  const map={nightly:"▇",daily:"▆","most days":"▅",weekly:"▃",fortnightly:"▂",occasionally:"▁"};
+  const seq=[]; c.course.filter(x=>x.facet==="frequency").forEach((x,i)=>{ if(i===0)seq.push(map[x.from]||"▄"); seq.push(map[x.to]||"▂"); });
+  if(!seq.length && c.frequency) seq.push(map[c.frequency]||"▄");
+  return seq.join("");
+}
+function renderFindings(){
+  const fs=S.findings.filter(f=>!f.tombstoned);
+  document.getElementById("f-count").textContent=fs.length;
+  const el=document.getElementById("findings"); if(!fs.length)return;
+  // focus topic first
+  fs.sort((a,b)=> (a.topic===S.focusTopic?-1:0) - (b.topic===S.focusTopic?-1:0));
+  el.innerHTML=fs.map(f=>{
+    const {c,bits}=fProj(f); const tl=TOPICS.find(t=>t.id===f.topic);
+    const flash=S.lastApplied&&S.lastApplied.fid===f.id?"flash":"";
+    const courseFreq=c.course.filter(x=>x.facet==="frequency");
+    const courseHtml=courseFreq.length?`<div class="course">${courseFreq.map(x=>`${x.from} <span class="arr">→</span> ${x.to}`).join(" ")} <span class="spark">${spark(c)}</span></div>`:"";
+    const txHtml=c.treatments.length?`<div class="tx">↘ ${c.treatments.map(t=>t.name).join(", ")}${c.direction?` · ${c.direction}`:""}</div>`:"";
+    return `<div class="fcard ${flash}" data-fid="${f.id}">
+      <div class="row1"><span class="lab">${f.label}</span><span class="topictag">${tl?tl.label:f.topic}</span><span class="ver">v${f.events.length}</span></div>
+      <div class="proj">${bits.join("")||'<span class="muted">no detail yet</span>'}</div>
+      ${courseHtml}${txHtml}</div>`;
+  }).join("");
+}
+function renderThreads(){
+  document.getElementById("t-count").textContent=S.threads.length;
+  const el=document.getElementById("threads"); if(!S.threads.length)return;
+  el.innerHTML=S.threads.map(t=>`<div class="thread"><div class="seed">“${esc(t.seed)}”</div>
+    <div class="chain">${t.nodes.map((n,i)=>`${i?'<span class="tarrow">→</span>':''}<span class="tnode ${n.kind}">${n.label}</span>`).join("")}</div>
+    <div class="note">patient-attribution narrative · not an expert opinion</div></div>`).join("");
+}
+const WEIGHTS={"Nightmares":{PTSD:22},"Flashbacks":{PTSD:22},"Avoidance":{PTSD:16},"Hypervigilance":{PTSD:16},"Sleep disturbance":{PTSD:10,MDD:8},"Low mood":{MDD:24},"Anhedonia":{MDD:22},"Hopelessness":{MDD:16},"Alcohol use":{AUD:34},"Social withdrawal":{MDD:10},"Lost job / not working":{MDD:6}};
+function scores(){const s={PTSD:0,MDD:0,AUD:0};S.findings.filter(f=>!f.tombstoned).forEach(f=>{const w=WEIGHTS[f.label];if(w)for(const k in w)s[k]=(s[k]||0)+w[k];});for(const k in s)s[k]=Math.min(100,s[k]);return s;}
+function renderHyp(){const s=scores();document.getElementById("hypotheses").innerHTML=[["PTSD","PTSD"],["MDD","MDD"],["AUD","Alcohol use disorder"]].map(([k,n])=>`<div class="hyp"><div class="hl"><b>${n}</b><span class="muted">${s[k]||0}%</span></div><div class="bar ${k}"><span style="width:${s[k]||0}%"></span></div></div>`).join("");}
+const COV={PTSD:[["Nightmares","Nightmares"],["Flashbacks","Flashbacks"],["Avoidance","Avoidance"],["Hypervigilance","Hypervigilance"],["Sleep disturbance","Sleep"]],MDD:[["Low mood","Low mood"],["Anhedonia","Anhedonia"],["Hopelessness","Hopelessness"],["Social withdrawal","Withdrawal"]]};
+function renderCov(){const fs=S.findings.filter(f=>!f.tombstoned);const has=l=>fs.some(f=>f.label===l);
+  document.getElementById("coverage").innerHTML=Object.keys(COV).map(dx=>`<div class="cov-dx"><h4>${dx} <span class="muted" style="font-weight:400">${COV[dx].filter(i=>has(i[0])).length}/${COV[dx].length}</span></h4>${COV[dx].map(i=>`<div class="cov-item ${has(i[0])?'done':''}"><span class="cov-box">${has(i[0])?'✓':''}</span>${i[1]}</div>`).join("")}</div>`).join("");}
+
+function renderTimeline(){
+  const el=document.getElementById("timeline");
+  const fs=S.findings.filter(f=>!f.tombstoned);
+  const marks=[{cls:"event",lab:"Injury",wk:0}];
+  fs.forEach(f=>{const c=project(f); if(c.onsetWeeks!=null) marks.push({cls:"f",lab:f.label,wk:c.onsetWeeks});});
+  // course changes & treatments for evolving findings
+  fs.forEach(f=>{const c=project(f);
+    c.treatments.forEach(t=>marks.push({cls:"tx",lab:t.name,wk:(c.onsetWeeks!=null?c.onsetWeeks:0)+8}));
+    if(c.course.length) marks.push({cls:"cc",lab:c.course[c.course.length-1].to,wk:(c.onsetWeeks!=null?c.onsetWeeks:0)+4});
+  });
+  const maxWk=Math.max(10,...marks.map(m=>m.wk));
+  el.innerHTML=`<div class="axis"></div>`+marks.sort((a,b)=>a.wk-b.wk).map(m=>{const left=6+(m.wk/maxWk)*88;
+    return `<div class="mk ${m.cls}" style="left:${left}%"><div class="dot"></div><div class="lab">${m.lab}</div><div class="wk">${m.wk===0?'index':'+'+(Math.round(m.wk*10)/10)+'wk'}</div></div>`;}).join("");
+}
+
+/* increment preview */
+function renderPreviewApplied(){
+  if(!S.lastApplied){return;} const f=S.findings.find(x=>x.id===S.lastApplied.fid); if(!f)return;
+  const last=f.events[f.events.length-1];
+  const p=document.getElementById("preview"); p.className="preview show";
+  p.innerHTML=`<div><span class="act">✓ applied</span> → <b>${f.label}</b>: ${esc(last?last.note:"")} <span class="muted">(now v${f.events.length})</span></div>
+    <div class="keys"><button class="btn sm" id="pv-undo">Undo<span class="k">⌘Z</span></button><button class="btn sm" id="pv-hist" data-fid="${f.id}">History<span class="k">E</span></button></div>`;
+  document.getElementById("pv-undo").onclick=undoLast;
+  document.getElementById("pv-hist").onclick=()=>openInspector(f.id);
+}
+function renderPreviewAmbiguous(){
+  const p=document.getElementById("preview"); p.className="preview ambig show";
+  const pool=S.pending.pool.map(id=>S.findings.find(f=>f.id===id));
+  const what=Object.entries(S.pending.m).filter(([k])=>["frequency","severity","treatment","direction"].includes(k)).map(([k,v])=>`${k} = ${v.name||v}`).join(", ");
+  p.innerHTML=`<div><span class="act">⚠ ambiguous binding</span> — “${esc(S.pending.text)}” (${what}) could apply to:</div>
+    <div class="chooser">${pool.map((f,i)=>`<div class="choice" data-idx="${i}"><span class="num">${i+1}</span> ${f.label} <span class="muted" style="margin-left:auto;font-size:10px">${TOPICS.find(t=>t.id===f.topic).label}</span></div>`).join("")}</div>
+    <div class="muted" style="font-size:10px;margin-top:6px">press 1–${pool.length} to bind · Esc to cancel</div>`;
+  p.querySelectorAll(".choice").forEach(c=>c.onclick=()=>resolveAmbiguous(+c.dataset.idx));
+}
+
+/* history inspector */
+function openInspector(id){
+  const f=S.findings.find(x=>x.id===id); if(!f)return; const c=project(f);
+  document.getElementById("insp-title").textContent=f.label+"  ·  "+(TOPICS.find(t=>t.id===f.topic)||{}).label;
+  const cur=[c.onset&&`onset ${c.onset}`,c.frequency&&`freq ${c.frequency}`,c.severity&&`severity ${c.severity}`,c.attribution&&`attrib ${c.attribution}`].filter(Boolean).join(" · ")||"—";
+  const courseHtml=c.course.length?c.course.map(x=>`<div class="course" style="margin:2px 0">${x.facet}: <b>${x.from}</b> <span class="arr">→</span> <b>${x.to}</b></div>`).join(""):'<span class="muted">none</span>';
+  const txHtml=c.treatments.length?c.treatments.map(t=>`${t.name} (${t.kind})${c.direction?` · ${c.direction}`:""}`).join(", "):'<span class="muted">none</span>';
+  document.getElementById("insp-body").innerHTML=`
+    <div class="insp-block"><h3 style="margin:0 0 6px;font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Current state (projected)</h3>
+      <div style="font-size:14px">${cur}</div></div>
+    <div class="insp-block"><h3 style="margin:0 0 6px;font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Course changes</h3>${courseHtml}</div>
+    <div class="insp-block"><h3 style="margin:0 0 6px;font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Treatment links</h3><div style="font-size:13px">${txHtml}</div></div>
+    <div class="insp-block"><h3 style="margin:0 0 6px;font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Event log (append-only · ${f.events.length} versions)</h3>
+      <div class="evlog">${f.events.map(e=>`<div class="evrow ${e.superseded?'sup':''}"><span class="vn">v${e.v}</span><span>${esc(e.note||e.type)}</span><span class="src">claim #${e.claimRef||'—'} · ${time(e.ts)}</span></div>`).join("")}</div>
+      <p class="muted" style="font-size:10.5px;margin-top:6px">Nothing is overwritten — corrections supersede (struck through) but remain in the log. Current state is a projection (fold) over these events.</p></div>`;
+  document.getElementById("overlay").classList.add("open");
+}
+function closeInspector(){document.getElementById("overlay").classList.remove("open");}
+
+/* synthesis */
+function renderSynth(){
+  const fs=S.findings.filter(f=>!f.tombstoned); const s=scores();
+  const keyF=fs.length?fs.map(f=>{const c=project(f);return `<div class="kv"><span class="k">${f.label}</span><span>${[c.onset,c.frequency&&'freq '+c.frequency,c.severity,c.course.length&&c.course.map(x=>x.from+'→'+x.to).join(', '),c.treatments.map(t=>t.name).join(', ')].filter(Boolean).join(' · ')||'—'}</span></div>`;}).join(""):'<p class="muted">No findings yet.</p>';
+  const threads=S.threads.length?S.threads.map(t=>`<div class="kv"><span class="k">claimant</span><span>${t.nodes.map(n=>n.label).join(" → ")}</span></div>`).join(""):'<p class="muted">None.</p>';
+  const dxRows=[["PTSD",s.PTSD],["MDD",s.MDD],["AUD",s.AUD]].map(([k,v])=>`<div class="dxline"><span class="nm">${DXNAME[k]}</span><span class="bar ${k}" style="flex:1"><span style="width:${v}%"></span></span><span class="muted" style="min-width:90px">${v}% · ${v>=70?'likely':v>=50?'probable':v>=25?'possible':'insufficient'}</span></div>`).join("");
+  const cov=Object.keys(COV).map(dx=>({dx,done:COV[dx].filter(i=>fs.some(f=>f.label===i[0])).length,tot:COV[dx].length}));
+  const covPct=Math.round(100*cov.reduce((a,c)=>a+c.done,0)/cov.reduce((a,c)=>a+c.tot,0));
+  const opinions=(S.causation.edges.length?50:0)+(Object.keys(S.apportionment).length?50:0);
+  const diag=Math.min(100,[s.PTSD,s.MDD,s.AUD].filter(v=>v>=50).length*50);
+  const overall=Math.round((covPct+100+diag+opinions)/4);
+  document.getElementById("synth").innerHTML=`
+    <div class="panel"><h3>Key findings (current projection)</h3>${keyF}</div>
+    <div class="panel"><h3>Narrative threads (claimant account)</h3>${threads}</div>
+    <div class="panel"><h3>Current diagnoses</h3>${dxRows}</div>
+    <div class="panel"><h3>Case readiness</h3>
+      ${rb("Coverage",covPct)}${rb("Contradictions",100)}${rb("Diagnoses",diag)}${rb("Opinions",opinions)}
+      <div class="ready-item" style="margin-top:10px"><div class="rl"><b>Overall</b><b>${overall}%</b></div><div class="bar MDD"><span style="width:${overall}%"></span></div></div></div>
+    <div class="panel wide"><h3>Causation canvas</h3>
+      <div class="edge-controls"><span class="muted" style="font-size:11.5px">Click a node, then another, to link as:</span>
+        <select id="edge-type"><option value="material">Material contribution</option><option value="necessary">Necessary cause</option><option value="aggravating">Aggravating factor</option></select>
+        <button class="btn sm" id="clear-edges">Clear links</button><span class="muted" style="font-size:11px">drag to reposition</span></div>
+      <div class="canvas" id="canvas"><svg id="edges"></svg></div></div>
+    <div class="panel wide"><h3>Apportionment</h3><div id="appt"></div></div>`;
+  seedCausation(); renderCanvas(); renderAppt();
+}
+function rb(l,v){return `<div class="ready-item"><div class="rl"><span>${l}</span><span class="muted">${v}%</span></div><div class="bar PTSD"><span style="width:${v}%"></span></div></div>`;}
+
+/* causation */
+function seedCausation(){ if(S.causation.nodes.length)return;
+  S.causation.nodes=[{id:"injury",label:"Index injury",type:"event",x:40,y:30},{id:"pain",label:"Chronic pain",type:"event",x:40,y:150},
+   {id:"ptsd",label:"PTSD",type:"dx",x:300,y:25},{id:"mdd",label:"Depression",type:"dx",x:300,y:110},{id:"aud",label:"Alcohol relapse",type:"dx",x:300,y:200}];
+  S.causation.edges=[{from:"injury",to:"ptsd",type:"necessary"},{from:"injury",to:"mdd",type:"material"},{from:"pain",to:"aud",type:"material"}];}
+const EC={material:"#5b4ad6",necessary:"#2563a8",aggravating:"#b9770e"};let edgeSel=null;
+function renderCanvas(){const cv=document.getElementById("canvas");if(!cv)return;cv.querySelectorAll(".node").forEach(n=>n.remove());
+  S.causation.nodes.forEach(n=>{const d=document.createElement("div");d.className=`node ${n.type}${edgeSel===n.id?' sel':''}`;d.style.left=n.x+"px";d.style.top=n.y+"px";d.textContent=n.label;d.dataset.node=n.id;cv.appendChild(d);drag(d,n);});drawEdges();}
+function drawEdges(){const svg=document.getElementById("edges");if(!svg)return;const cv=document.getElementById("canvas");const cb=cv.getBoundingClientRect();
+  const ctr=id=>{const el=cv.querySelector(`[data-node="${id}"]`);const b=el.getBoundingClientRect();return{x:b.left-cb.left+b.width/2,y:b.top-cb.top+b.height/2};};
+  svg.innerHTML=`<defs>${Object.keys(EC).map(k=>`<marker id="a-${k}" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0L7,3L0,6Z" fill="${EC[k]}"/></marker>`).join("")}</defs>`+
+    S.causation.edges.map((e,i)=>{const a=ctr(e.from),b=ctr(e.to),mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
+      return `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${EC[e.type]}" stroke-width="2" marker-end="url(#a-${e.type})"/><rect x="${mx-28}" y="${my-9}" width="56" height="16" rx="8" fill="#fff" stroke="${EC[e.type]}" data-edge="${i}" style="cursor:pointer;pointer-events:all"/><text x="${mx}" y="${my+3}" text-anchor="middle" font-size="10" fill="${EC[e.type]}" style="pointer-events:none">${e.type}</text>`;}).join("");
+  svg.querySelectorAll("[data-edge]").forEach(r=>r.addEventListener("click",()=>{S.causation.edges.splice(+r.dataset.edge,1);drawEdges();}));}
+function drag(el,n){el.addEventListener("pointerdown",e=>{if(e.button!==0)return;const cv=document.getElementById("canvas"),cb=cv.getBoundingClientRect();let moved=false;const ox=e.clientX-n.x,oy=e.clientY-n.y;el.setPointerCapture(e.pointerId);
+  const mv=ev=>{moved=true;n.x=Math.max(0,Math.min(cb.width-el.offsetWidth,ev.clientX-ox));n.y=Math.max(0,Math.min(cb.height-el.offsetHeight,ev.clientY-oy));el.style.left=n.x+"px";el.style.top=n.y+"px";drawEdges();};
+  const up=()=>{el.releasePointerCapture(e.pointerId);el.removeEventListener("pointermove",mv);el.removeEventListener("pointerup",up);if(!moved)clickNode(n.id);};
+  el.addEventListener("pointermove",mv);el.addEventListener("pointerup",up);});}
+function clickNode(id){if(edgeSel===null)edgeSel=id;else if(edgeSel===id)edgeSel=null;else{const t=document.getElementById("edge-type").value;if(!S.causation.edges.some(e=>e.from===edgeSel&&e.to===id))S.causation.edges.push({from:edgeSel,to:id,type:t});edgeSel=null;}renderCanvas();}
+
+/* apportionment */
+function renderAppt(){const el=document.getElementById("appt");if(!el)return;const dxs=["PTSD","Depression (MDD)","Alcohol use"];
+  dxs.forEach(d=>{if(!S.apportionment[d])S.apportionment[d]={injury:70,pre:20,other:10};});
+  el.innerHTML=dxs.map(d=>{const a=S.apportionment[d];const row=(k,l)=>`<div class="sl"><span>${l}</span><input type="range" min="0" max="100" step="5" value="${a[k]}" data-appt="${d}" data-key="${k}"><span style="text-align:right" data-val="${d}-${k}">${a[k]}%</span></div>`;
+    return `<div class="appt" data-dx="${d}"><div class="nm">${d}</div>${row("injury","Injury")}${row("pre","Pre-existing")}${row("other","Other")}<div class="stk"><div class="s-i" style="width:${a.injury}%"></div><div class="s-p" style="width:${a.pre}%"></div><div class="s-o" style="width:${a.other}%"></div></div><div class="muted" style="font-size:11px;margin-top:4px" data-total="${d}">total ${a.injury+a.pre+a.other}%</div></div>`;}).join("");}
+function adjAppt(d,key,val){const a=S.apportionment[d];const others=["injury","pre","other"].filter(k=>k!==key);val=Math.max(0,Math.min(100,val));a[key]=val;let rem=100-val,so=others.reduce((s,k)=>s+a[k],0);
+  if(so===0){a[others[0]]=Math.round(rem/2/5)*5;a[others[1]]=rem-a[others[0]];}else{let r0=Math.round(rem*(a[others[0]]/so)/5)*5;a[others[0]]=r0;a[others[1]]=rem-r0;}
+  const w=document.querySelector(`.appt[data-dx="${d}"]`);if(!w)return;["injury","pre","other"].forEach(k=>{w.querySelector(`[data-val="${d}-${k}"]`).textContent=a[k]+"%";const inp=w.querySelector(`input[data-key="${k}"]`);if(inp&&k!==key)inp.value=a[k];});
+  w.querySelector(".s-i").style.width=a.injury+"%";w.querySelector(".s-p").style.width=a.pre+"%";w.querySelector(".s-o").style.width=a.other+"%";w.querySelector(`[data-total="${d}"]`).textContent="total "+(a.injury+a.pre+a.other)+"%";}
+
+/* helpers + boot */
+function esc(s){return (s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
+function time(d){return new Date(d).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});}
+function renderAll(){renderTopicRail();renderNarr();renderFindings();renderThreads();renderHyp();renderCov();renderTimeline();if(document.getElementById("view-syn").classList.contains("active"))renderSynth();}
+
+const EX=["cant sleep since injury","every night","now fortnightly","improved after emdr"];
+document.getElementById("examples").innerHTML=EX.map(e=>`<span class="ex-chip">${e}</span>`).join("");
+document.querySelectorAll(".ex-chip").forEach(c=>c.onclick=()=>{const i=document.getElementById("capture");i.value=c.textContent;i.focus();});
+document.getElementById("capture").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();submit();}});
+document.body.addEventListener("click",e=>{const t=e.target.closest("[data-topic]");if(t){S.focusTopic=t.dataset.topic;renderTopicRail();return;}
+  const fc=e.target.closest("[data-fid]");if(fc&&!e.target.closest(".keys")){openInspector(+fc.dataset.fid);return;}
+  if(e.target.id==="clear-edges"){S.causation.edges=[];renderCanvas();}});
+document.body.addEventListener("input",e=>{if(e.target.dataset.appt)adjAppt(e.target.dataset.appt,e.target.dataset.key,parseInt(e.target.value,10));});
+document.getElementById("insp-close").onclick=closeInspector;
+document.getElementById("overlay").addEventListener("click",e=>{if(e.target.id==="overlay")closeInspector();});
+document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>switchTab(t.dataset.tab));
+function switchTab(n){document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===n));document.getElementById("view-ws").classList.toggle("active",n==="ws");document.getElementById("view-syn").classList.toggle("active",n==="syn");if(n==="syn")renderSynth();}
+window.addEventListener("resize",()=>{if(document.getElementById("view-syn").classList.contains("active"))drawEdges();});
+
+document.addEventListener("keydown",e=>{const k=e.key.toLowerCase();
+  if((e.metaKey||e.ctrlKey)&&k==="k"){e.preventDefault();switchTab("ws");document.getElementById("capture").focus();return;}
+  if((e.metaKey||e.ctrlKey)&&k==="s"){e.preventDefault();switchTab("syn");return;}
+  if((e.metaKey||e.ctrlKey)&&k==="z"){e.preventDefault();undoLast();return;}
+  if(document.getElementById("overlay").classList.contains("open")){if(e.key==="Escape")closeInspector();return;}
+  if(S.pending){ if(/^[1-9]$/.test(e.key)){e.preventDefault();resolveAmbiguous(+e.key-1);} else if(e.key==="Escape"){S.pending=null;document.getElementById("preview").classList.remove("show","ambig");renderAll();} return; }
+});
+
+renderAll();
+document.getElementById("capture").focus();
+</script>
+</body>
+</html>

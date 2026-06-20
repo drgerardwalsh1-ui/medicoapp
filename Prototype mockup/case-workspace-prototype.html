@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Case Workspace — experimental prototype</title>
+<style>
+  :root{
+    --bg:#eef1f5; --surface:#ffffff; --surface2:#f5f7fa; --ink:#1f2733; --ink2:#566173;
+    --ink3:#8a93a3; --line:#dde3ec; --line2:#c7cfdb;
+    --accent:#5b4ad6; --accent-bg:#efedfc; --accent-line:#cdc6f4;
+    --green:#1f9d63; --green-bg:#e6f6ee; --red:#c0392b; --red-bg:#fbecea;
+    --amber:#b9770e; --amber-bg:#fdf3e3; --blue:#2563a8; --blue-bg:#e7f0fa;
+    --radius:10px; --radius-sm:7px; --shadow:0 1px 2px rgba(20,30,50,.06),0 2px 8px rgba(20,30,50,.05);
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:13.5px;
+    -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;overflow:hidden;}
+
+  /* top bar */
+  .topbar{display:flex;align-items:center;gap:14px;padding:9px 16px;background:#161b27;color:#fff;flex:0 0 auto;}
+  .topbar .brand{font-weight:600;font-size:14px;letter-spacing:.2px}
+  .topbar .tag{font-size:10.5px;color:#aeb6c6;border:1px solid #38404f;border-radius:20px;padding:2px 9px}
+  .tabs{display:flex;gap:4px;margin-left:8px}
+  .tab{font-size:12.5px;color:#c2c9d6;background:transparent;border:0;padding:6px 13px;border-radius:7px;cursor:pointer}
+  .tab.active{background:#2b3242;color:#fff}
+  .tab:hover:not(.active){background:#222838}
+  .topbar .spacer{flex:1}
+  .kbd{font-family:var(--mono);font-size:10px;background:#2b3242;color:#cdd4e0;border:1px solid #3a4253;border-radius:5px;padding:1px 5px}
+  .topbar .hint{font-size:11px;color:#9aa3b4;display:flex;gap:6px;align-items:center}
+
+  /* layout */
+  .view{flex:1;min-height:0;display:none}
+  .view.active{display:flex;flex-direction:column}
+  .workspace{flex:1;min-height:0;display:grid;grid-template-columns:288px 1fr 330px;gap:12px;padding:12px;}
+  .dock{flex:0 0 auto}
+  .col{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);
+    display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  .col-h{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;flex:0 0 auto}
+  .col-h h2{margin:0;font-size:11px;font-weight:700;letter-spacing:.7px;color:var(--ink2);text-transform:uppercase}
+  .col-body{overflow-y:auto;padding:12px;flex:1;min-height:0}
+  .muted{color:var(--ink3)}
+  .pill{font-size:10px;font-weight:600;border-radius:20px;padding:2px 8px}
+
+  /* narrative cards */
+  .ncard{border:1px solid var(--line);border-left:3px solid var(--accent-line);border-radius:var(--radius-sm);
+    padding:9px 11px;margin-bottom:9px;background:var(--surface2);cursor:pointer;transition:.12s}
+  .ncard:hover{border-color:var(--line2)}
+  .ncard.sel{border-left-color:var(--accent);background:var(--accent-bg)}
+  .ncard .ts{font-size:10px;color:var(--ink3);font-family:var(--mono);display:flex;justify-content:space-between;align-items:center}
+  .ncard .txt{margin-top:3px;font-size:13px;line-height:1.45}
+  .ncard .ex{margin-top:6px;display:flex;flex-wrap:wrap;gap:4px}
+  .tagchip{font-size:10px;background:var(--accent-bg);color:var(--accent);border-radius:5px;padding:1px 6px}
+  .xbtn{border:0;background:transparent;color:var(--ink3);cursor:pointer;font-size:12px;padding:0 2px}
+  .xbtn:hover{color:var(--red)}
+
+  /* capture */
+  .capture-wrap{padding:14px 14px 0}
+  .omnibox{display:flex;align-items:center;gap:10px;border:2px solid var(--accent-line);border-radius:12px;
+    background:var(--surface);padding:0 14px;height:50px;transition:.12s}
+  .omnibox:focus-within{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-bg)}
+  .omnibox .cmd{font-family:var(--mono);color:var(--accent);font-size:16px}
+  .omnibox input{flex:1;border:0;outline:0;font-size:15px;background:transparent;color:var(--ink);font-family:var(--sans)}
+  .examples{display:flex;flex-wrap:wrap;gap:6px;padding:8px 2px 0}
+  .ex-chip{font-size:11px;font-family:var(--mono);background:var(--surface2);border:1px solid var(--line);
+    color:var(--ink2);border-radius:6px;padding:3px 8px;cursor:pointer}
+  .ex-chip:hover{border-color:var(--accent-line);color:var(--accent)}
+
+  .section-label{font-size:11px;font-weight:700;letter-spacing:.6px;color:var(--ink2);text-transform:uppercase;
+    margin:18px 0 9px;display:flex;align-items:center;gap:8px}
+  .section-label .count{background:var(--line);color:var(--ink2);border-radius:20px;font-size:10px;padding:1px 7px}
+
+  /* finding cards */
+  .fcard{border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:9px;background:var(--surface)}
+  .fcard.proposed{border-style:dashed;border-color:var(--line2);background:var(--surface2)}
+  .fcard.proposed:focus{outline:0;border-color:var(--accent);border-style:solid;box-shadow:0 0 0 3px var(--accent-bg)}
+  .fcard .row1{display:flex;align-items:center;gap:8px}
+  .fcard .lab{font-weight:600;font-size:13.5px}
+  .dxtag{font-size:9.5px;font-weight:700;letter-spacing:.4px;border-radius:5px;padding:1px 6px}
+  .dx-PTSD{background:var(--blue-bg);color:var(--blue)} .dx-MDD{background:#efedfc;color:var(--accent)}
+  .dx-AUD{background:var(--amber-bg);color:var(--amber)} .dx-FUNCTION{background:#eef2f6;color:var(--ink2)}
+  .dx-SLEEP{background:#e9f5f2;color:#0f7a63}
+  .fcard .src{font-size:10px;color:var(--ink3);font-family:var(--mono);margin-left:auto}
+  .fcard .meta{margin-top:6px;font-size:11.5px;color:var(--ink2);display:flex;flex-wrap:wrap;gap:10px}
+  .fcard .meta b{font-weight:600;color:var(--ink)}
+  .fcard .acts{margin-top:9px;display:flex;gap:6px}
+  .btn{font-size:11.5px;border:1px solid var(--line2);background:var(--surface);color:var(--ink);border-radius:6px;
+    padding:5px 11px;cursor:pointer;font-family:var(--sans);transition:.1s}
+  .btn:hover{background:var(--surface2)}
+  .btn.acc{border-color:#9ed8ba;color:var(--green);background:var(--green-bg)}
+  .btn.rej{border-color:#e8b6af;color:var(--red);background:var(--red-bg)}
+  .btn.prim{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.prim:hover{background:#4c3dc2}
+  .btn.sm{padding:3px 8px;font-size:10.5px}
+  .btn .k{font-family:var(--mono);font-size:9px;opacity:.7;margin-left:4px}
+
+  /* hypotheses */
+  .hyp{margin-bottom:12px}
+  .hyp .hl{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px}
+  .hyp .hl b{font-weight:600}
+  .bar{height:8px;background:var(--line);border-radius:6px;overflow:hidden}
+  .bar > span{display:block;height:100%;border-radius:6px;transition:width .25s}
+  .bar.PTSD>span{background:var(--blue)} .bar.MDD>span{background:var(--accent)} .bar.AUD>span{background:var(--amber)}
+
+  .cov-dx{margin-bottom:11px}
+  .cov-dx h4{margin:0 0 5px;font-size:11.5px;font-weight:700;color:var(--ink)}
+  .cov-item{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink2);padding:1.5px 0}
+  .cov-box{width:14px;height:14px;border:1.5px solid var(--line2);border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;color:#fff}
+  .cov-item.done .cov-box{background:var(--green);border-color:var(--green)}
+  .cov-item.done{color:var(--ink3);text-decoration:line-through}
+
+  /* contradictions */
+  .contra{border:1px solid #e8b6af;background:var(--red-bg);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:10px}
+  .contra .warn{font-weight:700;color:var(--red);font-size:12px;display:flex;align-items:center;gap:6px}
+  .claim{font-size:12px;margin:6px 0;padding:6px 8px;background:#fff;border:1px solid var(--line);border-radius:6px}
+  .claim .who{font-size:10px;font-family:var(--mono);color:var(--ink3)}
+  .adj{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+  .adj .btn.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .contra textarea{width:100%;margin-top:6px;font-size:11.5px;border:1px solid var(--line);border-radius:6px;padding:6px;resize:vertical;min-height:34px;font-family:var(--sans)}
+  .contra.resolved{border-color:#9ed8ba;background:var(--green-bg)}
+  .contra.resolved .warn{color:var(--green)}
+
+  /* timeline dock */
+  .dock{background:var(--surface);border-top:1px solid var(--line);padding:10px 16px 12px}
+  .dock h2{margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:.7px;color:var(--ink2);text-transform:uppercase}
+  .tl{position:relative;height:74px;margin:0 8px}
+  .tl .axis{position:absolute;left:0;right:0;top:38px;height:2px;background:var(--line2)}
+  .tl .mk{position:absolute;top:24px;transform:translateX(-50%);text-align:center}
+  .tl .mk .dot{width:11px;height:11px;border-radius:50%;margin:0 auto;border:2px solid #fff;box-shadow:0 0 0 1px var(--line2)}
+  .tl .mk .lab{font-size:10px;color:var(--ink2);margin-top:4px;white-space:nowrap}
+  .tl .mk .wk{font-size:9px;color:var(--ink3);font-family:var(--mono)}
+  .tl .mk.event .dot{background:var(--red)} .tl .mk.ptsd .dot{background:var(--blue)}
+  .tl .mk.f .dot{background:var(--accent)} .tl .mk.thr .dot{background:var(--green)}
+
+  /* synthesis */
+  .synth{flex:1;min-height:0;overflow-y:auto;padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-content:start}
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px}
+  .panel h3{margin:0 0 10px;font-size:11px;font-weight:700;letter-spacing:.6px;color:var(--ink2);text-transform:uppercase}
+  .panel.wide{grid-column:1 / -1}
+  .kv{font-size:12.5px;padding:3px 0;display:flex;gap:8px}
+  .kv .k{color:var(--ink3);min-width:130px}
+  .dxline{display:flex;align-items:center;gap:10px;margin-bottom:7px;font-size:13px}
+  .dxline .nm{min-width:130px;font-weight:600}
+
+  /* causation canvas */
+  .canvas{position:relative;height:300px;border:1px dashed var(--line2);border-radius:8px;background:
+    radial-gradient(var(--line) 1px, transparent 1px);background-size:18px 18px;overflow:hidden}
+  .node{position:absolute;padding:8px 12px;border-radius:9px;font-size:12.5px;font-weight:600;cursor:grab;
+    user-select:none;border:1.5px solid;background:#fff;box-shadow:var(--shadow);z-index:2}
+  .node.event{border-color:var(--red);color:var(--red);background:var(--red-bg)}
+  .node.dx{border-color:var(--accent);color:var(--accent);background:var(--accent-bg)}
+  .node.sel{outline:3px solid var(--accent);outline-offset:2px}
+  .canvas svg{position:absolute;inset:0;z-index:1;pointer-events:none;width:100%;height:100%}
+  .edge-controls{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+  .edge-controls select{font-size:12px;padding:4px 6px;border:1px solid var(--line2);border-radius:6px;background:#fff}
+  .edgelabel{font-size:10px;font-family:var(--sans)}
+
+  /* apportionment */
+  .appt{margin-bottom:16px}
+  .appt .nm{font-weight:600;font-size:13px;margin-bottom:6px}
+  .appt .sl{display:grid;grid-template-columns:96px 1fr 42px;gap:8px;align-items:center;margin-bottom:5px;font-size:12px}
+  .appt input[type=range]{width:100%}
+  .stack{height:14px;border-radius:7px;overflow:hidden;display:flex;margin-top:6px;border:1px solid var(--line)}
+  .stack .s-injury{background:var(--red)} .stack .s-pre{background:var(--amber)} .stack .s-other{background:var(--ink3)}
+  .appt .total{font-size:11px;color:var(--ink3);margin-top:4px}
+
+  /* readiness */
+  .ready-item{margin-bottom:9px}
+  .ready-item .rl{display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px}
+  .ready-overall .bar{height:12px}
+
+  /* modal */
+  .overlay{position:fixed;inset:0;background:rgba(22,27,39,.45);display:none;align-items:center;justify-content:center;z-index:50}
+  .overlay.open{display:flex}
+  .modal{background:#fff;border-radius:14px;width:min(560px,94vw);max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  .modal-h{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff}
+  .modal-h h3{margin:0;font-size:15px}
+  .modal-b{padding:16px 18px}
+  .field{margin-bottom:12px}
+  .field label{display:block;font-size:11px;font-weight:600;color:var(--ink2);margin-bottom:4px;letter-spacing:.3px}
+  .field input,.field select{width:100%;font-size:13px;padding:7px 9px;border:1px solid var(--line2);border-radius:7px;background:#fff;font-family:var(--sans)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .versions{border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-top:6px}
+  .ver{display:flex;gap:10px;font-size:11.5px;padding:6px 10px;border-bottom:1px solid var(--line);background:var(--surface2)}
+  .ver:last-child{border-bottom:0}
+  .ver .vn{font-family:var(--mono);font-weight:700;color:var(--accent)}
+  .ver .vc{color:var(--ink2)}
+  .course{font-size:12px;display:flex;align-items:center;gap:8px;padding:4px 0}
+  .course .arrow{color:var(--ink3)}
+  @media (max-width:1120px){
+    .workspace{grid-template-columns:1fr;overflow-y:auto}
+    .col{min-height:240px}
+    .synth{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="brand">Case Workspace</span>
+  <span class="tag">experimental prototype · not MedicoApp</span>
+  <div class="tabs">
+    <button class="tab active" data-tab="workspace">Workspace</button>
+    <button class="tab" data-tab="synthesis">Case Synthesis</button>
+  </div>
+  <span class="spacer"></span>
+  <span class="hint"><span class="kbd">⌘K</span> capture <span class="kbd">A</span>/<span class="kbd">R</span>/<span class="kbd">E</span> accept·reject·edit <span class="kbd">⌘S</span> synthesis</span>
+</div>
+
+<!-- WORKSPACE VIEW -->
+<div class="view active" id="view-workspace">
+  <div class="workspace">
+
+    <!-- LEFT: narrative stream -->
+    <section class="col">
+      <div class="col-h"><h2>Interview Narrative</h2><span class="pill muted" id="narr-count">0</span></div>
+      <div class="col-body" id="narr-stream">
+        <p class="muted" style="font-size:12px">Capture narrative fragments in the centre. They appear here chronologically; click one to see the findings it produced.</p>
+      </div>
+    </section>
+
+    <!-- CENTRE: capture + findings -->
+    <section class="col">
+      <div class="capture-wrap">
+        <div class="omnibox">
+          <span class="cmd">⌘</span>
+          <input id="capture" placeholder="Capture… e.g. nightmares since injury" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="examples" id="examples"></div>
+      </div>
+      <div class="col-body">
+        <div class="section-label">Proposed findings <span class="count" id="prop-count">0</span></div>
+        <div id="proposed"><p class="muted" style="font-size:12px">Findings the system extracts from your narrative appear here. Accept, reject, or edit each.</p></div>
+        <div class="section-label">Accepted findings <span class="count" id="acc-count">0</span></div>
+        <div id="accepted"><p class="muted" style="font-size:12px">Confirmed findings collect here and feed the hypotheses, coverage and timeline.</p></div>
+      </div>
+    </section>
+
+    <!-- RIGHT: hypotheses + coverage + contradictions -->
+    <section class="col">
+      <div class="col-h"><h2>Working Hypotheses</h2></div>
+      <div class="col-body">
+        <div id="hypotheses"></div>
+        <div class="section-label">Missing information</div>
+        <div id="coverage"></div>
+        <div class="section-label">Contradictions <span class="count" id="contra-count">0</span></div>
+        <div style="margin-bottom:8px"><button class="btn" id="import-gp">⤓ Import GP record</button></div>
+        <div id="contradictions"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- BOTTOM DOCK: timeline preview -->
+  <div class="dock">
+    <h2>Timeline preview <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0">— accepted findings feed a timeline automatically</span></h2>
+    <div class="tl" id="timeline"></div>
+  </div>
+</div>
+
+<!-- SYNTHESIS VIEW -->
+<div class="view" id="view-synthesis">
+  <div class="synth" id="synth"></div>
+</div>
+
+<!-- INSPECTOR MODAL -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-h"><h3 id="insp-title">Finding</h3><button class="xbtn" id="insp-close" style="font-size:18px">✕</button></div>
+    <div class="modal-b" id="insp-body"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ───────────────────────── state ───────────────────────── */
+let uid=1; const nid=()=>uid++;
+const S = {
+  narratives:[],          // {id, text, ts, findingIds:[]}
+  findings:[],            // {id, label, dx, source, status, severity, frequency, duration, onset, attribution, confidence, versions:[], course:[], onsetWeeks}
+  contradictions:[],      // {id, prop, gp, patient, status, rationale}
+  causation:{ nodes:[], edges:[] },
+  apportionment:{},       // dx -> {injury,pre,other}
+  selNarr:null,
+};
+
+/* ───────────────────────── lexicon ───────────────────────── */
+const LEX=[
+  {re:/\b(low mood|depressed|depression|feeling down|flat)\b/i, label:"Low mood", dx:"MDD"},
+  {re:/\b(hopeless|no future|pointless)\b/i, label:"Hopelessness", dx:"MDD"},
+  {re:/\b(guilt|guilty|worthless|burden)\b/i, label:"Guilt / worthlessness", dx:"MDD"},
+  {re:/\b(anhedonia|no interest|lost interest|no enjoyment|nothing is fun)\b/i, label:"Anhedonia", dx:"MDD"},
+  {re:/\b(nightmare|nightmares|bad dreams)\b/i, label:"Nightmares", dx:"PTSD"},
+  {re:/\b(flashback|flashbacks|reliving|intrusive)\b/i, label:"Flashbacks", dx:"PTSD"},
+  {re:/\b(avoid|avoidance|won'?t drive|can'?t go near)\b/i, label:"Avoidance", dx:"PTSD"},
+  {re:/\b(hypervigil|on edge|on guard|startle|jumpy)\b/i, label:"Hypervigilance", dx:"PTSD"},
+  {re:/\b(drink|drinking|alcohol|relapse|booze)\b/i, label:"Alcohol use", dx:"AUD"},
+  {re:/\b(lost job|lost my job|stopped working|off work|unable to work|sacked|let go)\b/i, label:"Lost job / not working", dx:"FUNCTION"},
+  {re:/\b(social withdrawal|stopped seeing friends|withdrawn|isolat|no friends)\b/i, label:"Social withdrawal", dx:"FUNCTION"},
+  {re:/\b(insomnia|poor sleep|couldn'?t sleep|can'?t sleep|not sleeping|trouble sleeping|broken sleep)\b/i, label:"Sleep disturbance", dx:"SLEEP"},
+];
+const DXNAME={PTSD:"PTSD",MDD:"Depression (MDD)",AUD:"Alcohol use",FUNCTION:"Functional",SLEEP:"Sleep"};
+
+function extractModifiers(t){
+  const m={};
+  const sev=/\b(severe|moderate|mild)\b/i.exec(t); if(sev) m.severity=sev[1].toLowerCase();
+  const freq=/\b(nightly|daily|weekly|fortnightly|constant|most days|occasional(?:ly)?|intermittent)\b/i.exec(t); if(freq) m.frequency=freq[1].toLowerCase();
+  if(/since (the )?injury|after (the )?injury|post.?injury|after the accident/i.test(t)){ m.onset="post-injury"; m.onsetWeeks=0; m.attribution="injury"; }
+  const wk=/\+?\s*(\d+)\s*(?:wk|week|weeks)\b/i.exec(t); if(wk){ m.onset="+"+wk[1]+" week"+(wk[1]==1?"":"s"); m.onsetWeeks=+wk[1]; }
+  const mo=/\+?\s*(\d+)\s*(?:mo|month|months)\b/i.exec(t); if(mo){ m.onset="+"+mo[1]+" month"+(mo[1]==1?"":"s"); m.onsetWeeks=+mo[1]*4.3; }
+  const dur=/\bfor\s+(\d+\s*(?:days?|weeks?|months?|years?))\b/i.exec(t); if(dur) m.duration=dur[1];
+  const durBare=/\b(\d+\s*(?:wk|weeks?|months?))\b/i.exec(t); if(!m.duration && durBare) m.duration=durBare[1];
+  if(/\bagain\b|\brelapse/i.test(t)) m.note="recurrence";
+  return m;
+}
+
+/* ───────────────────────── capture + extraction ───────────────────────── */
+function submitCapture(){
+  const inp=document.getElementById("capture");
+  const text=inp.value.trim(); if(!text) return;
+  const n={id:nid(), text, ts:new Date(), findingIds:[]};
+  S.narratives.unshift(n);
+  const mods=extractModifiers(text);
+  const seen=new Set();
+  LEX.forEach(l=>{
+    if(l.re.test(text) && !seen.has(l.label)){
+      seen.add(l.label);
+      // skip if already accepted with same label
+      if(S.findings.some(f=>f.label===l.label && f.status==="accepted")) return;
+      // skip if an identical proposed finding already exists
+      if(S.findings.some(f=>f.label===l.label && f.status==="proposed")) return;
+      const f={id:nid(), label:l.label, dx:l.dx, source:n.id, status:"proposed",
+        severity:mods.severity||"", frequency:mods.frequency||"", duration:mods.duration||"",
+        onset:mods.onset||"", onsetWeeks:(mods.onsetWeeks!=null?mods.onsetWeeks:null),
+        attribution:mods.attribution||"", confidence:"probable", versions:[], course:[]};
+      S.findings.push(f);
+      n.findingIds.push(f.id);
+    }
+  });
+  inp.value="";
+  refresh();
+  // focus first proposed card for keyboard flow
+  setTimeout(()=>{ const c=document.querySelector('.fcard.proposed'); if(c) c.focus(); },30);
+}
+
+function acceptFinding(id){
+  const f=S.findings.find(x=>x.id===id); if(!f||f.status!=="accepted"){ if(f){ f.status="accepted"; if(!f.versions.length) snapshot(f,"initial"); } }
+  refresh();
+}
+function rejectFinding(id){
+  const f=S.findings.find(x=>x.id===id); if(f) f.status="rejected";
+  refresh();
+}
+function snapshot(f,changeNote){
+  f.versions.push({v:f.versions.length+1, ts:new Date(), note:changeNote||"edit",
+    fields:{severity:f.severity,frequency:f.frequency,duration:f.duration,onset:f.onset,attribution:f.attribution,confidence:f.confidence}});
+}
+
+/* ───────────────────────── render: narratives ───────────────────────── */
+function fmtTime(d){ return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+function renderNarratives(){
+  const el=document.getElementById("narr-stream");
+  document.getElementById("narr-count").textContent=S.narratives.length;
+  if(!S.narratives.length){ return; }
+  el.innerHTML=S.narratives.map(n=>{
+    const fs=n.findingIds.map(fid=>S.findings.find(f=>f.id===fid)).filter(Boolean);
+    const chips=fs.map(f=>`<span class="tagchip">${f.label}</span>`).join("");
+    const sel=S.selNarr===n.id?"sel":"";
+    return `<div class="ncard ${sel}" data-narr="${n.id}">
+      <div class="ts">#${n.id} · ${fmtTime(n.ts)} <button class="xbtn" data-del-narr="${n.id}" title="delete">🗑</button></div>
+      <div class="txt">${escapeHtml(n.text)}</div>
+      ${chips?`<div class="ex"><span class="muted" style="font-size:10px">extracted:</span>${chips}</div>`:`<div class="ex"><span class="muted" style="font-size:10px">no findings extracted</span></div>`}
+    </div>`;
+  }).join("");
+}
+
+/* ───────────────────────── render: findings ───────────────────────── */
+function fMeta(f){
+  const bits=[];
+  if(f.onset) bits.push(`<span>Onset <b>${f.onset}</b></span>`);
+  if(f.frequency) bits.push(`<span>Freq <b>${f.frequency}</b></span>`);
+  if(f.severity) bits.push(`<span>Severity <b>${f.severity}</b></span>`);
+  if(f.duration) bits.push(`<span>Duration <b>${f.duration}</b></span>`);
+  if(f.attribution) bits.push(`<span>Attribution <b>${f.attribution}</b></span>`);
+  return bits.join("");
+}
+function renderProposed(){
+  const props=S.findings.filter(f=>f.status==="proposed");
+  document.getElementById("prop-count").textContent=props.length;
+  const el=document.getElementById("proposed");
+  if(!props.length){ el.innerHTML=`<p class="muted" style="font-size:12px">Findings the system extracts from your narrative appear here. Accept, reject, or edit each.</p>`; return; }
+  el.innerHTML=props.map(f=>`
+    <div class="fcard proposed" tabindex="0" data-fid="${f.id}">
+      <div class="row1"><span class="lab">${f.label}</span>
+        <span class="dxtag dx-${f.dx}">${DXNAME[f.dx]||f.dx}</span>
+        <span class="src">narrative #${f.source}</span></div>
+      ${fMeta(f)?`<div class="meta">${fMeta(f)}</div>`:`<div class="meta muted">no modifiers detected — accept then edit to add detail</div>`}
+      <div class="acts">
+        <button class="btn acc" data-act="accept" data-fid="${f.id}">Accept<span class="k">A</span></button>
+        <button class="btn rej" data-act="reject" data-fid="${f.id}">Reject<span class="k">R</span></button>
+        <button class="btn" data-act="edit" data-fid="${f.id}">Edit<span class="k">E</span></button>
+      </div>
+    </div>`).join("");
+}
+function renderAccepted(){
+  const acc=S.findings.filter(f=>f.status==="accepted");
+  document.getElementById("acc-count").textContent=acc.length;
+  const el=document.getElementById("accepted");
+  if(!acc.length){ el.innerHTML=`<p class="muted" style="font-size:12px">Confirmed findings collect here and feed the hypotheses, coverage and timeline.</p>`; return; }
+  el.innerHTML=acc.map(f=>`
+    <div class="fcard" data-fid="${f.id}">
+      <div class="row1"><span class="lab">${f.label}</span>
+        <span class="dxtag dx-${f.dx}">${DXNAME[f.dx]||f.dx}</span>
+        ${f.versions.length>1?`<span class="src">v${f.versions.length}</span>`:`<span class="src">v1</span>`}</div>
+      <div class="meta">${fMeta(f)||'<span class="muted">no detail yet</span>'}</div>
+      ${f.course.length?`<div class="meta" style="color:var(--ink3)">course: ${f.course.map(c=>`${c.from} → ${c.to}`).join(" · ")}</div>`:""}
+      <div class="acts"><button class="btn" data-act="edit" data-fid="${f.id}">Edit / evolve</button></div>
+    </div>`).join("");
+}
+
+/* ───────────────────────── render: hypotheses + coverage ───────────────────────── */
+const WEIGHTS={
+  "Nightmares":{PTSD:22},"Flashbacks":{PTSD:22},"Avoidance":{PTSD:16},"Hypervigilance":{PTSD:16},
+  "Low mood":{MDD:22},"Anhedonia":{MDD:22},"Hopelessness":{MDD:16},"Guilt / worthlessness":{MDD:16},
+  "Alcohol use":{AUD:34},"Sleep disturbance":{PTSD:8,MDD:8},
+};
+function scores(){
+  const s={PTSD:0,MDD:0,AUD:0};
+  S.findings.filter(f=>f.status==="accepted").forEach(f=>{
+    const w=WEIGHTS[f.label]; if(w) for(const k in w) s[k]=(s[k]||0)+w[k];
+  });
+  for(const k in s) s[k]=Math.min(100,s[k]);
+  return s;
+}
+function renderHypotheses(){
+  const s=scores();
+  const order=[["PTSD","PTSD"],["MDD","MDD"],["AUD","Alcohol use disorder"]];
+  document.getElementById("hypotheses").innerHTML=order.map(([k,nm])=>`
+    <div class="hyp"><div class="hl"><b>${nm}</b><span class="muted">${s[k]||0}%</span></div>
+      <div class="bar ${k}"><span style="width:${s[k]||0}%"></span></div></div>`).join("");
+}
+const COVERAGE={
+  PTSD:[["Nightmares","Nightmares"],["Flashbacks","Flashbacks"],["Avoidance","Avoidance"],["Hypervigilance","Hypervigilance"],["__dur","Duration / 1mo+"]],
+  MDD:[["Low mood","Low mood"],["Anhedonia","Anhedonia"],["Guilt / worthlessness","Guilt"],["Hopelessness","Hopelessness"],["__dur","Duration / 2wk+"]],
+};
+function coverageState(){
+  const acc=S.findings.filter(f=>f.status==="accepted");
+  const has=lab=>acc.some(f=>f.label===lab);
+  const hasDur=dx=>acc.some(f=>f.dx===dx && f.duration);
+  const out={};
+  for(const dx in COVERAGE){
+    out[dx]=COVERAGE[dx].map(([key,lab])=>({lab, done: key==="__dur"?hasDur(dx):has(key)}));
+  }
+  return out;
+}
+function renderCoverage(){
+  const cov=coverageState();
+  document.getElementById("coverage").innerHTML=Object.keys(cov).map(dx=>`
+    <div class="cov-dx"><h4>${dx} <span class="muted" style="font-weight:400">${cov[dx].filter(i=>i.done).length}/${cov[dx].length}</span></h4>
+      ${cov[dx].map(i=>`<div class="cov-item ${i.done?'done':''}"><span class="cov-box">${i.done?'✓':''}</span>${i.lab}</div>`).join("")}
+    </div>`).join("");
+}
+
+/* ───────────────────────── contradictions ───────────────────────── */
+function importGP(){
+  // does the narrative contain a denial of prior depression?
+  const denial=S.narratives.find(n=>/no (previous|prior|past) depression|never (been )?depressed|well before|no psychiatric history/i.test(n.text));
+  const prop="History of depression before the index injury";
+  if(S.contradictions.some(c=>c.prop===prop)) return;
+  S.contradictions.push({
+    id:nid(), prop,
+    gp:{who:"GP records (2014)", text:"Treated for depression age 23 — fluoxetine 6 months."},
+    patient:{who: denial?`Claimant (narrative #${denial.id})`:"Claimant (assumed position)",
+             text: denial?denial.text:"“No previous depression”"},
+    status:null, rationale:""
+  });
+  refresh();
+}
+function renderContradictions(){
+  document.getElementById("contra-count").textContent=S.contradictions.length;
+  const el=document.getElementById("contradictions");
+  if(!S.contradictions.length){ el.innerHTML=`<p class="muted" style="font-size:12px">None. Import a GP record to simulate a conflict with the claimant's account.</p>`; return; }
+  el.innerHTML=S.contradictions.map(c=>{
+    const resolved=c.status&&c.status!=="unresolved";
+    const opt=(v,l)=>`<button class="btn sm ${c.status===v?'on':''}" data-adj="${v}" data-cid="${c.id}">${l}</button>`;
+    return `<div class="contra ${resolved?'resolved':''}">
+      <div class="warn">${resolved?'✓ adjudicated':'⚠ contradiction'} — ${c.prop}</div>
+      <div class="claim"><div class="who">${c.gp.who}</div>${escapeHtml(c.gp.text)}</div>
+      <div class="claim"><div class="who">${c.patient.who}</div>${escapeHtml(c.patient.text)}</div>
+      <div class="adj">${opt("gp","Accept GP")}${opt("patient","Accept claimant")}${opt("both","Weight both")}${opt("unresolved","Unresolved")}</div>
+      <textarea data-rat="${c.id}" placeholder="Rationale (e.g. contemporaneous records preferred to retrospective recall)…">${escapeHtml(c.rationale)}</textarea>
+    </div>`;
+  }).join("");
+}
+
+/* ───────────────────────── timeline preview ───────────────────────── */
+function renderTimeline(){
+  const el=document.getElementById("timeline");
+  const acc=S.findings.filter(f=>f.status==="accepted" && f.onsetWeeks!=null);
+  const ptsd=scores().PTSD;
+  const marks=[{cls:"event",lab:"Injury",wk:0}];
+  acc.forEach(f=>marks.push({cls:"f",lab:f.label,wk:f.onsetWeeks}));
+  if(ptsd>=60) marks.push({cls:"thr",lab:"PTSD threshold",wk:3});
+  const maxWk=Math.max(8, ...marks.map(m=>m.wk));
+  el.innerHTML=`<div class="axis"></div>`+marks
+    .sort((a,b)=>a.wk-b.wk)
+    .map(m=>{
+      const left=6+(m.wk/maxWk)*88;
+      return `<div class="mk ${m.cls}" style="left:${left}%"><div class="dot"></div>
+        <div class="lab">${m.lab}</div><div class="wk">${m.wk===0?'index':'+'+(Math.round(m.wk*10)/10)+'wk'}</div></div>`;
+    }).join("");
+}
+
+/* ───────────────────────── readiness ───────────────────────── */
+function readiness(){
+  const cov=coverageState();
+  const covItems=Object.values(cov).flat();
+  const coverage=Math.round(100*covItems.filter(i=>i.done).length/covItems.length);
+  const contra= S.contradictions.length? Math.round(100*S.contradictions.filter(c=>c.status&&c.status!=="unresolved").length/S.contradictions.length):100;
+  const s=scores(); const diag=Math.min(100, Math.round((Object.values(s).filter(v=>v>=50).length)*50));
+  const apptDone=Object.keys(S.apportionment).length>0?50:0;
+  const opinions=Math.min(100,(S.causation.edges.length?50:0)+apptDone);
+  const overall=Math.round((coverage+contra+diag+opinions)/4);
+  return {coverage,contra,diag,opinions,overall};
+}
+
+/* ───────────────────────── synthesis ───────────────────────── */
+function renderSynthesis(){
+  const acc=S.findings.filter(f=>f.status==="accepted");
+  const s=scores(); const r=readiness();
+  const dxRows=[["PTSD",s.PTSD],["MDD",s.MDD],["AUD",s.AUD]].map(([k,v])=>{
+    const status=v>=70?"likely":v>=50?"probable":v>=25?"possible":"insufficient";
+    return `<div class="dxline"><span class="nm">${DXNAME[k]}</span>
+      <span class="bar ${k}" style="flex:1"><span style="width:${v}%"></span></span>
+      <span class="muted" style="min-width:90px">${v}% · ${status}</span></div>`;
+  }).join("");
+  const keyF=acc.length?acc.map(f=>`<div class="kv"><span class="k">${DXNAME[f.dx]||f.dx}</span><span>${f.label}${f.onset?` (${f.onset})`:''}${f.severity?` · ${f.severity}`:''}</span></div>`).join(""):`<p class="muted">No accepted findings yet.</p>`;
+  const contraS=S.contradictions.length?S.contradictions.map(c=>`<div class="kv"><span class="k">${c.status&&c.status!=='unresolved'?'✓ resolved':'⚠ open'}</span><span>${c.prop} — ${c.status?adjLabel(c.status):'awaiting adjudication'}</span></div>`).join(""):`<p class="muted">None.</p>`;
+
+  document.getElementById("synth").innerHTML=`
+    <div class="panel"><h3>Key findings</h3>${keyF}</div>
+    <div class="panel"><h3>Current diagnoses</h3>${dxRows}</div>
+    <div class="panel"><h3>Contradictions</h3>${contraS}</div>
+    <div class="panel ready-overall"><h3>Case readiness</h3>
+      ${readyBar("Coverage",r.coverage)}${readyBar("Contradictions",r.contra)}${readyBar("Diagnoses",r.diag)}${readyBar("Opinions",r.opinions)}
+      <div class="ready-item" style="margin-top:10px"><div class="rl"><b>Overall</b><b>${r.overall}%</b></div><div class="bar MDD"><span style="width:${r.overall}%"></span></div></div>
+    </div>
+    <div class="panel wide"><h3>Causation canvas</h3>
+      <div class="edge-controls">
+        <span class="muted" style="font-size:11.5px">Click a node, then another, to link them as:</span>
+        <select id="edge-type">
+          <option value="material">Material contribution</option>
+          <option value="necessary">Necessary cause</option>
+          <option value="aggravating">Aggravating factor</option>
+        </select>
+        <button class="btn sm" id="clear-edges">Clear links</button>
+        <span class="muted" style="font-size:11px">drag nodes to reposition</span>
+      </div>
+      <div class="canvas" id="canvas"><svg id="edges"></svg></div>
+    </div>
+    <div class="panel wide"><h3>Apportionment</h3><div id="appt"></div></div>
+    <div class="panel wide"><h3>Prognosis</h3>
+      <div class="grid2">
+        <div class="field"><label>Most likely trajectory</label>
+          <select id="prog-traj"><option>Gradual improvement with treatment</option><option>Partial recovery, residual symptoms</option><option>Chronic course likely</option><option>Guarded / poor prognosis</option></select></div>
+        <div class="field"><label>Time to maximal medical improvement</label>
+          <select id="prog-mmi"><option>6–12 months</option><option>12–24 months</option><option>2–3 years</option><option>Reached / static</option></select></div>
+      </div>
+      <div class="field"><label>Basis</label><input id="prog-basis" placeholder="e.g. response to SSRI + EMDR; pre-injury well interval; chronicity of pain" /></div>
+    </div>`;
+
+  ensureCausationSeed();
+  renderCanvas();
+  renderApportionment();
+}
+function adjLabel(v){return {gp:"accepted GP records",patient:"accepted claimant",both:"weighted both",unresolved:"unresolved"}[v]||v;}
+function readyBar(lab,v){return `<div class="ready-item"><div class="rl"><span>${lab}</span><span class="muted">${v}%</span></div><div class="bar PTSD"><span style="width:${v}%"></span></div></div>`;}
+
+/* ── causation ── */
+function ensureCausationSeed(){
+  if(S.causation.nodes.length) return;
+  S.causation.nodes=[
+    {id:"injury",label:"Index injury",type:"event",x:40,y:30},
+    {id:"pain",label:"Chronic pain",type:"event",x:40,y:150},
+    {id:"ptsd",label:"PTSD",type:"dx",x:300,y:25},
+    {id:"mdd",label:"Depression",type:"dx",x:300,y:115},
+    {id:"aud",label:"Alcohol relapse",type:"dx",x:300,y:210},
+  ];
+  S.causation.edges=[
+    {from:"injury",to:"ptsd",type:"necessary"},
+    {from:"injury",to:"mdd",type:"material"},
+    {from:"pain",to:"aud",type:"material"},
+  ];
+}
+const EDGECOL={material:"#5b4ad6",necessary:"#2563a8",aggravating:"#b9770e"};
+const EDGELAB={material:"material",necessary:"necessary",aggravating:"aggravating"};
+let edgeSel=null;
+function renderCanvas(){
+  const cv=document.getElementById("canvas"); if(!cv) return;
+  // nodes
+  cv.querySelectorAll(".node").forEach(n=>n.remove());
+  S.causation.nodes.forEach(n=>{
+    const d=document.createElement("div");
+    d.className=`node ${n.type}${edgeSel===n.id?' sel':''}`;
+    d.style.left=n.x+"px"; d.style.top=n.y+"px"; d.textContent=n.label; d.dataset.node=n.id;
+    cv.appendChild(d);
+    makeDraggable(d,n);
+  });
+  drawEdges();
+}
+function drawEdges(){
+  const svg=document.getElementById("edges"); if(!svg) return;
+  const cv=document.getElementById("canvas");
+  const cb=cv.getBoundingClientRect();
+  function center(id){const el=cv.querySelector(`[data-node="${id}"]`);const b=el.getBoundingClientRect();return {x:b.left-cb.left+b.width/2,y:b.top-cb.top+b.height/2};}
+  svg.innerHTML=`<defs>${Object.keys(EDGECOL).map(k=>`<marker id="ar-${k}" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="${EDGECOL[k]}"/></marker>`).join("")}</defs>`+
+    S.causation.edges.map((e,i)=>{
+      const a=center(e.from),b=center(e.to);
+      const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
+      return `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${EDGECOL[e.type]}" stroke-width="2" marker-end="url(#ar-${e.type})"/>
+        <rect x="${mx-30}" y="${my-9}" width="60" height="16" rx="8" fill="#fff" stroke="${EDGECOL[e.type]}" opacity="0.95" style="cursor:pointer;pointer-events:all" data-edge="${i}"></rect>
+        <text x="${mx}" y="${my+3}" text-anchor="middle" class="edgelabel" fill="${EDGECOL[e.type]}" style="pointer-events:none">${EDGELAB[e.type]}</text>`;
+    }).join("");
+  svg.querySelectorAll("[data-edge]").forEach(r=>r.addEventListener("click",ev=>{
+    const i=+r.dataset.edge; S.causation.edges.splice(i,1); drawEdges(); renderReadinessLive();
+  }));
+}
+function makeDraggable(el,n){
+  el.addEventListener("pointerdown",e=>{
+    if(e.button!==0) return;
+    const cv=document.getElementById("canvas"); const cb=cv.getBoundingClientRect();
+    let moved=false; const ox=e.clientX-n.x, oy=e.clientY-n.y;
+    el.setPointerCapture(e.pointerId); el.style.cursor="grabbing";
+    function mv(ev){ moved=true; n.x=Math.max(0,Math.min(cb.width-el.offsetWidth, ev.clientX-ox)); n.y=Math.max(0,Math.min(cb.height-el.offsetHeight, ev.clientY-oy)); el.style.left=n.x+"px"; el.style.top=n.y+"px"; drawEdges(); }
+    function up(ev){ el.releasePointerCapture(e.pointerId); el.style.cursor="grab"; el.removeEventListener("pointermove",mv); el.removeEventListener("pointerup",up);
+      if(!moved) clickNode(n.id); }
+    el.addEventListener("pointermove",mv); el.addEventListener("pointerup",up);
+  });
+}
+function clickNode(id){
+  if(edgeSel===null){ edgeSel=id; }
+  else if(edgeSel===id){ edgeSel=null; }
+  else {
+    const type=document.getElementById("edge-type").value;
+    if(!S.causation.edges.some(e=>e.from===edgeSel&&e.to===id)) S.causation.edges.push({from:edgeSel,to:id,type});
+    edgeSel=null; renderReadinessLive();
+  }
+  renderCanvas();
+}
+
+/* ── apportionment ── */
+function renderApportionment(){
+  const el=document.getElementById("appt"); if(!el) return;
+  const dxs=["PTSD","Depression (MDD)","Alcohol use"];
+  dxs.forEach(d=>{ if(!S.apportionment[d]) S.apportionment[d]={injury:70,pre:20,other:10}; });
+  el.innerHTML=dxs.map(d=>{
+    const a=S.apportionment[d];
+    const row=(key,lab)=>`<div class="sl"><span>${lab}</span><input type="range" min="0" max="100" step="5" value="${a[key]}" data-appt="${d}" data-key="${key}"><span style="text-align:right" data-val="${d}-${key}">${a[key]}%</span></div>`;
+    return `<div class="appt" data-dx="${d}"><div class="nm">${d}</div>
+      ${row("injury","Injury")}${row("pre","Pre-existing")}${row("other","Other")}
+      <div class="stack"><div class="s-injury" style="width:${a.injury}%"></div><div class="s-pre" style="width:${a.pre}%"></div><div class="s-other" style="width:${a.other}%"></div></div>
+      <div class="total" data-total="${d}">total ${a.injury+a.pre+a.other}%</div></div>`;
+  }).join("");
+}
+function adjustAppt(d,key,val){
+  const a=S.apportionment[d]; const others=["injury","pre","other"].filter(k=>k!==key);
+  val=Math.max(0,Math.min(100,val)); a[key]=val;
+  let rem=100-val; const sumOther=others.reduce((s,k)=>s+a[k],0);
+  if(sumOther===0){ a[others[0]]=Math.round(rem/2/5)*5; a[others[1]]=rem-a[others[0]]; }
+  else { let r0=Math.round(rem*(a[others[0]]/sumOther)/5)*5; a[others[0]]=r0; a[others[1]]=rem-r0; }
+  // reflect in DOM without full re-render
+  const wrap=document.querySelector(`.appt[data-dx="${d}"]`); if(!wrap) return;
+  ["injury","pre","other"].forEach(k=>{
+    wrap.querySelector(`[data-val="${d}-${k}"]`).textContent=a[k]+"%";
+    const inp=wrap.querySelector(`input[data-key="${k}"]`); if(inp&&inp.dataset.key!==key) inp.value=a[k];
+  });
+  wrap.querySelector(".s-injury").style.width=a.injury+"%";
+  wrap.querySelector(".s-pre").style.width=a.pre+"%";
+  wrap.querySelector(".s-other").style.width=a.other+"%";
+  wrap.querySelector(`[data-total="${d}"]`).textContent="total "+(a.injury+a.pre+a.other)+"%";
+}
+function renderReadinessLive(){ if(document.getElementById("view-synthesis").classList.contains("active")) { /* readiness recompute */ const r=readiness();
+  // light update of readiness panel if present
+  } }
+
+/* ───────────────────────── inspector ───────────────────────── */
+let inspId=null;
+function openInspector(id){
+  const f=S.findings.find(x=>x.id===id); if(!f) return;
+  inspId=id;
+  document.getElementById("insp-title").textContent=f.label+"  ·  "+(DXNAME[f.dx]||f.dx);
+  const sevOpt=["","mild","moderate","severe"].map(o=>`<option ${f.severity===o?'selected':''}>${o}</option>`).join("");
+  const conf=["possible","probable","certain"].map(o=>`<option ${f.confidence===o?'selected':''}>${o}</option>`).join("");
+  const attr=["","injury","pre-existing","other / competing","treatment side-effect"].map(o=>`<option ${f.attribution===o?'selected':''}>${o}</option>`).join("");
+  document.getElementById("insp-body").innerHTML=`
+    <div class="grid2">
+      <div class="field"><label>Symptom</label><input id="i-label" value="${escapeAttr(f.label)}"></div>
+      <div class="field"><label>Severity</label><select id="i-sev">${sevOpt}</select></div>
+      <div class="field"><label>Frequency</label><input id="i-freq" value="${escapeAttr(f.frequency)}" placeholder="nightly / most days…"></div>
+      <div class="field"><label>Duration</label><input id="i-dur" value="${escapeAttr(f.duration)}" placeholder="3 weeks…"></div>
+      <div class="field"><label>Onset</label><input id="i-onset" value="${escapeAttr(f.onset)}" placeholder="+1 week post-injury"></div>
+      <div class="field"><label>Onset (weeks post-injury, for timeline)</label><input id="i-wk" type="number" step="0.5" value="${f.onsetWeeks!=null?f.onsetWeeks:''}"></div>
+      <div class="field"><label>Attribution</label><select id="i-attr">${attr}</select></div>
+      <div class="field"><label>Confidence</label><select id="i-conf">${conf}</select></div>
+    </div>
+    <div style="display:flex;gap:8px;margin:4px 0 14px">
+      <button class="btn prim" id="i-save">Save changes</button>
+      <button class="btn" id="i-saverev">Save as new version (v${f.versions.length+1})</button>
+    </div>
+
+    <div class="field"><label>Course change (symptom evolution — does not overwrite)</label>
+      <div class="grid2"><input id="i-cfrom" placeholder="from e.g. nightly"><input id="i-cto" placeholder="to e.g. fortnightly"></div>
+      <button class="btn sm" id="i-addcourse" style="margin-top:6px">+ Add course change</button>
+    </div>
+    ${f.course.length?`<div style="margin-bottom:12px">${f.course.map(c=>`<div class="course"><b>${escapeHtml(c.from)}</b><span class="arrow">↓</span><b>${escapeHtml(c.to)}</b><span class="muted" style="font-size:10px">${fmtTime(new Date(c.ts))}</span></div>`).join("")}</div>`:""}
+
+    <label style="font-size:11px;font-weight:600;color:var(--ink2)">Revision history</label>
+    <div class="versions">${(f.versions.length?f.versions:[{v:1,ts:new Date(),note:'current',fields:{severity:f.severity,frequency:f.frequency,duration:f.duration,onset:f.onset,attribution:f.attribution,confidence:f.confidence}}]).slice().reverse().map(v=>`
+      <div class="ver"><span class="vn">v${v.v}</span><span class="vc">${[v.fields.onset,v.fields.frequency,v.fields.severity,v.fields.duration,v.fields.attribution].filter(Boolean).join(" · ")||'—'}</span><span class="muted" style="margin-left:auto;font-size:10px">${v.note} · ${fmtTime(new Date(v.ts))}</span></div>`).join("")}</div>
+  `;
+  document.getElementById("overlay").classList.add("open");
+
+  const read=()=>{ f.label=val("i-label"); f.severity=val("i-sev"); f.frequency=val("i-freq"); f.duration=val("i-dur");
+    f.onset=val("i-onset"); const wk=val("i-wk"); f.onsetWeeks=wk===""?null:parseFloat(wk); f.attribution=val("i-attr"); f.confidence=val("i-conf"); };
+  document.getElementById("i-save").onclick=()=>{ read(); if(!f.versions.length) snapshot(f,"initial"); closeInspector(); };
+  document.getElementById("i-saverev").onclick=()=>{ read(); snapshot(f,"revision"); openInspector(id); refreshSilent(); };
+  document.getElementById("i-addcourse").onclick=()=>{ const from=val("i-cfrom"),to=val("i-cto"); if(!from||!to) return;
+    f.course.push({from,to,ts:new Date()}); read(); snapshot(f,`course: ${from}→${to}`); openInspector(id); refreshSilent(); };
+}
+function closeInspector(){ document.getElementById("overlay").classList.remove("open"); inspId=null; refresh(); }
+const val=id=>document.getElementById(id)?document.getElementById(id).value.trim():"";
+
+/* ───────────────────────── helpers ───────────────────────── */
+function escapeHtml(s){return (s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
+function escapeAttr(s){return (s||"").replace(/"/g,"&quot;");}
+
+/* ───────────────────────── refresh ───────────────────────── */
+function refresh(){ renderNarratives(); renderProposed(); renderAccepted(); renderHypotheses(); renderCoverage(); renderContradictions(); renderTimeline();
+  if(document.getElementById("view-synthesis").classList.contains("active")) renderSynthesis(); }
+function refreshSilent(){ renderAccepted(); renderHypotheses(); renderCoverage(); renderTimeline(); }
+
+/* ───────────────────────── events ───────────────────────── */
+document.getElementById("capture").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); submitCapture(); }});
+
+const EX=["nightmares since injury","low mood severe 3wk","started drinking again","lost job after injury","flashbacks daily","couldn't sleep, on edge"];
+document.getElementById("examples").innerHTML=EX.map(e=>`<span class="ex-chip">${e}</span>`).join("");
+document.querySelectorAll(".ex-chip").forEach(c=>c.onclick=()=>{ const i=document.getElementById("capture"); i.value=c.textContent; i.focus(); });
+
+// event delegation for finding actions + narrative
+document.body.addEventListener("click",e=>{
+  const act=e.target.closest("[data-act]");
+  if(act){ const id=+act.dataset.fid; if(act.dataset.act==="accept")acceptFinding(id); else if(act.dataset.act==="reject")rejectFinding(id); else if(act.dataset.act==="edit")openInspector(id); return; }
+  const ncard=e.target.closest("[data-narr]");
+  const deln=e.target.closest("[data-del-narr]");
+  if(deln){ e.stopPropagation(); const id=+deln.dataset.delNarr; S.narratives=S.narratives.filter(n=>n.id!==id); refresh(); return; }
+  if(ncard){ const id=+ncard.dataset.narr; S.selNarr=S.selNarr===id?null:id; renderNarratives(); return; }
+  const adj=e.target.closest("[data-adj]");
+  if(adj){ const c=S.contradictions.find(x=>x.id===+adj.dataset.cid); if(c){ c.status=adj.dataset.adj; refresh(); } return; }
+});
+document.body.addEventListener("input",e=>{
+  if(e.target.dataset.rat){ const c=S.contradictions.find(x=>x.id===+e.target.dataset.rat); if(c) c.rationale=e.target.value; }
+  if(e.target.dataset.appt){ adjustAppt(e.target.dataset.appt, e.target.dataset.key, parseInt(e.target.value,10)); }
+});
+document.getElementById("import-gp").onclick=importGP;
+document.getElementById("insp-close").onclick=closeInspector;
+document.getElementById("overlay").addEventListener("click",e=>{ if(e.target.id==="overlay") closeInspector(); });
+
+// tabs
+document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>switchTab(t.dataset.tab));
+function switchTab(name){
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===name));
+  document.getElementById("view-workspace").classList.toggle("active",name==="workspace");
+  document.getElementById("view-synthesis").classList.toggle("active",name==="synthesis");
+  if(name==="synthesis") renderSynthesis();
+}
+
+// causation buttons (delegated since synthesis re-renders)
+document.body.addEventListener("click",e=>{ if(e.target.id==="clear-edges"){ S.causation.edges=[]; renderCanvas(); } });
+window.addEventListener("resize",()=>{ if(document.getElementById("view-synthesis").classList.contains("active")) drawEdges(); });
+
+// keyboard-first global
+document.addEventListener("keydown",e=>{
+  const k=e.key.toLowerCase();
+  if((e.metaKey||e.ctrlKey)&&k==="k"){ e.preventDefault(); switchTab("workspace"); document.getElementById("capture").focus(); return; }
+  if((e.metaKey||e.ctrlKey)&&k==="s"){ e.preventDefault(); switchTab("synthesis"); return; }
+  if(document.getElementById("overlay").classList.contains("open")){ if(e.key==="Escape") closeInspector(); return; }
+  // A/R/E on a focused proposed finding (not while typing)
+  const card=document.activeElement&&document.activeElement.classList&&document.activeElement.classList.contains("proposed")?document.activeElement:null;
+  if(card && !["input","textarea","select"].includes((document.activeElement.tagName||"").toLowerCase())){
+    const id=+card.dataset.fid; const next=card.nextElementSibling;
+    if(k==="a"){ e.preventDefault(); acceptFinding(id); setTimeout(()=>{const c=document.querySelector('.fcard.proposed');if(c)c.focus();},20); }
+    else if(k==="r"){ e.preventDefault(); rejectFinding(id); setTimeout(()=>{const c=document.querySelector('.fcard.proposed');if(c)c.focus();},20); }
+    else if(k==="e"){ e.preventDefault(); openInspector(id); }
+  }
+});
+
+/* ───────────────────────── boot ───────────────────────── */
+refresh();
+document.getElementById("capture").focus();
+</script>
+</body>
+</html>

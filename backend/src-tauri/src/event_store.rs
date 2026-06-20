@@ -209,12 +209,35 @@ pub fn default_clinical_decisions_path() -> PathBuf {
 }
 
 fn base_dir() -> PathBuf {
-    if let Some(home) = dirs_home() {
-        let dir = home.join(".medicoapp");
-        let _ = std::fs::create_dir_all(&dir);
-        dir
-    } else {
-        PathBuf::from(".")
+    // Test isolation: `cargo test` must never touch the production store.
+    // Without this, every unit test that initialises the event store or
+    // calls a command appends fixture events (client_id = doc_id) to the
+    // REAL ~/.medicoapp databases — phantom clients then surface in the UI.
+    #[cfg(test)]
+    {
+        static TEST_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+        return TEST_DIR
+            .get_or_init(|| {
+                let dir = std::env::temp_dir()
+                    .join(format!("medicoapp_test_{}", std::process::id()));
+                let _ = std::fs::create_dir_all(&dir);
+                dir
+            })
+            .clone();
+    }
+    #[cfg(not(test))]
+    {
+        if let Some(dir) = std::env::var_os("MEDICOAPP_DATA_DIR").map(PathBuf::from) {
+            let _ = std::fs::create_dir_all(&dir);
+            return dir;
+        }
+        if let Some(home) = dirs_home() {
+            let dir = home.join(".medicoapp");
+            let _ = std::fs::create_dir_all(&dir);
+            dir
+        } else {
+            PathBuf::from(".")
+        }
     }
 }
 

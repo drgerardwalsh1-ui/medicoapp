@@ -4,7 +4,7 @@
 //! NO domain logic: every lowering is delegated verbatim to the existing
 //! converters in `case_events.rs`. Adding a future event type means adding one
 //! `EventEnvelope` variant and one `match` arm here — never touching the
-//! clinical, family, longitudinal, identity, temporal, or STEP-6 pipelines.
+//! clinical, family, longitudinal, identity, temporal, or Contradiction Engine pipelines.
 //!
 //! Guarantees:
 //!   - No logic duplication — only routes already-defined conversions.

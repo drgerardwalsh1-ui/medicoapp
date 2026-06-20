@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Case Workspace v4 — projection policies over the discourse graph</title>
+<style>
+  :root{
+    --bg:#eef1f5;--surface:#fff;--surface2:#f5f7fa;--ink:#1f2733;--ink2:#566173;--ink3:#8a93a3;
+    --line:#dde3ec;--line2:#c7cfdb;--accent:#5b4ad6;--accent-bg:#efedfc;--accent-line:#cdc6f4;
+    --green:#1f9d63;--green-bg:#e6f6ee;--red:#c0392b;--red-bg:#fbecea;--amber:#b9770e;--amber-bg:#fdf3e3;
+    --blue:#2563a8;--blue-bg:#e7f0fa;--radius:10px;--radius-sm:7px;--shadow:0 1px 2px rgba(20,30,50,.06),0 2px 8px rgba(20,30,50,.05);
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}html,body{height:100%}
+  body{margin:0;font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:13.5px;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;overflow:hidden}
+  .topbar{display:flex;align-items:center;gap:14px;padding:9px 16px;background:#161b27;color:#fff;flex:0 0 auto}
+  .topbar .brand{font-weight:600;font-size:14px}.topbar .tag{font-size:10.5px;color:#aeb6c6;border:1px solid #38404f;border-radius:20px;padding:2px 9px}
+  .tabs{display:flex;gap:4px;margin-left:8px}.tab{font-size:12.5px;color:#c2c9d6;background:transparent;border:0;padding:6px 13px;border-radius:7px;cursor:pointer}
+  .tab.active{background:#2b3242;color:#fff}.tab:hover:not(.active){background:#222838}.topbar .spacer{flex:1}
+  .kbd{font-family:var(--mono);font-size:10px;background:#2b3242;color:#cdd4e0;border:1px solid #3a4253;border-radius:5px;padding:1px 5px}
+  .topbar .hint{font-size:11px;color:#9aa3b4;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .polsel{display:flex;align-items:center;gap:3px;margin-right:14px}
+  .polsel .pl-label{font-size:10px;color:#9aa3b4;margin-right:4px;text-transform:uppercase;letter-spacing:.5px}
+  .polsel .pl{font-size:11.5px;color:#c2c9d6;background:#222838;border:1px solid #38404f;padding:4px 10px;border-radius:7px;cursor:pointer;font-family:var(--sans)}
+  .polsel .pl.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .polsel .pl:hover:not(.on){background:#2b3242}
+  .conflict{margin-top:5px;font-size:11.5px;color:var(--red)}
+  .conflict .cand{background:var(--red-bg);border:1px solid #e8b6af;border-radius:5px;padding:1px 6px;font-weight:600;color:var(--red)}
+  .conflict .vs{color:var(--ink3);font-weight:400;margin:0 2px}
+  .view{flex:1;min-height:0;display:none}.view.active{display:flex;flex-direction:column}
+  .workspace{flex:1;min-height:0;display:grid;grid-template-columns:230px 1fr 320px;gap:12px;padding:12px}
+  .col{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  .stack{display:flex;flex-direction:column;gap:12px;min-height:0}
+  .col-h{padding:9px 13px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;flex:0 0 auto}
+  .col-h h2{margin:0;font-size:10.5px;font-weight:700;letter-spacing:.7px;color:var(--ink2);text-transform:uppercase}
+  .col-body{overflow-y:auto;padding:11px;flex:1;min-height:0}
+  .muted{color:var(--ink3)}.pill{font-size:10px;font-weight:600;border-radius:20px;padding:2px 8px}
+  .topic{display:flex;align-items:center;gap:9px;width:100%;text-align:left;border:1px solid transparent;background:transparent;border-radius:8px;padding:7px 9px;cursor:pointer;margin-bottom:2px;font-family:var(--sans)}
+  .topic:hover{background:var(--surface2)}.topic.focus{background:var(--accent-bg);border-color:var(--accent-line)}
+  .topic .nm{flex:1;font-size:12.5px;font-weight:600;color:var(--ink)}.topic.focus .nm{color:var(--accent)}
+  .topic .ct{font-size:10px;color:var(--ink3);font-family:var(--mono)}
+  .topic .fdot{width:7px;height:7px;border-radius:50%;background:var(--accent);visibility:hidden}.topic.focus .fdot{visibility:visible}
+  .focusbar{font-size:11px;color:var(--accent);background:var(--accent-bg);border:1px solid var(--accent-line);border-radius:7px;padding:5px 9px;margin-bottom:8px;font-weight:600}
+  .ncard{border:1px solid var(--line);border-left:3px solid var(--accent-line);border-radius:var(--radius-sm);padding:7px 9px;margin-bottom:7px;background:var(--surface2);font-size:12px}
+  .ncard .ts{font-size:9.5px;color:var(--ink3);font-family:var(--mono)}.ncard .txt{margin-top:2px;line-height:1.4}.ncard .op{margin-top:4px;font-size:10px;color:var(--accent);font-family:var(--mono)}
+  .capwrap{padding:13px 13px 0}
+  .omnibox{display:flex;align-items:center;gap:10px;border:2px solid var(--accent-line);border-radius:12px;background:var(--surface);padding:0 14px;height:48px}
+  .omnibox:focus-within{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-bg)}.omnibox .cmd{font-family:var(--mono);color:var(--accent);font-size:15px}
+  .omnibox input{flex:1;border:0;outline:0;font-size:15px;background:transparent;color:var(--ink);font-family:var(--sans)}
+  .examples{display:flex;flex-wrap:wrap;gap:6px;padding:8px 2px 0}
+  .ex-chip{font-size:11px;font-family:var(--mono);background:var(--surface2);border:1px solid var(--line);color:var(--ink2);border-radius:6px;padding:3px 8px;cursor:pointer}
+  .ex-chip:hover{border-color:var(--accent-line);color:var(--accent)}
+  .preview{margin:10px 13px 0;border:1px solid var(--accent-line);background:var(--accent-bg);border-radius:9px;padding:9px 12px;font-size:12.5px;display:none}
+  .preview.show{display:block}.preview .act{font-weight:600;color:var(--accent)}.preview .keys{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+  .preview.ambig{border-color:#e8b6af;background:var(--red-bg)}.preview.ambig .act{color:var(--red)}
+  .chooser{display:flex;flex-direction:column;gap:5px;margin-top:7px}
+  .choice{display:flex;align-items:center;gap:9px;background:#fff;border:1px solid var(--line);border-radius:7px;padding:6px 9px;font-size:12.5px}
+  .choice .num{font-family:var(--mono);font-weight:700;background:var(--accent);color:#fff;width:18px;height:18px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;font-size:11px}
+  .section-label{font-size:10.5px;font-weight:700;letter-spacing:.6px;color:var(--ink2);text-transform:uppercase;margin:16px 0 9px;display:flex;align-items:center;gap:8px}
+  .section-label .count{background:var(--line);color:var(--ink2);border-radius:20px;font-size:10px;padding:1px 7px}
+  .fcard{border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:9px;background:var(--surface);cursor:pointer}
+  .fcard:hover{border-color:var(--line2)}.fcard.flash{animation:flash .6s}@keyframes flash{0%{background:var(--accent-bg)}100%{background:#fff}}
+  .fcard .row1{display:flex;align-items:center;gap:8px}.fcard .lab{font-weight:600;font-size:13.5px}
+  .topictag{font-size:9.5px;font-weight:700;letter-spacing:.3px;border-radius:5px;padding:1px 6px;background:var(--surface2);color:var(--ink2);border:1px solid var(--line)}
+  .fcard .ver{font-size:10px;color:var(--ink3);font-family:var(--mono);margin-left:auto}
+  .fcard .proj{margin-top:6px;font-size:12px;color:var(--ink2);display:flex;flex-wrap:wrap;gap:5px 12px}.fcard .proj b{color:var(--ink);font-weight:600}
+  .fcard .course{margin-top:5px;font-size:11.5px;color:var(--accent)}.fcard .course .arr{color:var(--ink3)}.fcard .tx{margin-top:4px;font-size:11px;color:#0f7a63}
+  .spark{font-family:var(--mono);letter-spacing:1px;color:var(--accent)}
+  .thread{border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:var(--radius-sm);padding:9px 11px;margin-bottom:9px;background:var(--surface2)}
+  .thread .seed{font-size:11px;color:var(--ink2);font-style:italic;margin-bottom:6px}.thread .chain{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+  .tnode{font-size:11.5px;border-radius:6px;padding:2px 8px;font-weight:600}.tnode.event{background:var(--red-bg);color:var(--red)}.tnode.finding{background:var(--accent-bg);color:var(--accent)}
+  .tarrow{color:var(--ink3);font-size:12px}.thread .note{margin-top:6px;font-size:10px;color:var(--ink3)}
+  .hyp{margin-bottom:11px}.hyp .hl{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px}
+  .bar{height:8px;background:var(--line);border-radius:6px;overflow:hidden}.bar>span{display:block;height:100%;border-radius:6px;transition:width .25s}
+  .bar.PTSD>span{background:var(--blue)}.bar.MDD>span{background:var(--accent)}.bar.AUD>span{background:var(--amber)}
+  .cov-dx{margin-bottom:10px}.cov-dx h4{margin:0 0 4px;font-size:11px;font-weight:700}
+  .cov-item{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink2);padding:1px 0}
+  .cov-box{width:14px;height:14px;border:1.5px solid var(--line2);border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;color:#fff}
+  .cov-item.done .cov-box{background:var(--green);border-color:var(--green)}.cov-item.done{color:var(--ink3);text-decoration:line-through}
+  .dock{background:var(--surface);border-top:1px solid var(--line);padding:10px 16px 12px;flex:0 0 auto}
+  .dock h2{margin:0 0 8px;font-size:10.5px;font-weight:700;letter-spacing:.7px;color:var(--ink2);text-transform:uppercase}
+  .tl{position:relative;height:78px;margin:0 8px}.tl .axis{position:absolute;left:0;right:0;top:40px;height:2px;background:var(--line2)}
+  .tl .mk{position:absolute;top:26px;transform:translateX(-50%);text-align:center}
+  .tl .mk .dot{width:11px;height:11px;border-radius:50%;margin:0 auto;border:2px solid #fff;box-shadow:0 0 0 1px var(--line2)}
+  .tl .mk .lab{font-size:10px;color:var(--ink2);margin-top:4px;white-space:nowrap}.tl .mk .wk{font-size:9px;color:var(--ink3);font-family:var(--mono)}
+  .tl .mk.event .dot{background:var(--red)}.tl .mk.f .dot{background:var(--accent)}.tl .mk.tx .dot{background:var(--green)}.tl .mk.cc .dot{background:var(--amber)}
+  .synth{flex:1;min-height:0;overflow-y:auto;padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-content:start}
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px}
+  .panel h3{margin:0 0 10px;font-size:10.5px;font-weight:700;letter-spacing:.6px;color:var(--ink2);text-transform:uppercase}.panel.wide{grid-column:1 / -1}
+  .kv{font-size:12.5px;padding:3px 0;display:flex;gap:8px}.kv .k{color:var(--ink3);min-width:120px}
+  .dxline{display:flex;align-items:center;gap:10px;margin-bottom:7px;font-size:13px}.dxline .nm{min-width:120px;font-weight:600}
+  .btn{font-size:11.5px;border:1px solid var(--line2);background:var(--surface);color:var(--ink);border-radius:6px;padding:5px 11px;cursor:pointer;font-family:var(--sans)}
+  .btn:hover{background:var(--surface2)}.btn.sm{padding:3px 8px;font-size:10.5px}.btn .k{font-family:var(--mono);font-size:9px;opacity:.7;margin-left:4px}
+  .overlay{position:fixed;inset:0;background:rgba(22,27,39,.45);display:none;align-items:center;justify-content:center;z-index:50}.overlay.open{display:flex}
+  .modal{background:#fff;border-radius:14px;width:min(640px,94vw);max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  .modal-h{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff}
+  .modal-h h3{margin:0;font-size:15px}.modal-b{padding:16px 18px}.xbtn{border:0;background:transparent;color:var(--ink3);cursor:pointer;font-size:18px}
+  .insp-block{margin-bottom:16px}.evlog{border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .evrow{display:grid;grid-template-columns:120px 1fr auto;gap:8px;font-size:11.5px;padding:7px 10px;border-bottom:1px solid var(--line);background:var(--surface2)}
+  .evrow:last-child{border-bottom:0}.evrow .et{font-family:var(--mono);font-weight:700;color:var(--accent);font-size:10px}.evrow.sup{opacity:.5;text-decoration:line-through}
+  .evrow .src{color:var(--ink3);font-family:var(--mono);font-size:10px}
+  @media (max-width:1180px){.workspace{grid-template-columns:1fr;overflow-y:auto}.col{min-height:220px}.synth{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <span class="brand">Case Workspace v4</span>
+  <span class="tag">graph + projection policies · same UI · not MedicoApp</span>
+  <div class="tabs"><button class="tab active" data-tab="ws">Interview</button><button class="tab" data-tab="syn">Case Synthesis</button></div>
+  <span class="spacer"></span>
+  <div class="polsel" id="polsel"><span class="pl-label">Lens:</span>
+    <button class="pl on" data-pol="Clinical">Clinical</button><button class="pl" data-pol="Forensic">Forensic</button><button class="pl" data-pol="Claimant">Claimant</button><button class="pl" data-pol="GP">GP</button></div>
+  <span class="hint"><span class="kbd">⌘K</span> capture · <span class="kbd">↵</span> commit · <span class="kbd">⌘Z</span> undo · <span class="kbd">⌘S</span> synthesis</span>
+</div>
+<div class="view active" id="view-ws">
+  <div class="workspace">
+    <div class="stack">
+      <section class="col" style="flex:0 0 auto"><div class="col-h"><h2>Topics</h2></div><div class="col-body" id="topic-rail"></div></section>
+      <section class="col" style="flex:1"><div class="col-h"><h2>Interview narrative</h2><span class="pill muted" id="narr-count">0</span></div>
+        <div class="col-body" id="narr-stream"><p class="muted" style="font-size:12px">Each utterance you capture appears here with the action it produced.</p></div></section>
+    </div>
+    <section class="col">
+      <div class="capwrap">
+        <div class="focusbar" id="focusbar">FOCUS ▶ — <span style="font-weight:400;color:var(--ink3)">(bare modifiers will bind here)</span></div>
+        <div class="omnibox"><span class="cmd">⌘</span><input id="capture" placeholder="Capture… e.g. cant sleep since injury" autocomplete="off" spellcheck="false"></div>
+        <div class="examples" id="examples"></div>
+      </div>
+      <div class="preview" id="preview"></div>
+      <div class="col-body">
+        <div class="section-label">Evolving findings <span class="count" id="f-count">0</span></div>
+        <div id="findings"><p class="muted" style="font-size:12px">Findings build up here and re-project as new information arrives. A finding is never duplicated.</p></div>
+      </div>
+    </section>
+    <section class="col">
+      <div class="col-h"><h2>Narrative threads · coverage · hypotheses</h2></div>
+      <div class="col-body">
+        <div class="section-label">Narrative threads <span class="count" id="t-count">0</span></div>
+        <div id="threads"><p class="muted" style="font-size:12px">Patient-attribution stories are preserved here — evidence of the claimant’s account, not expert opinion.</p></div>
+        <div class="section-label">Working hypotheses</div><div id="hypotheses"></div>
+        <div class="section-label">Missing information</div><div id="coverage"></div>
+      </div>
+    </section>
+  </div>
+  <div class="dock"><h2>Timeline preview <span class="muted" style="font-weight:400;text-transform:none;letter-spacing:0">— projected from the discourse graph alone (read-only)</span></h2><div class="tl" id="timeline"></div></div>
+</div>
+<div class="view" id="view-syn"><div class="synth" id="synth"></div></div>
+<div class="overlay" id="overlay"><div class="modal">
+  <div class="modal-h"><h3 id="insp-title">Finding history</h3><button class="xbtn" id="insp-close">✕</button></div>
+  <div class="modal-b" id="insp-body"></div>
+</div></div>
+
+<script>
+"use strict";
+/* ════════ V3 DISCOURSE GRAPH ENGINE (UI identical to v2) ════════ */
+let uid=1; const nid=()=>uid++;
+const TOPICS=[{id:"sleep",label:"Sleep"},{id:"mood",label:"Mood"},{id:"trauma",label:"Trauma"},{id:"alcohol",label:"Alcohol"},{id:"function",label:"Function"},{id:"anxiety",label:"Anxiety"},{id:"psychosis",label:"Psychosis"}];
+const DXNAME={PTSD:"PTSD",MDD:"Depression (MDD)",AUD:"Alcohol use"};
+// Graph IS the state. Findings hold NO computed fields — only identity.
+const G={nodes:[],edges:[]};
+const S={focusTopic:null,pending:null,lastApplied:null,causation:{nodes:[],edges:[]},apportionment:{},
+  shadow:{refLog:[],index:new Map(),indexTreatment:new Map(),indexTimeAnchor:new Map(),clinicianId:"prototype-clinician"}};
+
+// ── SHADOW MODE (v5 probe) — S3 EventNode referent-identity observability ──────
+// Additive · inert · reversible. Writes ONLY to S.shadow; read by NOTHING (no
+// render, no projection, no reasoning, no ClinicalEvent join / resolveReference).
+// To revert: delete this block + the single shadowEventMint(...) call at S3.
+// kind uses EXISTING taxonomy labels only (HistoryCategory / ClinicalEventKind) —
+// no new ontology terms are introduced.
+const SHADOW_NEAREST_KIND={injury:"trauma",accident:"trauma",incident:"trauma",assault:"trauma",
+  termination:"work",disciplinary:"work",redundancy:"work",sacked:"work",
+  bereavement:"other",divorce:"relationship"};
+function shadowKindForEvent(label){const l=(label||"").toLowerCase();
+  for(const k in SHADOW_NEAREST_KIND){ if(l.includes(k)) return SHADOW_NEAREST_KIND[k]; }
+  return "trauma"; }                                  // nearest existing HistoryCategory label
+let __shadowSeq=0;
+function shadowEventMint(ev, existed, claimId){
+  const sh=S.shadow; if(!sh) return;
+  if(existed && sh.index.has(ev.id)){                 // REUSE — attach claim to existing ReferenceEntity
+    const re=sh.index.get(ev.id); re.attachments.push(String(claimId)); re.reuseCount++; return;
+  }
+  const re={                                          // CREATE — new shadow ReferenceEntity
+    id:"shadowref:"+(++__shadowSeq), kind:shadowKindForEvent(ev.label), label:ev.label,
+    provenance:{clinicianId:sh.clinicianId, at:new Date().toISOString()},
+    attachments:[String(claimId)], reuseCount:0, sourceEventNodeId:ev.id };
+  sh.refLog.push(re); sh.index.set(ev.id, re);
+}
+// generic shadow mint for S1/S2 (S3's shadowEventMint above is left unchanged).
+function __shadowMint(refType, reKind, label, nodeId, indexMap, existed, claimId){
+  const sh=S.shadow; if(!sh) return;
+  if(existed && indexMap.has(nodeId)){              // REUSE — attach claim to existing ReferenceEntity
+    const re=indexMap.get(nodeId); re.attachments.push(String(claimId)); re.reuseCount++; return;
+  }
+  const re={ id:"shadowref:"+(++__shadowSeq), refType, kind:reKind, label,
+    provenance:{clinicianId:sh.clinicianId, at:new Date().toISOString()},
+    attachments:[String(claimId)], reuseCount:0, sourceNodeId:nodeId };
+  sh.refLog.push(re); indexMap.set(nodeId, re);
+}
+// S1 — TreatmentNode → existing TreatmentCategory label only (no new ontology).
+const SHADOW_TREATMENT_KIND={therapy:"psychological",medication:"medication"};
+function shadowTreatmentMint(tn, existed, claimId){
+  __shadowMint("treatment", SHADOW_TREATMENT_KIND[tn.kind]||"other", tn.name, tn.id, S.shadow.indexTreatment, existed, claimId);
+}
+// S2 — TimeAnchor → existing ClinicalEventKind label "document_date" (no new time ontology).
+function shadowTimeAnchorMint(ta, existed, claimId){
+  __shadowMint("timeAnchor", "document_date", ta.label, ta.id, S.shadow.indexTimeAnchor, existed, claimId);
+}
+
+/* ════ v4 PROJECTION POLICY LAYER — wraps v3 graph; never mutates it ════ */
+let activePolicy="Clinical";
+function supersededSet(){return new Set(G.edges.filter(e=>e.type==="OVERRIDES"&&e.payload&&e.payload.supersedesEdge).map(e=>e.payload.supersedesEdge));}
+const POLICIES={
+  Clinical:{ name:"Clinical",
+    includeEdge:(e,sup)=>!sup.has(e.id),
+    weight:e=> e.type==="COURSE_CHANGES"?3 : e.type==="MODIFIES_FACET"?2 : 1,
+    resolveFacet:c=>{const s=[...c].sort((a,b)=>(a.weight-b.weight)||(a.eid-b.eid));return {mode:"single",value:s[s.length-1].value};} },
+  Forensic:{ name:"Forensic",
+    includeEdge:()=>true,                                  // shows superseded too
+    weight:()=>1,
+    resolveFacet:c=> c.length>1?{mode:"conflict",candidates:c}:{mode:"single",value:c[0]&&c[0].value} },
+  Claimant:{ name:"Claimant",
+    includeEdge:(e,sup)=>!sup.has(e.id),
+    weight:e=> e.type==="MODIFIES_FACET"?3 : e.type==="COURSE_CHANGES"?1 : 1,   // downweight inference
+    resolveFacet:c=>{const s=[...c].sort((a,b)=>(a.ts-b.ts)||(a.eid-b.eid));return {mode:"narrative",value:s[s.length-1].value,sequence:s};} },
+  GP:{ name:"GP",
+    includeEdge:(e,sup)=>!sup.has(e.id),
+    weight:e=> e.type==="ATTRIBUTED_TO"?3:1,                // external/attribution edges win
+    resolveFacet:c=>{const s=[...c].sort((a,b)=>(a.eid-b.eid));return {mode:"single",value:s[s.length-1].value};} },
+};
+function freqDisplay(c){
+  const r=c.freqResolved; if(!r) return {inline:"",detail:""};
+  if(r.mode==="single") return {inline:`freq <b>${r.value}</b>`,
+    detail:c.course.filter(x=>x.facet==="frequency").length?`<div class="course">${c.course.filter(x=>x.facet==="frequency").map(x=>`${x.from} <span class="arr">→</span> ${x.to}`).join(" ")} <span class="spark">${spark(c)}</span></div>`:""};
+  if(r.mode==="conflict") return {inline:`freq <b style="color:var(--red)">⚠ conflict</b>`,
+    detail:`<div class="conflict">competing values · not collapsed: ${r.candidates.map(x=>`<span class="cand">${x.value} <span class="muted">e${x.eid}·C-${x.claim}·T${x.turn}</span></span>`).join(' <span class="vs">vs</span> ')}</div>`};
+  if(r.mode==="narrative") return {inline:`freq <b>${r.value}</b> <span class="muted">claimant·latest</span>`,
+    detail:`<div class="course">stated: ${r.sequence.map(x=>`${x.value} <span class="muted">(C-${x.claim}·T${x.turn})</span>`).join(' <span class="arr">→</span> ')}</div>`};
+  return {inline:"",detail:""};
+}
+function addNode(n){n.id=nid();G.nodes.push(n);return n;}
+function addEdge(from,to,type,payload,claimRef){const e={id:nid(),from,to,type,payload:payload||{},claimRef,ts:new Date()};G.edges.push(e);return e;}
+const node=id=>G.nodes.find(n=>n.id===id);
+const byType=t=>G.nodes.filter(n=>n.type===t);
+const findingByLabel=l=>G.nodes.find(n=>n.type==="finding"&&n.symptomType===l);
+
+const LEX=[
+  {re:/\b(couldn'?t sleep|can'?t sleep|cant sleep|not sleeping|insomnia|poor sleep|trouble sleeping|broken sleep)\b/i,label:"Sleep disturbance",topic:"sleep",dx:"PTSD"},
+  {re:/\b(low mood|depressed|depression|feeling down|became depressed|flat)\b/i,label:"Low mood",topic:"mood",dx:"MDD"},
+  {re:/\b(anhedonia|no interest|lost interest|no enjoyment)\b/i,label:"Anhedonia",topic:"mood",dx:"MDD"},
+  {re:/\b(nightmare|nightmares|bad dreams)\b/i,label:"Nightmares",topic:"trauma",dx:"PTSD"},
+  {re:/\b(flashback|flashbacks|reliving|intrusive)\b/i,label:"Flashbacks",topic:"trauma",dx:"PTSD"},
+  {re:/\b(avoid|avoidance)\b/i,label:"Avoidance",topic:"trauma",dx:"PTSD"},
+  {re:/\b(hypervigil|on edge|on guard|startle|jumpy)\b/i,label:"Hypervigilance",topic:"trauma",dx:"PTSD"},
+  {re:/\b(drink|drinking|alcohol|relapse|booze)\b/i,label:"Alcohol use",topic:"alcohol",dx:"AUD"},
+  {re:/\b(stopped seeing friends|social withdrawal|withdrew|withdrawn|isolat)\b/i,label:"Social withdrawal",topic:"function",dx:"MDD"},
+];
+const TREAT=[{re:/\bemdr\b/i,name:"EMDR",kind:"therapy"},{re:/\bcbt\b/i,name:"CBT",kind:"therapy"},{re:/\b(sertraline|fluoxetine|fluox|mirtazapine|ssri|antidepressant)\b/i,name:"Antidepressant",kind:"medication"}];
+function parse(text){
+  const t=text.toLowerCase(); const syms=[]; const seen=new Set();
+  LEX.forEach(l=>{if(l.re.test(t)&&!seen.has(l.label)){seen.add(l.label);syms.push({label:l.label,topic:l.topic,dx:l.dx});}});
+  const m={};
+  const fr=/\b(nightly|every night|daily|every day|weekly|fortnightly|once a fortnight|most days|constant|occasional(?:ly)?)\b/i.exec(t);
+  if(fr){let f=fr[1].toLowerCase();if(/every night/.test(f))f="nightly";if(/every day/.test(f))f="daily";if(/once a fortnight/.test(f))f="fortnightly";m.frequency=f;}
+  const sv=/\b(severe|moderate|mild)\b/i.exec(t); if(sv)m.severity=sv[1].toLowerCase();
+  if(/since (the )?injury|after (the )?injury|post.?injury|after the accident/i.test(t)){m.onset="post-injury";m.onsetWeeks=0;m.attribution="Injury";m.eventRef="Injury";}
+  const wk=/\+?\s*(\d+)\s*(?:wk|week|weeks)\b/i.exec(t); if(wk){m.onset="+"+wk[1]+"wk";m.onsetWeeks=+wk[1];}
+  const tr=TREAT.find(x=>x.re.test(t)); if(tr)m.treatment=tr;
+  if(/\b(improved|better|easier|settled|reduced)\b/i.test(t))m.direction="improved";
+  if(/\b(worse|worsened|deteriorated|escalat)\b/i.test(t))m.direction="worsened";
+  if(/\b(now|these days|currently|nowadays)\b/i.test(t))m.courseCue=true;
+  if(/\b(actually|sorry|i meant|no,? )\b/i.test(t))m.correction=true;
+  return {syms,m};
+}
+
+/* ── PROJECTION: Finding state derived ONLY by graph traversal ── */
+function project(f, policyName){
+  const P=POLICIES[policyName]||POLICIES.Clinical;
+  const sup=supersededSet();
+  const cur={onset:"",onsetWeeks:null,frequency:"",severity:"",attribution:"",treatments:[],course:[],direction:"",freqResolved:null,freqCands:[]};
+  const inc=G.edges.filter(e=>(e.from===f.id||e.to===f.id)&&P.includeEdge(e,sup)).sort((a,b)=>a.id-b.id);
+  const fc=[];   // frequency candidates (policy resolves)
+  inc.forEach(e=>{const other=node(e.from===f.id?e.to:e.from); const cl=node(e.claimRef)||{};
+    if(e.type==="MODIFIES_FACET"){ if(e.payload.facet==="frequency") fc.push({value:e.payload.value,eid:e.id,type:e.type,claim:e.claimRef,turn:cl.turn,ts:e.ts,weight:P.weight(e)}); else cur[e.payload.facet]=e.payload.value; }
+    else if(e.type==="COURSE_CHANGES"){ cur.course.push({facet:e.payload.facet,from:e.payload.from,to:e.payload.to,eid:e.id,claim:e.claimRef}); if(e.payload.facet==="frequency") fc.push({value:e.payload.to,from:e.payload.from,eid:e.id,type:e.type,claim:e.claimRef,turn:cl.turn,ts:e.ts,weight:P.weight(e)}); else cur[e.payload.facet]=e.payload.to; }
+    else if(e.type==="TEMPORAL_ANCHORS"){cur.onset=other.label;cur.onsetWeeks=(e.payload&&e.payload.weeks!=null?e.payload.weeks:other.weeks);}
+    else if(e.type==="ATTRIBUTED_TO"){cur.attribution=(other.label||"").toLowerCase();}
+    else if(e.type==="ASSOCIATED_WITH"&&other&&other.type==="treatment"){if(!cur.treatments.includes(other.name))cur.treatments.push(other.name);}
+    else if(e.type==="CAUSES"&&other&&other.type==="treatment"){cur.direction=(e.payload&&e.payload.polarity==="negative")?"worsened":"improved";}
+  });
+  cur.freqCands=fc;
+  cur.freqResolved=fc.length?P.resolveFacet(fc):null;
+  cur.frequency=(cur.freqResolved&&cur.freqResolved.mode!=="conflict")?cur.freqResolved.value:"";
+  return cur;
+}
+function fIncident(f){const sup=new Set(G.edges.filter(e=>e.type==="OVERRIDES"&&e.payload&&e.payload.supersedesEdge).map(e=>e.payload.supersedesEdge));
+  return G.edges.filter(e=>e.from===f.id||e.to===f.id).map(e=>({...e,_sup:sup.has(e.id)})).sort((a,b)=>a.id-b.id);}
+function fVersion(f){return new Set(fIncident(f).filter(e=>!e._sup).map(e=>e.claimRef)).size;}
+
+/* ── build semantic edges for modifiers ── */
+function buildEdges(f,m,claimId){
+  const cur=project(f,"Clinical"); const made=[];   // classification is policy-independent (graph truth)
+  if(m.treatment){const __shadowTxExisted=!!byType("treatment").find(n=>n.name===m.treatment.name); let tn=byType("treatment").find(n=>n.name===m.treatment.name)||addNode({type:"treatment",name:m.treatment.name,kind:m.treatment.kind});
+    made.push(addEdge(f.id,tn.id,"ASSOCIATED_WITH",{},claimId));
+    if(m.direction)made.push(addEdge(tn.id,f.id,"CAUSES",{polarity:m.direction==="improved"?"positive":"negative",value:m.direction},claimId)); shadowTreatmentMint(tn,__shadowTxExisted,claimId);}
+  ["frequency","severity"].forEach(facet=>{if(m[facet]){const prior=cur[facet];
+    if(m.correction){const last=[...G.edges].reverse().find(e=>(e.from===f.id||e.to===f.id)&&e.payload&&e.payload.facet===facet);
+      const me=addEdge(claimId,f.id,"MODIFIES_FACET",{facet,value:m[facet]},claimId);
+      if(last)made.push(addEdge(claimId,last.from,"OVERRIDES",{supersedesEdge:last.id,facet},claimId)); made.push(me);}
+    else if(prior&&(m.courseCue||prior!==m[facet])){made.push(addEdge(claimId,f.id,"COURSE_CHANGES",{facet,from:prior,to:m[facet]},claimId));}
+    else if(!prior){made.push(addEdge(claimId,f.id,"MODIFIES_FACET",{facet,value:m[facet]},claimId));}}});
+  return made;
+}
+function edgeLabel(e){
+  if(e.type==="CREATES")return "create finding";
+  if(e.type==="MODIFIES_FACET")return `set ${e.payload.facet} = ${e.payload.value}`;
+  if(e.type==="COURSE_CHANGES")return `course change · ${e.payload.facet} ${e.payload.from} → ${e.payload.to}`;
+  if(e.type==="TEMPORAL_ANCHORS")return `anchor onset → ${node(e.to)?node(e.to).label:""}`;
+  if(e.type==="ATTRIBUTED_TO")return `attributed to ${node(e.to)?node(e.to).label:""}`;
+  if(e.type==="ASSOCIATED_WITH"){const o=node(e.to);return o&&o.type==="treatment"?`link ${o.name}`:"associated with focus";}
+  if(e.type==="CAUSES"){const o=node(e.from);return `${o?o.name||o.label:""} causes (${e.payload.value||e.payload.polarity})`;}
+  if(e.type==="OVERRIDES")return `overrides edge #${e.payload.supersedesEdge}`;
+  if(e.type==="NARRATIVE_LINK")return "narrative link";
+  return e.type;
+}
+
+/* ── claim pipeline ── */
+function submit(){
+  const inp=document.getElementById("capture"); const text=inp.value.trim(); if(!text) return;
+  const turn=byType("claim").length+1;
+  const claim=addNode({type:"claim",text,ts:new Date(),turn});
+  const {syms,m}=parse(text); const ops=[];
+
+  if(syms.length>=2){ // narrative thread (patient attribution)
+    const nodes=[]; if(m.eventRef)nodes.push({label:m.eventRef,kind:"event"}); syms.forEach(s=>nodes.push({label:s.label,kind:"finding"}));
+    const th=addNode({type:"narrative_thread",seed:text,nodes});
+    addEdge(claim.id,th.id,"NARRATIVE_LINK",{},claim.id); ops.push("narrative thread");
+  }
+
+  if(syms.length>=1){
+    syms.forEach((s,i)=>{
+      let f=findingByLabel(s.label);
+      if(!f){ f=addNode({type:"finding",symptomType:s.label,topic:s.topic,dx:s.dx});
+        addEdge(claim.id,f.id,"CREATES",{},claim.id); ops.push("create "+s.label);
+        addEdge(claim.id,f.id,"ASSOCIATED_WITH",{},claim.id);
+        if(m.onset!=null){ const __shadowTaExisted=!!byType("time_anchor").find(n=>n.label===m.onset); let ta=byType("time_anchor").find(n=>n.label===m.onset)||addNode({type:"time_anchor",label:m.onset,weeks:(m.onsetWeeks!=null?m.onsetWeeks:null)});
+          addEdge(f.id,ta.id,"TEMPORAL_ANCHORS",{weeks:m.onsetWeeks},claim.id); ops.push("anchor "+m.onset); shadowTimeAnchorMint(ta,__shadowTaExisted,claim.id); }
+        if(m.attribution){ const __shadowExisted=!!byType("event").find(n=>n.label===m.attribution); let ev=byType("event").find(n=>n.label===m.attribution)||addNode({type:"event",label:m.attribution});
+          addEdge(f.id,ev.id,"ATTRIBUTED_TO",{},claim.id); addEdge(ev.id,f.id,"CAUSES",{polarity:"negative",value:"onset"},claim.id); ops.push("attributed to "+m.attribution); shadowEventMint(ev,__shadowExisted,claim.id); }
+      }
+      if(syms.length===1||i===syms.length-1){ buildEdges(f,m,claim.id).forEach(e=>ops.push(edgeLabel(e))); }
+      S.focusTopic=f.topic; S.lastApplied={fid:f.id};
+    });
+    claim.op=ops.join(" · "); inp.value=""; renderAll(); renderPreviewApplied(); return;
+  }
+
+  const hasMod=m.frequency||m.severity||m.treatment||m.direction;
+  if(hasMod){
+    const cands=byType("finding"); const fc=S.focusTopic?cands.filter(f=>f.topic===S.focusTopic):[];
+    let target=null,pool=cands;
+    if(fc.length===1)target=fc[0]; else if(fc.length>1)pool=fc; else if(cands.length===1)target=cands[0];
+    if(target){ addEdge(claim.id,target.id,"ASSOCIATED_WITH",{},claim.id);
+      buildEdges(target,m,claim.id).forEach(e=>ops.push(edgeLabel(e)));
+      S.focusTopic=target.topic; S.lastApplied={fid:target.id}; claim.op=ops.join(" · "); inp.value=""; renderAll(); renderPreviewApplied(); return; }
+    if(pool.length>1){ S.pending={claimId:claim.id,m,pool:pool.map(f=>f.id),text}; claim.op="(awaiting binding)"; renderPreviewAmbiguous(); renderAll(); inp.value=""; return; }
+  }
+  claim.op="(narrative only — no edge to a finding)"; inp.value=""; renderAll();
+}
+function resolveAmbiguous(idx){if(!S.pending)return;const f=node(S.pending.pool[idx]);if(!f)return;const claim=node(S.pending.claimId);
+  addEdge(claim.id,f.id,"ASSOCIATED_WITH",{},claim.id); const made=buildEdges(f,S.pending.m,claim.id);
+  if(claim)claim.op=made.map(edgeLabel).join(" · ")+` → ${f.symptomType}`;
+  S.focusTopic=f.topic;S.lastApplied={fid:f.id};S.pending=null;document.getElementById("preview").classList.remove("show","ambig");renderAll();}
+function undoLast(){ if(!S.lastApplied)return; const f=node(S.lastApplied.fid); if(!f)return;
+  const lastClaim=Math.max(...G.edges.filter(e=>e.from===f.id||e.to===f.id).map(e=>e.claimRef));
+  G.edges=G.edges.filter(e=>!((e.from===f.id||e.to===f.id)&&e.claimRef===lastClaim));
+  if(!G.edges.some(e=>e.type==="CREATES"&&e.to===f.id)){G.nodes=G.nodes.filter(n=>n.id!==f.id);}
+  S.lastApplied=null;document.getElementById("preview").classList.remove("show");renderAll(); }
+
+/* ════════ RENDER (reads only from graph projections) ════════ */
+function renderTopicRail(){const el=document.getElementById("topic-rail");
+  el.innerHTML=TOPICS.map(t=>{const fs=byType("finding").filter(f=>f.topic===t.id);const foc=S.focusTopic===t.id?"focus":"";
+    return `<button class="topic ${foc}" data-topic="${t.id}"><span class="fdot"></span><span class="nm">${t.label}</span><span class="ct">${fs.length||""}</span></button>`;}).join("");
+  const ft=TOPICS.find(t=>t.id===S.focusTopic);
+  document.getElementById("focusbar").innerHTML=ft?`FOCUS ▶ ${ft.label} <span style="font-weight:400;color:var(--ink3)">— bare modifiers bind here (UX hint only)</span>`:`FOCUS ▶ — <span style="font-weight:400;color:var(--ink3)">(bare modifiers will bind here)</span>`;}
+function renderNarr(){const cl=byType("claim").slice().sort((a,b)=>b.id-a.id);document.getElementById("narr-count").textContent=cl.length;
+  const el=document.getElementById("narr-stream");if(!cl.length)return;
+  el.innerHTML=cl.map(c=>`<div class="ncard"><div class="ts">C-${c.id} · turn ${c.turn} · ${time(c.ts)}</div><div class="txt">${esc(c.text)}</div><div class="op">▸ ${esc(c.op||"")}</div></div>`).join("");}
+function spark(c){const map={nightly:"▇",daily:"▆","most days":"▅",weekly:"▃",fortnightly:"▂",occasionally:"▁"};const seq=[];c.course.filter(x=>x.facet==="frequency").forEach((x,i)=>{if(i===0)seq.push(map[x.from]||"▄");seq.push(map[x.to]||"▂");});if(!seq.length&&c.frequency)seq.push(map[c.frequency]||"▄");return seq.join("");}
+function renderFindings(){const fs=byType("finding");document.getElementById("f-count").textContent=fs.length;const el=document.getElementById("findings");if(!fs.length)return;
+  fs.sort((a,b)=>(a.topic===S.focusTopic?-1:0)-(b.topic===S.focusTopic?-1:0));
+  el.innerHTML=fs.map(f=>{const c=project(f,activePolicy);const tl=TOPICS.find(t=>t.id===f.topic);const flash=S.lastApplied&&S.lastApplied.fid===f.id?"flash":"";
+    const fd=freqDisplay(c);
+    const bits=[c.onset&&`onset <b>${c.onset}</b>`,fd.inline,c.severity&&`severity <b>${c.severity}</b>`,c.attribution&&`attrib <b>${c.attribution}</b>`].filter(Boolean);
+    const courseHtml=fd.detail;
+    const txHtml=c.treatments.length?`<div class="tx">↘ ${c.treatments.join(", ")}${c.direction?` · ${c.direction}`:""}</div>`:"";
+    return `<div class="fcard ${flash}" data-fid="${f.id}"><div class="row1"><span class="lab">${f.symptomType}</span><span class="topictag">${tl?tl.label:f.topic}</span><span class="ver">v${fVersion(f)}</span></div>
+      <div class="proj">${bits.join("")||'<span class="muted">no detail yet</span>'}</div>${courseHtml}${txHtml}</div>`;}).join("");}
+function renderThreads(){const th=byType("narrative_thread").slice().sort((a,b)=>b.id-a.id);document.getElementById("t-count").textContent=th.length;const el=document.getElementById("threads");if(!th.length)return;
+  el.innerHTML=th.map(t=>`<div class="thread"><div class="seed">“${esc(t.seed)}”</div><div class="chain">${t.nodes.map((n,i)=>`${i?'<span class="tarrow">→</span>':''}<span class="tnode ${n.kind}">${n.label}</span>`).join("")}</div><div class="note">patient-attribution narrative · not an expert opinion</div></div>`).join("");}
+const WEIGHTS={"Nightmares":{PTSD:22},"Flashbacks":{PTSD:22},"Avoidance":{PTSD:16},"Hypervigilance":{PTSD:16},"Sleep disturbance":{PTSD:10,MDD:8},"Low mood":{MDD:24},"Anhedonia":{MDD:22},"Alcohol use":{AUD:34},"Social withdrawal":{MDD:10}};
+function scores(){const s={PTSD:0,MDD:0,AUD:0};byType("finding").forEach(f=>{const w=WEIGHTS[f.symptomType];if(w)for(const k in w)s[k]=(s[k]||0)+w[k];});for(const k in s)s[k]=Math.min(100,s[k]);return s;}
+function renderHyp(){const s=scores();document.getElementById("hypotheses").innerHTML=[["PTSD","PTSD"],["MDD","MDD"],["AUD","Alcohol use disorder"]].map(([k,n])=>`<div class="hyp"><div class="hl"><b>${n}</b><span class="muted">${s[k]||0}%</span></div><div class="bar ${k}"><span style="width:${s[k]||0}%"></span></div></div>`).join("");}
+const COV={PTSD:[["Nightmares","Nightmares"],["Flashbacks","Flashbacks"],["Avoidance","Avoidance"],["Hypervigilance","Hypervigilance"],["Sleep disturbance","Sleep"]],MDD:[["Low mood","Low mood"],["Anhedonia","Anhedonia"],["Social withdrawal","Withdrawal"]]};
+function renderCov(){const has=l=>!!findingByLabel(l);document.getElementById("coverage").innerHTML=Object.keys(COV).map(dx=>`<div class="cov-dx"><h4>${dx} <span class="muted" style="font-weight:400">${COV[dx].filter(i=>has(i[0])).length}/${COV[dx].length}</span></h4>${COV[dx].map(i=>`<div class="cov-item ${has(i[0])?'done':''}"><span class="cov-box">${has(i[0])?'✓':''}</span>${i[1]}</div>`).join("")}</div>`).join("");}
+function renderTimeline(){const el=document.getElementById("timeline");const fs=byType("finding");const marks=[];
+  if(byType("event").some(e=>e.label==="Injury"))marks.push({cls:"event",lab:"Injury",wk:0});
+  fs.forEach(f=>{const c=project(f,activePolicy);const base=c.onsetWeeks!=null?c.onsetWeeks:0;
+    if(c.onsetWeeks!=null)marks.push({cls:"f",lab:f.symptomType,wk:c.onsetWeeks});
+    const r=c.freqResolved;
+    if(r&&r.mode==="conflict"){ r.candidates.forEach((x,i)=>marks.push({cls:"cc",lab:x.value+" (e"+x.eid+")",wk:base+(i+1)*4})); }   // segmented competing trajectories
+    else if(r&&r.mode==="narrative"){ r.sequence.forEach((x,i)=>marks.push({cls:"cc",lab:x.value+" (T"+x.turn+")",wk:base+(i+1)*4})); } // narrative-aligned
+    else if(c.course.length){ marks.push({cls:"cc",lab:c.course[c.course.length-1].to,wk:base+4}); }                                    // clinical smooth trajectory
+    c.treatments.forEach(t=>marks.push({cls:"tx",lab:t,wk:base+8}));});
+  if(!marks.length){el.innerHTML="";return;} const maxWk=Math.max(10,...marks.map(m=>m.wk));
+  el.innerHTML=`<div class="axis"></div>`+marks.sort((a,b)=>a.wk-b.wk).map(m=>{const left=6+(m.wk/maxWk)*88;return `<div class="mk ${m.cls}" style="left:${left}%"><div class="dot"></div><div class="lab">${m.lab}</div><div class="wk">${m.wk===0?'index':'+'+(Math.round(m.wk*10)/10)+'wk'}</div></div>`;}).join("");}
+function renderPreviewApplied(){if(!S.lastApplied)return;const f=node(S.lastApplied.fid);if(!f)return;const p=document.getElementById("preview");p.className="preview show";
+  const lastClaim=Math.max(...G.edges.filter(e=>e.from===f.id||e.to===f.id).map(e=>e.claimRef));const last=G.edges.filter(e=>(e.from===f.id||e.to===f.id)&&e.claimRef===lastClaim).slice(-1)[0];
+  p.innerHTML=`<div><span class="act">✓ applied</span> → <b>${f.symptomType}</b>: ${esc(last?edgeLabel(last):"")} <span class="muted">(now v${fVersion(f)})</span></div><div class="keys"><button class="btn sm" id="pv-undo">Undo<span class="k">⌘Z</span></button><button class="btn sm" id="pv-hist">History<span class="k">E</span></button></div>`;
+  document.getElementById("pv-undo").onclick=undoLast;document.getElementById("pv-hist").onclick=()=>openInspector(f.id);}
+function renderPreviewAmbiguous(){const p=document.getElementById("preview");p.className="preview ambig show";const pool=S.pending.pool.map(id=>node(id));
+  const what=Object.entries(S.pending.m).filter(([k])=>["frequency","severity","treatment","direction"].includes(k)).map(([k,v])=>`${k} = ${v.name||v}`).join(", ");
+  p.innerHTML=`<div><span class="act">⚠ ambiguous binding</span> — “${esc(S.pending.text)}” (${what}) could apply to:</div><div class="chooser">${pool.map((f,i)=>`<div class="choice" data-idx="${i}"><span class="num">${i+1}</span> ${f.symptomType} <span class="muted" style="margin-left:auto;font-size:10px">${TOPICS.find(t=>t.id===f.topic).label}</span></div>`).join("")}</div><div class="muted" style="font-size:10px;margin-top:6px">press 1–${pool.length} to bind · Esc to cancel</div>`;
+  p.querySelectorAll(".choice").forEach(c=>c.onclick=()=>resolveAmbiguous(+c.dataset.idx));}
+function openInspector(id){const f=node(id);if(!f)return;const c=project(f,activePolicy);
+  document.getElementById("insp-title").textContent=f.symptomType+"  ·  "+(TOPICS.find(t=>t.id===f.topic)||{}).label;
+  const cur=[c.onset&&`onset ${c.onset}`,c.frequency&&`freq ${c.frequency}`,c.severity&&`severity ${c.severity}`,c.attribution&&`attrib ${c.attribution}`].filter(Boolean).join(" · ")||"—";
+  const inc=fIncident(f);
+  document.getElementById("insp-body").innerHTML=`
+    <div class="insp-block"><h3 style="margin:0 0 6px;font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Current state (graph traversal · fold)</h3><div style="font-size:14px">${cur}${c.treatments.length?` · ↘ ${c.treatments.join(", ")} ${c.direction}`:""}</div></div>
+    <div class="insp-block"><h3 style="margin:0 0 6px;font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Incident edges (append-only · v${fVersion(f)})</h3>
+      <div class="evlog">${inc.map(e=>`<div class="evrow ${e._sup?'sup':''}"><span class="et">${e.type}</span><span>${esc(edgeLabel(e))}</span><span class="src">e#${e.id} · C-${e.claimRef} · ${time(e.ts)}</span></div>`).join("")}</div>
+      <p class="muted" style="font-size:10.5px;margin-top:6px">Finding stores no computed state. Everything above is derived by traversing typed edges. Corrections append an OVERRIDES edge (superseded rows struck) — never deleted.</p></div>`;
+  document.getElementById("overlay").classList.add("open");}
+function closeInspector(){document.getElementById("overlay").classList.remove("open");}
+function renderSynth(){const fs=byType("finding");const s=scores();
+  const keyF=fs.length?fs.map(f=>{const c=project(f,activePolicy);return `<div class="kv"><span class="k">${f.symptomType}</span><span>${[c.onset,c.frequency&&'freq '+c.frequency,c.course.map(x=>x.from+'→'+x.to).join(', '),c.treatments.join(', ')].filter(Boolean).join(' · ')||'—'}</span></div>`;}).join(""):'<p class="muted">No findings yet.</p>';
+  const dxRows=[["PTSD",s.PTSD],["MDD",s.MDD],["AUD",s.AUD]].map(([k,v])=>`<div class="dxline"><span class="nm">${DXNAME[k]}</span><span class="bar ${k}" style="flex:1"><span style="width:${v}%"></span></span><span class="muted" style="min-width:90px">${v}% · ${v>=70?'likely':v>=50?'probable':v>=25?'possible':'insufficient'}</span></div>`).join("");
+  document.getElementById("synth").innerHTML=`<div class="panel"><h3>Key findings (graph projection)</h3>${keyF}</div><div class="panel"><h3>Current diagnoses</h3>${dxRows}</div>
+    <div class="panel wide"><h3>Discourse graph — node &amp; edge counts</h3><div class="kv"><span class="k">nodes</span><span>${["claim","finding","event","treatment","time_anchor","narrative_thread"].map(t=>`${t}: ${byType(t).length}`).join(" · ")}</span></div><div class="kv"><span class="k">edges</span><span>${G.edges.length} typed</span></div></div>`;}
+function esc(s){return (s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
+function time(d){return new Date(d).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});}
+function renderAll(){renderTopicRail();renderNarr();renderFindings();renderThreads();renderHyp();renderCov();renderTimeline();if(document.getElementById("view-syn").classList.contains("active"))renderSynth();}
+
+const EX=["cant sleep since injury","every night","now fortnightly","improved after emdr"];
+document.getElementById("examples").innerHTML=EX.map(e=>`<span class="ex-chip">${e}</span>`).join("");
+document.querySelectorAll(".ex-chip").forEach(c=>c.onclick=()=>{const i=document.getElementById("capture");i.value=c.textContent;i.focus();});
+document.getElementById("capture").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();submit();}});
+document.body.addEventListener("click",e=>{const t=e.target.closest("[data-topic]");if(t){S.focusTopic=t.dataset.topic;renderTopicRail();return;}const fc=e.target.closest("[data-fid]");if(fc&&!e.target.closest(".keys")){openInspector(+fc.dataset.fid);}});
+document.getElementById("insp-close").onclick=closeInspector;document.getElementById("overlay").addEventListener("click",e=>{if(e.target.id==="overlay")closeInspector();});
+document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>switchTab(t.dataset.tab));
+document.querySelectorAll(".polsel .pl").forEach(b=>b.onclick=()=>{activePolicy=b.dataset.pol;
+  document.querySelectorAll(".polsel .pl").forEach(x=>x.classList.toggle("on",x===b));
+  renderAll(); if(S.lastApplied)renderPreviewApplied();});  // re-project only; graph untouched
+function switchTab(n){document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===n));document.getElementById("view-ws").classList.toggle("active",n==="ws");document.getElementById("view-syn").classList.toggle("active",n==="syn");if(n==="syn")renderSynth();}
+document.addEventListener("keydown",e=>{const k=e.key.toLowerCase();
+  if((e.metaKey||e.ctrlKey)&&k==="k"){e.preventDefault();switchTab("ws");document.getElementById("capture").focus();return;}
+  if((e.metaKey||e.ctrlKey)&&k==="s"){e.preventDefault();switchTab("syn");return;}
+  if((e.metaKey||e.ctrlKey)&&k==="z"){e.preventDefault();undoLast();return;}
+  if(document.getElementById("overlay").classList.contains("open")){if(e.key==="Escape")closeInspector();return;}
+  if(S.pending){if(/^[1-9]$/.test(e.key)){e.preventDefault();resolveAmbiguous(+e.key-1);}else if(e.key==="Escape"){S.pending=null;document.getElementById("preview").classList.remove("show","ambig");renderAll();}return;}
+});
+renderAll();document.getElementById("capture").focus();
+</script>
+</body>
+</html>

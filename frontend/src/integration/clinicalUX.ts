@@ -149,7 +149,7 @@ export function buildClinicalDecisionViewModel(
   // ── Missing evidence (per surfaced diagnosis with gaps) ────────────────────
   const missingEvidence: MissingEvidenceItem[] = snapshot.semanticStates
     .filter((s) => PRIMARY_SET.has(s.state))
-    .map((s) => {
+    .map((s): MissingEvidenceItem | null => {
       const temporal = temporalById.get(s.diagnosisId);
       const suppression = suppressionById.get(s.diagnosisId);
       const missingCriteria: string[] = [];

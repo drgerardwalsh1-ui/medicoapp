@@ -4,7 +4,7 @@
 //! constitute a contradiction — even when both are affirmed. This is orthogonal
 //! to (and does not replace) the existing diagnosis/symptom *polarity* engine;
 //! it produces additional `CaseContradiction`s that flow through the very same
-//! `enrich_step6 → graph` path.
+//! `enrich_contradictions → graph` path.
 //!
 //! Payload reuse: we emit `CaseContradictionBody::Family(FamilyContradiction)` —
 //! that body already carries a `canonical_value` + `alternatives` (competing
@@ -97,34 +97,62 @@ fn make_contradiction(
     };
     let contradiction_type = attribute_contradiction_type(attribute);
 
-    // More competing values ⇒ lower confidence ⇒ higher severity downstream.
-    let resolution_confidence = 1.0_f32 / distinct.len() as f32;
-
-    let to_value = |f: &FactAssertion| FamilyValue {
-        value: f.value.clone(),
-        support_count: 1,
-        confidence: resolution_confidence,
-        sources: vec![SourceRef {
-            source: f.source_ids.first().cloned().unwrap_or_default(),
-            date: f.temporal.clone(),
-            context: f.raw_text.clone(),
-        }],
-        edge_ids: vec![],
+    // Evidence-distribution confidence (NOT a heuristic): each value's
+    // confidence is its share of ALL observations of this (subject, attribute);
+    // the canonical value is the best-supported one. Multi-source resolution:
+    // every observation of a value becomes a SourceRef on that value.
+    let total = all_members.len().max(1) as f32;
+    let sentence_or_raw = |f: &FactAssertion| {
+        if f.sentence.is_empty() { f.raw_text.clone() } else { f.sentence.clone() }
+    };
+    let to_source = |f: &FactAssertion| SourceRef {
+        source: f.source_ids.first().cloned().unwrap_or_default(),
+        date: f.temporal.clone(),
+        context: sentence_or_raw(f),
+    };
+    let to_value = |d: &FactAssertion| {
+        let members: Vec<&FactAssertion> =
+            all_members.iter().filter(|m| m.value == d.value).collect();
+        FamilyValue {
+            value: d.value.clone(),
+            support_count: members.len() as u32,
+            confidence: members.len() as f32 / total,
+            sources: members.iter().map(|m| to_source(m)).collect(),
+            edge_ids: vec![],
+        }
     };
 
-    let canonical_value = to_value(distinct[0]);
-    let alternatives: Vec<FamilyValue> = distinct[1..].iter().map(|f| to_value(f)).collect();
+    // Canonical = highest support; ties break on the existing deterministic
+    // member order (value asc). `distinct` is value-ordered, so a stable
+    // max-by over support keeps determinism.
+    let mut ordered: Vec<&FactAssertion> = distinct.to_vec();
+    ordered.sort_by(|a, b| {
+        let sa = all_members.iter().filter(|m| m.value == a.value).count();
+        let sb = all_members.iter().filter(|m| m.value == b.value).count();
+        sb.cmp(&sa).then(a.value.cmp(&b.value))
+    });
+    let canonical_value = to_value(ordered[0]);
+    let alternatives: Vec<FamilyValue> = ordered[1..].iter().map(|f| to_value(f)).collect();
+    let resolution_confidence = canonical_value.confidence;
 
-    let source_refs: Vec<SourceRef> = all_members
+    let source_refs: Vec<SourceRef> = all_members.iter().map(|f| to_source(f)).collect();
+
+    let values: Vec<&str> = ordered.iter().map(|f| f.value.as_str()).collect();
+
+    // Per-value provenance for the graph layer: polarity (explicit negation
+    // state), text span, and sentence — keyed by value.
+    let value_provenance: Vec<serde_json::Value> = ordered
         .iter()
-        .map(|f| SourceRef {
-            source: f.source_ids.first().cloned().unwrap_or_default(),
-            date: f.temporal.clone(),
-            context: f.raw_text.clone(),
+        .map(|f| {
+            serde_json::json!({
+                "value": f.value,
+                "polarity": f.polarity.as_str(),
+                "char_offset_start": f.char_offset_start,
+                "char_offset_end": f.char_offset_end,
+                "sentence": sentence_or_raw(f),
+            })
         })
         .collect();
-
-    let values: Vec<&str> = distinct.iter().map(|f| f.value.as_str()).collect();
     let conflict_type = match contradiction_type {
         "temporal_value" => FamilyConflictType::Temporal,
         _ => FamilyConflictType::Relational,
@@ -142,6 +170,7 @@ fn make_contradiction(
         "attribute": attribute,
         "fact_subject": subject,
         "values": values,
+        "value_provenance": value_provenance,
     });
 
     let display_subject = format!("{subject}:{attribute}");
@@ -253,6 +282,7 @@ mod tests {
             char_offset_start: off,
             char_offset_end: off + value.len(),
             raw_text: value.into(),
+            sentence: String::new(),
         }
     }
 

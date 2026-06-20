@@ -500,10 +500,12 @@ pub fn build_events(input: EventBuildInput<'_>) -> Vec<ClinicalEvent> {
 
     // ── Medications (MedicationMention only — no lifecycle inference) ──
     for (i, med) in input.medications.iter().enumerate() {
-        let snip = snippet_for_term(input.clean_text, med);
-        let (snippet, snip_start, snip_end) = snip
-            .map(|(s, st, en)| (s, st, en))
-            .unwrap_or_default();
+        // Classify assertion from sentence context instead of hardcoding
+        // Affirmed. Production data showed "Emma denied taking opioid
+        // medication" persisted as an AFFIRMED medication_mention — the
+        // negation was silently inverted at the event layer.
+        let (status, snippet, snip_start, snip_end) =
+            classify_term_mention(input.clean_text, med);
         let section = section_for_offset(&sections, snip_start);
         out.push(ClinicalEvent {
             event_id: ClinicalEvent::content_addressed_id(
@@ -514,7 +516,7 @@ pub fn build_events(input: EventBuildInput<'_>) -> Vec<ClinicalEvent> {
             raw_concept: med.clone(),
             date: None,
             date_precision: None,
-            assertion_status: Some(AssertionStatus::Affirmed),
+            assertion_status: Some(status),
             source_document_id: doc_id.to_string(),
             source_section: section,
             source_snippet: snippet,
@@ -529,10 +531,10 @@ pub fn build_events(input: EventBuildInput<'_>) -> Vec<ClinicalEvent> {
     // ── Procedures + investigations ─────────────────────────────────────
     for (i, proc) in input.procedures.iter().enumerate() {
         let event_type = classify_procedure_event(proc);
-        let snip = snippet_for_term(input.clean_text, proc);
-        let (snippet, snip_start, snip_end) = snip
-            .map(|(s, st, en)| (s, st, en))
-            .unwrap_or_default();
+        // Context-classified for the same reason as medications: a denied
+        // or queried procedure must not persist as affirmed.
+        let (status, snippet, snip_start, snip_end) =
+            classify_term_mention(input.clean_text, proc);
         let section = section_for_offset(&sections, snip_start);
         out.push(ClinicalEvent {
             event_id: ClinicalEvent::content_addressed_id(
@@ -543,7 +545,7 @@ pub fn build_events(input: EventBuildInput<'_>) -> Vec<ClinicalEvent> {
             raw_concept: proc.clone(),
             date: None,
             date_precision: None,
-            assertion_status: Some(AssertionStatus::Affirmed),
+            assertion_status: Some(status),
             source_document_id: doc_id.to_string(),
             source_section: section,
             source_snippet: snippet,
@@ -638,12 +640,46 @@ pub fn build_events(input: EventBuildInput<'_>) -> Vec<ClinicalEvent> {
 /// Returns `(snippet, start, end)` where the invariant
 /// `text[start..end] == snippet` holds. This is the byte-equality rule
 /// enforced by the persistence boundary's snippet-integrity check.
+/// Classify the first mention of `term` in `clean_text` via the shared
+/// assertion classifier, returning (status, snippet, start, end).
+///
+/// Used for medication / procedure events so that negated or contradicted
+/// mentions ("denied taking opioid medication") are persisted with their
+/// real assertion status instead of a hardcoded Affirmed. `SymptomOnly` is
+/// mapped back to Affirmed — symptom-verb framing ("reports taking X") is
+/// normal for medications and carries no doubt about the mention itself.
+///
+/// Falls back to `snippet_for_term` + Affirmed when the classifier finds
+/// no mention (e.g. canonical med name absent from text after synonym
+/// expansion), preserving the previous snippet behaviour.
+fn classify_term_mention(
+    clean_text: &str,
+    term: &str,
+) -> (AssertionStatus, String, usize, usize) {
+    if let Some(m) = crate::assertion::classify_all_mentions(clean_text, term, false)
+        .into_iter()
+        .next()
+    {
+        let status = match m.status {
+            crate::assertion::AssertionStatus::SymptomOnly => AssertionStatus::Affirmed,
+            other => AssertionStatus::parse(other.as_str()).unwrap_or(AssertionStatus::Affirmed),
+        };
+        return (status, m.snippet, m.start, m.end);
+    }
+    let (snippet, start, end) =
+        snippet_for_term(clean_text, term).unwrap_or_default();
+    (AssertionStatus::Affirmed, snippet, start, end)
+}
+
 fn snippet_for_term(text: &str, term: &str) -> Option<(String, usize, usize)> {
     if term.is_empty() {
         return None;
     }
-    let lower_text = text.to_lowercase();
-    let lower_term = term.to_lowercase();
+    // ASCII-only lowercase: byte-length-preserving, so `pos` is a valid
+    // offset into `text` even when the document contains non-ASCII
+    // characters whose Unicode lowercase has a different byte length.
+    let lower_text = text.to_ascii_lowercase();
+    let lower_term = term.to_ascii_lowercase();
     let pos = lower_text.find(&lower_term)?;
     let line_byte_start = text[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
     let line_byte_end = text[pos..].find('\n').map(|i| pos + i).unwrap_or(text.len());

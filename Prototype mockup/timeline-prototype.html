@@ -1,0 +1,1166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MedicoApp — episode timeline prototype</title>
+<style>
+  :root{
+    --bg:#faf9f6; --surface:#ffffff; --surface2:#f1efe8;
+    --text:#2c2c2a; --text2:#5f5e5a; --text3:#888780;
+    --border:rgba(0,0,0,.14); --border2:rgba(0,0,0,.28);
+    --info:#185fa5; --info-bg:#e6f1fb;
+    --constitutional:#4a4a47; --preexisting:#4f9fd6;
+    --injury1:#d55e00; --injury2:#e69f00; --neutral:#888780;
+    --threshold:#2f7ec4; --danger:#c1440a; --warning:#8a6d12; --seg-edge:#2c2c2a;
+    --radius:8px; --radius-lg:12px;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#1a1a18; --surface:#242421; --surface2:#2c2c2a;
+      --text:#f1efe8; --text2:#b4b2a9; --text3:#888780;
+      --border:rgba(255,255,255,.16); --border2:rgba(255,255,255,.3);
+      --info:#85b7eb; --info-bg:#0c447c; --seg-edge:#e9e7df; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);
+    font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:1100px;margin:0 auto;padding:28px 24px 80px;}
+  h1{font-size:21px;font-weight:500;margin:0 0 2px;}
+  .sub{font-size:13px;color:var(--text2);margin:0 0 22px;}
+  .panel{background:var(--surface);border:.5px solid var(--border);
+    border-radius:var(--radius-lg);padding:14px 16px;margin-bottom:14px;}
+  .panel-h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;}
+  .panel-t{font-size:14px;font-weight:500;}
+  .panel-x{font-size:11px;color:var(--text3);}
+  .hint{font-size:11px;color:var(--text2);margin:0 0 12px;}
+
+  /* capture bar */
+  .capture{display:flex;gap:8px;align-items:center;margin-bottom:8px;}
+  .capture input{flex:1;height:38px;border:.5px solid var(--border2);
+    border-radius:var(--radius);background:var(--surface);color:var(--text);
+    font-family:var(--mono);font-size:13px;padding:0 12px;outline:none;}
+  .capture input:focus{box-shadow:0 0 0 2px var(--info-bg);border-color:var(--info);}
+  .capture button{height:38px;padding:0 14px;border:.5px solid var(--border2);
+    border-radius:var(--radius);background:transparent;color:var(--text);
+    font-size:13px;cursor:pointer;}
+  .capture button:hover{background:var(--surface2);}
+  .examples{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;}
+  .ex{font-size:11px;font-family:var(--mono);background:var(--surface2);
+    color:var(--text2);padding:3px 8px;border-radius:6px;cursor:pointer;border:.5px solid transparent;}
+  .ex:hover{border-color:var(--border2);color:var(--text);}
+  .parsed{display:flex;flex-wrap:wrap;gap:6px;min-height:22px;margin-bottom:4px;}
+  .chip{font-size:11px;padding:3px 9px;border-radius:6px;}
+  .chip.ok{background:#e1f5ee;color:#0f6e56;}
+  .chip.field{background:var(--info-bg);color:var(--info);}
+  .chip.err{background:#fcebeb;color:#a32d2d;}
+
+  /* timeline panels */
+  .track-area{position:relative;}
+  .lane{position:relative;}
+  .lane-label{position:absolute;left:0;font-weight:500;}
+  .lane-track{position:absolute;right:0;}
+  .axis-line{position:absolute;height:.5px;background:var(--border);}
+  .block{position:absolute;border-radius:4px;box-sizing:border-box;
+    overflow:hidden;cursor:pointer;display:flex;align-items:center;
+    padding:0 7px;font-size:10px;white-space:nowrap;}
+  .block.index{border:1.5px solid var(--injury1);}
+  .block .lbl{overflow:hidden;text-overflow:ellipsis;}
+  .marker{position:absolute;width:2px;z-index:5;}
+  .marker-cap{position:absolute;transform:translateX(-50%);font-size:10px;
+    white-space:nowrap;z-index:6;background:var(--surface);padding:0 4px;}
+  .tick{position:absolute;font-size:10px;color:var(--text3);transform:translateX(-50%);}
+  .tick.l0{transform:none;}
+  .tick.r0{transform:translateX(-100%);}
+
+  /* overview viewport */
+  .viewport{position:absolute;background:rgba(24,95,165,.13);
+    border:1px solid var(--info);border-radius:4px;z-index:4;cursor:grab;}
+  .viewport.drag{cursor:grabbing;}
+  .vp-handle{position:absolute;top:0;bottom:0;width:8px;cursor:ew-resize;}
+  .vp-handle.l{left:-4px;} .vp-handle.r{right:-4px;}
+
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;
+    padding-top:12px;border-top:.5px solid var(--border);font-size:11px;color:var(--text2);}
+  .sw{display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:-1px;margin-right:3px;}
+  .chev{cursor:pointer;user-select:none;color:var(--text2);font-weight:400;
+    display:inline-block;width:14px;}
+  .readout{margin-top:14px;background:var(--surface);border:.5px solid var(--border);
+    border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--text2);}
+  .readout b{color:var(--text);font-weight:500;}
+  .go{background-image:repeating-linear-gradient(135deg,var(--injury1),var(--injury1) 4px,#791f1f 4px,#791f1f 8px);}
+  .ghost{background:transparent !important;border:1px dashed var(--border2);color:var(--text3) !important;font-style:italic;}
+  .subhdr{position:absolute;font-size:10px;color:var(--text3);}
+  .block.sel{outline:2px solid var(--text);outline-offset:1px;z-index:7;}
+  .block[data-id]{cursor:grab;}
+  .block[data-id]:active{cursor:grabbing;}
+  .lbl{pointer-events:none;}
+  .eh{position:absolute;top:0;bottom:0;width:8px;z-index:8;cursor:ew-resize;}
+  .eh.l{left:-2px;} .eh.r{right:-2px;}
+  .seg{position:absolute;}
+  .kf{position:absolute;width:2px;background:var(--surface);z-index:3;}
+  .kf-tag{position:absolute;font-size:9px;font-weight:500;z-index:4;}
+  /* context lanes */
+  .ctx-head{position:absolute;font-size:10px;color:var(--text3);letter-spacing:.02em;}
+  .cbar{position:absolute;border-radius:3px;box-sizing:border-box;overflow:hidden;
+    display:flex;align-items:center;gap:4px;padding:0 6px;font-size:10px;cursor:grab;}
+  .cbar .lbl{pointer-events:none;}
+  .cbar.sel,.cseg.sel,.cpoint.sel{outline:2px solid var(--text);outline-offset:1px;z-index:9;}
+  .cseg{position:absolute;border-radius:3px;box-sizing:border-box;overflow:hidden;
+    display:flex;align-items:center;padding:0 6px;font-size:10px;cursor:pointer;}
+  .cpoint{position:absolute;display:flex;align-items:center;gap:3px;font-size:10px;
+    color:var(--text2);cursor:pointer;white-space:nowrap;}
+  .cpoint .pin{width:2px;height:16px;background:var(--text3);}
+  .src{font-size:10px;opacity:.85;}
+  .ctx-toolbar{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px;}
+  .ctx-toolbar .insp-sub{align-self:center;}
+  /* inspector */
+  .insp-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;}
+  .insp-title{font-size:14px;font-weight:500;}
+  .insp-sub{font-size:11px;color:var(--text3);}
+  .insp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;}
+  .insp-row{display:flex;flex-direction:column;gap:4px;}
+  .insp-row label{font-size:11px;color:var(--text2);}
+  .insp-row input[type=number],.insp-row input[type=text],.insp-row select,.step-add input,.step-add select{
+    height:32px;border:.5px solid var(--border2);border-radius:6px;background:var(--surface);
+    color:var(--text);padding:0 8px;font-size:13px;font-family:var(--sans);}
+  .chkline{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer;}
+  .btn{height:30px;padding:0 12px;border:.5px solid var(--border2);border-radius:6px;
+    background:transparent;color:var(--text);font-size:12px;cursor:pointer;}
+  .btn:hover{background:var(--surface2);}
+  .btn.danger{color:var(--danger);border-color:var(--danger);}
+  .steps-list{display:flex;flex-direction:column;gap:6px;margin-top:6px;}
+  .step-item{display:flex;align-items:center;gap:8px;font-size:12px;background:var(--surface2);
+    padding:5px 9px;border-radius:6px;}
+  .step-item .x{margin-left:auto;cursor:pointer;color:var(--text3);}
+  .step-item .x:hover{color:var(--danger);}
+  .step-add{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;}
+  .daterow{grid-column:1 / -1;}
+  .date-inputs{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .date-inputs > span{display:flex;align-items:center;gap:6px;min-width:0;}
+  .date-inputs input{width:100%;min-width:0;}
+  /* compact onset+end range — all four boxes on one line */
+  .daterange{grid-column:1 / -1;}
+  .dr-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+  .dr-cell > label{display:block;}
+  .dr-pair{display:grid;grid-template-columns:1fr auto 1fr auto;gap:6px;align-items:center;}
+  .dr-pair input{width:100%;min-width:0;}
+  .dr-pair .insp-sub{white-space:nowrap;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Episode timeline — interactive prototype</h1>
+  <p class="sub">Comorbid depression · PTSD · alcohol misuse, one client. Drag the viewport, expand a diagnosis, or type to capture. Throwaway UX prototype — touches no app code.</p>
+
+  <!-- CAPTURE -->
+  <div class="panel">
+    <div class="panel-h"><span class="panel-t">Capture bar</span><span class="panel-x">type shorthand · Enter to drop a block</span></div>
+    <p class="hint">Type a diagnosis (<code>depression</code>, <code>ptsd</code>, <code>alcohol</code>) <i>or</i> a treatment by name — a medication (<code>fluox</code>→Fluoxetine), therapy (<code>EMDR</code>, <code>CBT</code>) or procedure (<code>ORIF</code>, <code>admission</code>) — then onset (<code>age 20-24</code>, <code>5y ago</code>, <code>+2wk post-injury</code>), duration (<code>for 6mo</code>, <code>ongoing</code>) and severity. Age-based and approximate dates are flagged ~circa automatically.</p>
+    <div class="examples" id="examples"></div>
+    <div class="capture">
+      <input id="capin" placeholder="depression +2wk post-injury severe ongoing" autocomplete="off" />
+      <button id="capbtn">Add ↵</button>
+    </div>
+    <div class="parsed" id="parsed"></div>
+  </div>
+
+  <!-- OVERVIEW -->
+  <div class="panel">
+    <div class="panel-h"><span class="panel-t">Life course — overview</span><span class="panel-x">age 20 → 45 · drag the blue box to set the zoom window</span></div>
+    <div class="track-area" id="overview"></div>
+  </div>
+
+  <!-- ZOOM -->
+  <div class="panel">
+    <div class="panel-h"><span class="panel-t">Zoom — detail window</span><span class="panel-x" id="zoomrange"></span></div>
+    <p class="hint">Click a diagnosis ▸ to expand to symptom level. Symptoms inherit the envelope onset (dashed) until you edit them; the threshold-met marker is derived.</p>
+    <div class="track-area" id="zoom"></div>
+    <div class="legend" id="legend"></div>
+    <div class="readout" id="readout"></div>
+  </div>
+
+  <!-- INSPECTOR -->
+  <div class="panel">
+    <div class="panel-h"><span class="panel-t">Inspector</span><span class="panel-x">click a block to edit · changes are live</span></div>
+    <div id="inspector"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const NOW = 12;               // months from injury = current assessment
+const DOMAIN = {min:-300, max:13};
+const AGE_AT_INJURY = 44;
+const toAge = t => AGE_AT_INJURY + t/12;
+const ageToM = a => (a - AGE_AT_INJURY)*12;            // age in years → months from injury
+const ageStr = t => (Math.round(toAge(t)*10)/10).toString();
+const WK = 7/30.4, YR = 12;   // months per week / year
+
+// Deuteranopia/protanopia-safe: encoding never relies on hue alone.
+// Each attribution = distinct hue + lightness + fill PATTERN; severity = bar HEIGHT.
+const ATTR = {
+  constitutional:{c:'#4a4a47', label:'constitutional', pat:'cross', tc:'#fff'},   // neutral dark + crosshatch
+  preexisting:   {c:'#4f9fd6', label:'pre-existing',   pat:'diag',  tc:'#0c2c44'}, // light blue + diagonal
+  injury1:       {c:'#d55e00', label:'injury 1 (index)',pat:'solid', tc:'#fff'},   // dark vermillion, SOLID (hero)
+  injury2:       {c:'#e69f00', label:'injury 2',        pat:'dots',  tc:'#3a2700'},// light amber + dots
+};
+function patternCss(attr){
+  const c=ATTR[attr].c, p=ATTR[attr].pat;
+  if(p==='diag')  return `background-color:${c};background-image:repeating-linear-gradient(45deg,rgba(0,0,0,.30) 0 3px,transparent 3px 7px);`;
+  if(p==='cross') return `background-color:${c};background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.22) 0 2px,transparent 2px 6px),repeating-linear-gradient(-45deg,rgba(255,255,255,.22) 0 2px,transparent 2px 6px);`;
+  if(p==='dots')  return `background-color:${c};background-image:radial-gradient(rgba(0,0,0,.34) 1.1px,transparent 1.6px);background-size:6px 6px;`;
+  return `background-color:${c};`;
+}
+const SEV_H = {mild:10, mod:17, severe:24, '':19};   // severity → column height (px), redundant with colour
+const txtOn = bg => '#fff';
+
+// provenance — source carries an ICON (never colour-only); confidence carries an edge STYLE
+const SOURCE = {
+  doc:       {icon:'ti-file-text', label:'documents / records'},
+  self:      {icon:'ti-user',      label:'patient self-report'},
+  collateral:{icon:'ti-users',     label:'collateral'},
+};
+const srcIcon = s => `<i class="ti ${(SOURCE[s]||SOURCE.self).icon}" aria-hidden="true"></i>`;
+const edgeStyle = conf => conf==='estimated' ? 'dashed' : 'solid';   // confidence → solid/dashed
+function dotsCss(c){ return `background-color:${c};background-image:radial-gradient(rgba(0,0,0,.30) 1.1px,transparent 1.6px);background-size:6px 6px;`; }
+function diagCss(c){ return `background-color:${c};background-image:repeating-linear-gradient(45deg,rgba(0,0,0,.28) 0 3px,transparent 3px 7px);`; }
+// work-capacity levels: status band, pattern + label (colour never alone)
+const WORK = {
+  full:      {css:'background-color:#9fb4c9;', tc:'#1c2e40', label:'full duties'},
+  restricted:{cssFn:()=>dotsCss('#e6c178'),    tc:'#3a2700', label:'restricted'},
+  unfit:     {cssFn:()=>diagCss('#d9824f'),    tc:'#3a1500', label:'unfit for work'},
+};
+const workCss = lv => (WORK[lv].cssFn?WORK[lv].cssFn():WORK[lv].css);
+
+let nextId = 100;
+
+const state = {
+  events:[
+    {id:'inj1', label:'Subject injury', t:0, kind:'injury'},
+    {id:'mva',  label:'Later MVA',      t:6, kind:'subsequent'},
+  ],
+  background:[
+    {label:'Autism (ASD)', note:'lifelong · developmental · context, not attributed'},
+  ],
+  lanes:[
+    {id:'depression', name:'Depression', expanded:false, episodes:[
+      {id:'d1', start:-288, end:-252, attr:'constitutional', sev:'severe', note:'age 20 · 3y', source:'doc', confidence:'certain'},
+      {id:'d2', start:-48,  end:-42,  attr:'preexisting',   sev:'mod',    note:'PND', source:'collateral', confidence:'estimated', circa:true},
+      {id:'d3', start:-1,   end:NOW,  attr:'injury1', sev:'severe', gradual:true, note:'gradual → severe', source:'self', confidence:'estimated', circa:true},
+    ], symptoms:[]},
+    {id:'ptsd', name:'PTSD', expanded:false, episodes:[
+      {id:'p1', start:0, end:NOW, attr:'injury1', sev:'severe', note:'meets criteria from +3wk', source:'self', confidence:'certain'},
+    ], symptoms:[
+      {id:'s1', name:'Flashbacks',          cluster:'B · Intrusion', start:0,    end:2,   edited:true,  resolved:true},
+      {id:'s2', name:'Nightmares',          cluster:'B · Intrusion', start:1*WK, end:NOW, edited:true},
+      {id:'s3', name:'Situational avoidance',cluster:'C · Avoidance', inherit:true},
+      {id:'s4', name:'Hypervigilance',      cluster:'E · Arousal',   inherit:true},
+      {id:'s5', name:'Sleep disturbance',   cluster:'E · Arousal',   start:1*WK, end:NOW, edited:true},
+    ], threshold:3*WK},
+    {id:'alcohol', name:'Alcohol misuse', expanded:false, episodes:[
+      {id:'a1', start:-288, end:-216, attr:'preexisting', sev:'mod', note:'age 20–26', source:'self', confidence:'estimated', circa:true},
+      {id:'a2', start:1.5,  end:NOW,  attr:'injury1', sev:'mod', note:'relapse', source:'collateral', confidence:'certain', steps:[{t:6, sev:'severe', note:'aggravated by MVA'}]},
+    ], symptoms:[]},
+  ],
+  // authored CONTEXT lanes — not derived; tell the causation/quantum story alongside symptoms
+  contextLanes:[
+    {id:'work', name:'Work capacity', kind:'status', segments:[
+      {id:'w1', start:-40, end:-0.5, level:'full',       source:'doc'},
+      {id:'w2', start:-0.5, end:6,   level:'unfit',      source:'doc'},
+      {id:'w3', start:6,   end:NOW,  level:'restricted', source:'doc'},
+    ]},
+  ],
+  // Treatments — an expandable group (like diagnosis→symptoms); collapses to one envelope row
+  treatments:{ id:'treat', name:'Treatments', expanded:false, lanes:[
+    {id:'med', name:'Medication', kind:'interval', icon:'ti-pill', items:[
+      {id:'m1', start:ageToM(20), end:ageToM(23), label:'Fluoxetine', source:'doc', confidence:'estimated', circa:true, circaEnd:true},
+      {id:'m2', start:0.5,  end:NOW,  label:'Sertraline 100mg', source:'doc', confidence:'certain'},
+      {id:'m3', start:2,    end:NOW,  label:'Mirtazapine 30mg', source:'doc', confidence:'certain'},
+    ]},
+    {id:'psych', name:'Therapy', kind:'interval', icon:'ti-message-2', items:[
+      {id:'t1', start:1, end:8,   label:'CBT (12 sessions)', source:'doc',  confidence:'certain'},
+      {id:'t2', start:8, end:NOW, label:'EMDR (ongoing)',    source:'self', confidence:'estimated'},
+    ]},
+    {id:'proc', name:'Procedures', kind:'point', items:[
+      {id:'o1', t:0.1, label:'ORIF right wrist',     icon:'ti-cut',              source:'doc'},
+      {id:'h1', t:1.5, label:'Psych admission (2/52)',icon:'ti-building-hospital',source:'doc'},
+    ]},
+  ]},
+  viewport:{start:-2, end:NOW+1},
+  selected:null,
+  legendOpen:false,
+};
+// every authored context lane (work + the treatment sub-lanes), for resolution
+function ctxLaneById(id){ return state.contextLanes.find(l=>l.id===id) || state.treatments.lanes.find(l=>l.id===id); }
+
+/* ---------- geometry ---------- */
+const LABEL_W = 96, SUB_LABEL_W = 150;
+function xIn(t, d0, d1, w){ return (t-d0)/(d1-d0)*w; }
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+
+// greedy stagger so close marker captions don't overlap; returns max row used
+function assignRows(caps){
+  caps.sort((a,b)=>a.x-b.x);
+  const rowRight=[];
+  caps.forEach(c=>{
+    const w=c.text.length*5.6+16, left=c.x-w/2;
+    let r=0; while(rowRight[r]!=null && left < rowRight[r]+6) r++;
+    rowRight[r]=c.x+w/2; c.row=r;
+  });
+  return caps.reduce((m,c)=>Math.max(m,c.row),0);
+}
+
+// draw one episode as severity-HEIGHT columns + pattern fill + keyframe notches + a draggable overlay
+function drawEpisodeHtml(ep, lane, d0, d1, trackW, top, h){
+  const vS=clamp(ep.start,d0,d1), vE=clamp(ep.end,d0,d1);
+  if(vE<=d0||vS>=d1) return '';
+  const x0=xIn(vS,d0,d1,trackW), x1=xIn(vE,d0,d1,trackW), bw=Math.max(6,x1-x0);
+  const steps=ep.steps||[];
+  const pts=[ep.start, ...steps.map(s=>s.t), ep.end];
+  const sevs=[ep.sev||'', ...steps.map(s=>s.sev)];
+  const isIdx=ep.attr==='injury1';
+  let html='';
+  // baseline under the whole episode (columns grow upward from it)
+  html+=`<div style="position:absolute;left:${x0}px;width:${bw}px;top:${top+h-1}px;height:1px;background:var(--border2)"></div>`;
+  for(let i=0;i<pts.length-1;i++){
+    const ss=clamp(pts[i],d0,d1), se=clamp(pts[i+1],d0,d1);
+    if(se<=d0||ss>=d1) continue;
+    const sx=xIn(ss,d0,d1,trackW), sw=Math.max(2,xIn(se,d0,d1,trackW)-sx);
+    const sh=SEV_H[sevs[i]]??19, segTop=top+(h-sh);
+    const rad = sh>=h ? (i===0?'4px 4px 0 0':'4px 4px 0 0') : '3px 3px 0 0';
+    // confidence → outline STYLE on every column (solid certain / dashed estimated); CB-safe redundancy
+    const edge = `outline:1.25px ${edgeStyle(ep.confidence)} var(--seg-edge);outline-offset:-1.25px;`;
+    html+=`<div class="seg" style="left:${sx}px;width:${sw}px;top:${segTop}px;height:${sh}px;${patternCss(ep.attr)}border-radius:${rad};${edge}"></div>`;
+  }
+  // soft / uncertain onset (insidious OR estimated date) → hatched cap at the left edge
+  if((ep.gradual||ep.circa) && ep.start>=d0){
+    const capEnd=xIn(Math.min(ep.start+1,ep.end),d0,d1,trackW);
+    html+=`<div style="position:absolute;left:${x0}px;width:${Math.max(8,capEnd-x0)}px;top:${top+2}px;height:${h-2}px;background-image:repeating-linear-gradient(60deg,rgba(255,255,255,.55) 0 2px,transparent 2px 6px);border-radius:4px 0 0 0"></div>`;
+  }
+  // uncertain end date → hatched cap at the right edge (not for ongoing)
+  if(ep.circaEnd && ep.end<NOW && ep.end<=d1){
+    const capStart=xIn(Math.max(ep.end-1,ep.start),d0,d1,trackW);
+    html+=`<div style="position:absolute;left:${capStart}px;width:${Math.max(8,x1-capStart)}px;top:${top+2}px;height:${h-2}px;background-image:repeating-linear-gradient(60deg,rgba(255,255,255,.55) 0 2px,transparent 2px 6px);border-radius:0 4px 0 0"></div>`;
+  }
+  steps.forEach(stp=>{
+    if(stp.t<=d0||stp.t>=d1) return;
+    const kx=xIn(stp.t,d0,d1,trackW);
+    html+=`<div class="kf" style="left:${kx-1}px;top:${top-2}px;height:${h+4}px"></div>`;
+    html+=`<div class="kf-tag" style="left:${kx+3}px;top:${top-1}px;color:var(--text)">↑${stp.sev}</div>`;
+  });
+  const sel = state.selected && state.selected.laneId===lane.id && state.selected.kind==='episode' && state.selected.id===ep.id;
+  const lastSev = sevs[sevs.length-1];
+  const agg = steps.length?' · ↑ aggravated':'';
+  html+=`<div class="block ${sel?'sel':''}" data-lane="${lane.id}" data-kind="episode" data-id="${ep.id}" `+
+    `style="left:${x0}px;width:${bw}px;top:${top}px;height:${h}px;background:transparent;align-items:flex-end;padding-bottom:1px">`+
+    `<span class="eh l"></span><span class="eh r"></span>`+
+    `<span class="lbl" style="font-size:9px;color:#fff;text-shadow:0 0 3px rgba(0,0,0,.85),0 0 2px rgba(0,0,0,.85)">`+
+      `${srcIcon(ep.source)} ${ep.circa?'~':''}${ep.note?ep.note+' · ':''}${lastSev}${agg}</span></div>`;
+  return html;
+}
+
+// ── context lanes (authored: work capacity, medication, therapy, procedures) ──
+function packRows(items, d0, d1){
+  const vis=items.filter(it=>!(it.end<=d0||it.start>=d1)).slice().sort((a,b)=>a.start-b.start);
+  const rowEnd=[];
+  vis.forEach(it=>{ let r=0; while(rowEnd[r]!=null && it.start < rowEnd[r]-0.001) r++; rowEnd[r]=it.end; it._row=r; });
+  return {vis, rows:Math.max(1, rowEnd.length)};
+}
+// stagger left-anchored point labels so they don't overlap (returns max row used)
+function packPoints(pv){
+  pv.sort((a,b)=>a.x-b.x);
+  const rowEnd=[];
+  pv.forEach(p=>{ const w=p.text.length*5.6+30; let r=0; while(rowEnd[r]!=null && p.x < rowEnd[r]+4) r++; rowEnd[r]=p.x+w; p.row=r; });
+  return pv.reduce((m,p)=>Math.max(m,p.row),0);
+}
+// soft-edge hatch (circa / uncertain) used on context bars
+const CAP = 'background-image:repeating-linear-gradient(60deg,var(--text3) 0 1.5px,transparent 1.5px 4px)';
+// one context lane → {html, y}. indent offsets the label for nested (treatment) sub-lanes.
+function ctxLaneHtml(cl, d0, d1, trackW, labW, y, compact, indent){
+  indent=indent||0; let html='';
+  const labStyle=`top:${y+(compact?-1:(cl.kind==='interval'?4:5))}px;left:${indent}px;width:${labW-indent}px;font-size:${compact?9:11}px;color:var(--text2)`;
+  if(cl.kind==='status'){
+    const hH=compact?9:18, lh=hH+(compact?3:8);
+    html+=`<div class="lane-label" style="${labStyle}">${cl.name}</div>`;
+    html+=`<div class="lane-track" style="left:${labW}px;width:${trackW}px;top:${y}px;height:${lh}px">`;
+    cl.segments.forEach(sg=>{
+      const s=clamp(sg.start,d0,d1), e=clamp(sg.end,d0,d1); if(e<=d0||s>=d1) return;
+      const x=xIn(s,d0,d1,trackW), bw=Math.max(3,xIn(e,d0,d1,trackW)-x);
+      const sel=sameSel('ctx-status',cl.id,sg.id), w=WORK[sg.level];
+      html+=`<div class="cseg ${sel?'sel':''}" data-lane="${cl.id}" data-kind="ctx-status" data-id="${sg.id}" `+
+        `style="left:${x}px;width:${bw}px;top:${compact?0:2}px;height:${hH}px;${workCss(sg.level)}color:${w.tc}">`+
+        (compact?'':`<span class="lbl">${w.label}</span>`)+`</div>`;
+    });
+    html+=`</div>`; return {html, y:y+lh};
+  }
+  if(cl.kind==='interval'){
+    const {vis,rows}=packRows(cl.items,d0,d1);
+    const rh=compact?10:20, lh=compact?11:(rows*rh+4);
+    html+=`<div class="lane-label" style="${labStyle}">${cl.icon?`<i class="ti ${cl.icon}" aria-hidden="true"></i> `:''}${cl.name}</div>`;
+    html+=`<div class="lane-track" style="left:${labW}px;width:${trackW}px;top:${y}px;height:${lh}px">`;
+    vis.forEach(it=>{
+      const s=clamp(it.start,d0,d1), e=clamp(it.end,d0,d1);
+      const x=xIn(s,d0,d1,trackW), bw=Math.max(6,xIn(e,d0,d1,trackW)-x);
+      const bh=compact?9:15, bt=(compact?0:it._row*rh)+(compact?0:2);
+      const sel=sameSel('ctx-interval',cl.id,it.id);
+      const edge=`border:0.5px ${edgeStyle(it.confidence)} var(--border2);`;
+      let caps='';
+      if(!compact){
+        if(it.circa    && it.start>=d0) caps+=`<span style="position:absolute;left:0;top:0;bottom:0;width:7px;${CAP}"></span>`;
+        if(it.circaEnd && it.end<=d1)   caps+=`<span style="position:absolute;right:0;top:0;bottom:0;width:7px;${CAP}"></span>`;
+      }
+      html+=`<div class="cbar ${sel?'sel':''}" data-lane="${cl.id}" data-kind="ctx-interval" data-id="${it.id}" `+
+        `style="left:${x}px;width:${bw}px;top:${bt}px;height:${bh}px;background:var(--surface2);${edge}color:var(--text2)">`+
+        (compact?'':`${caps}<span class="eh l"></span><span class="eh r"></span><span class="src">${srcIcon(it.source)}</span><span class="lbl">${it.circa?'~':''}${it.label}</span>`)+`</div>`;
+    });
+    html+=`</div>`; return {html, y:y+lh};
+  }
+  // point
+  if(compact){
+    const lh=11;
+    html+=`<div class="lane-label" style="${labStyle}">${cl.name}</div>`;
+    html+=`<div class="lane-track" style="left:${labW}px;width:${trackW}px;top:${y}px;height:${lh}px">`;
+    cl.items.forEach(it=>{ if(it.t<d0||it.t>d1) return; const x=xIn(it.t,d0,d1,trackW);
+      html+=`<div class="cpoint" data-lane="${cl.id}" data-kind="ctx-point" data-id="${it.id}" style="left:${x}px;top:0"><span class="pin"></span></div>`; });
+    html+=`</div>`; return {html, y:y+lh};
+  }
+  const pv=cl.items.filter(it=>it.t>=d0&&it.t<=d1).map(it=>({it, x:xIn(it.t,d0,d1,trackW), text:(it.circa?'~':'')+it.label}));
+  const maxRow=packPoints(pv), rowH=15, lh=Math.max(22,(maxRow+1)*rowH+4);
+  html+=`<div class="lane-label" style="${labStyle}">${cl.name}</div>`;
+  html+=`<div class="lane-track" style="left:${labW}px;width:${trackW}px;top:${y}px;height:${lh}px">`;
+  pv.forEach(p=>{ const it=p.it, sel=sameSel('ctx-point',cl.id,it.id);
+    html+=`<div class="cpoint ${sel?'sel':''}" data-lane="${cl.id}" data-kind="ctx-point" data-id="${it.id}" style="left:${p.x}px;top:${2+p.row*rowH}px">`+
+      `<span class="pin"></span><i class="ti ${it.icon||'ti-point'}" aria-hidden="true"></i><span>${it.circa?'~':''}${it.label}</span> <span class="src">${srcIcon(it.source)}</span></div>`;
+  });
+  html+=`</div>`; return {html, y:y+lh};
+}
+
+// CONTEXT region: standalone lanes (work capacity) + the expandable Treatments group
+function drawContextLanes(d0, d1, trackW, labW, y0, compact){
+  let y=y0, html='';
+  if(!compact){ html+=`<div class="ctx-head" style="left:0;top:${y}px">CONTEXT</div>`; y+=16; }
+  state.contextLanes.forEach(cl=>{ const r=ctxLaneHtml(cl,d0,d1,trackW,labW,y,compact,0); html+=r.html; y=r.y+(compact?3:6); });
+
+  const tg=state.treatments;
+  const mergedIntervals=()=>{ const a=[]; tg.lanes.forEach(cl=>{ if(cl.kind==='interval') cl.items.forEach(it=>a.push({start:it.start,end:it.end,id:it.id,label:it.label,laneId:cl.id})); }); return a; };
+  const mergedPoints =()=>{ const a=[]; tg.lanes.forEach(cl=>{ if(cl.kind==='point') cl.items.forEach(it=>a.push({t:it.t,id:it.id,laneId:cl.id})); }); return a; };
+  if(compact){
+    const lh=11;
+    html+=`<div class="lane-label" style="top:${y-1}px;left:0;width:${labW}px;font-size:9px;color:var(--text2)">${tg.name}</div>`;
+    html+=`<div class="lane-track" style="left:${labW}px;width:${trackW}px;top:${y}px;height:${lh}px">`;
+    packRows(mergedIntervals(),d0,d1).vis.forEach(m=>{ const s=clamp(m.start,d0,d1), e=clamp(m.end,d0,d1); if(e<=d0||s>=d1) return;
+      const x=xIn(s,d0,d1,trackW), bw=Math.max(4,xIn(e,d0,d1,trackW)-x);
+      html+=`<div style="position:absolute;left:${x}px;width:${bw}px;top:0;height:9px;background:var(--surface2);border:0.5px solid var(--border2);border-radius:2px"></div>`; });
+    mergedPoints().forEach(m=>{ if(m.t<d0||m.t>d1) return; const x=xIn(m.t,d0,d1,trackW); html+=`<div style="position:absolute;left:${x}px;top:-1px"><span class="pin" style="height:11px"></span></div>`; });
+    html+=`</div>`; return {html, y:y+lh+3};
+  }
+  html+=`<div class="lane-label" style="top:${y+5}px;left:0;width:${labW}px;font-size:13px;color:var(--text)">`+
+    `<span class="chev" data-treat="1">${tg.expanded?'▾':'▸'}</span>${tg.name}`+
+    (tg.expanded?'':`<span style="font-size:9px;color:var(--text3);font-weight:400"> envelope</span>`)+`</div>`;
+  if(!tg.expanded){
+    const {vis,rows}=packRows(mergedIntervals(),d0,d1), rh=15, lh=Math.max(18,rows*rh+3);
+    html+=`<div class="lane-track" style="left:${labW}px;width:${trackW}px;top:${y}px;height:${lh}px">`;
+    vis.forEach(m=>{ const s=clamp(m.start,d0,d1), e=clamp(m.end,d0,d1); if(e<=d0||s>=d1) return;
+      const x=xIn(s,d0,d1,trackW), bw=Math.max(6,xIn(e,d0,d1,trackW)-x);
+      html+=`<div class="cbar" data-lane="${m.laneId}" data-kind="ctx-interval" data-id="${m.id}" style="left:${x}px;width:${bw}px;top:${m._row*rh+2}px;height:13px;background:var(--surface2);border:0.5px solid var(--border2);color:var(--text2)"><span class="lbl" style="font-size:9px">${m.label}</span></div>`; });
+    mergedPoints().forEach(m=>{ if(m.t<d0||m.t>d1) return; const x=xIn(m.t,d0,d1,trackW); html+=`<div class="cpoint" data-lane="${m.laneId}" data-kind="ctx-point" data-id="${m.id}" style="left:${x}px;top:2px"><span class="pin" style="height:14px"></span></div>`; });
+    html+=`</div>`; y+=lh+6;
+  } else {
+    y+=24;   // clear the group header row before the sub-lanes
+    tg.lanes.forEach(cl=>{ const r=ctxLaneHtml(cl,d0,d1,trackW,labW,y,false,18); html+=r.html; y=r.y+6; });
+  }
+  return {html, y};
+}
+
+/* ---------- rendering ---------- */
+function render(){ renderOverview(); renderZoom(); renderLegend(); renderReadout(); updateZoomRange(); renderInspector(); }
+// re-render timelines only (keeps inspector inputs focused while typing)
+function renderTimelines(){ renderOverview(); renderZoom(); renderReadout(); updateZoomRange(); inspLbl(); }
+
+function renderOverview(){
+  const host = document.getElementById('overview');
+  const d0=DOMAIN.min, d1=DOMAIN.max;
+  const laneH=14, gap=4, top=8;
+  const rows = state.lanes;
+  const w = host.clientWidth || 980;
+  const trackW = w - LABEL_W;
+  let html = '';
+  // diagnosis rows
+  rows.forEach((lane,i)=>{
+    const y = top + i*(laneH+gap);
+    html += `<div class="lane-label" style="top:${y}px;font-size:9px;color:var(--text3);width:${LABEL_W}px">${lane.name}</div>`;
+    html += `<div class="lane-track" style="left:${LABEL_W}px;width:${trackW}px;top:${y}px;height:${laneH}px">`;
+    lane.episodes.forEach(ep=>{
+      const s=clamp(ep.start,d0,d1), e=clamp(ep.end,d0,d1);
+      if(e<=d0||s>=d1) return;
+      const x=xIn(s,d0,d1,trackW), bw=Math.max(3,xIn(e,d0,d1,trackW)-x);
+      html += `<div class="block" data-lane="${lane.id}" data-kind="episode" data-id="${ep.id}" style="left:${x}px;width:${bw}px;top:2px;height:10px;${patternCss(ep.attr)}border-radius:2px;cursor:pointer"></div>`;
+    });
+    html += `</div>`;
+  });
+  // context lanes (compact strips) below the diagnoses
+  const diagEnd = top + rows.length*(laneH+gap);
+  const ctx = drawContextLanes(d0, d1, trackW, LABEL_W, diagEnd+2, true);
+  html += ctx.html;
+  const contentBottom = ctx.y;
+  const fullH = contentBottom + 20;
+  host.style.height = fullH+'px';
+  // event markers spanning the whole stack
+  state.events.forEach(ev=>{
+    const x = LABEL_W + xIn(ev.t,d0,d1,trackW);
+    const col = ev.kind==='injury'?'#d55e00':'#7a7a74';
+    const dash = ev.kind==='injury'?'':'border-left:2px dashed '+col+';width:0;';
+    html += `<div class="marker" style="left:${x}px;top:${top-4}px;height:${contentBottom-top+4}px;background:${ev.kind==='injury'?col:'transparent'};${dash}"></div>`;
+  });
+  // axis ticks (age)
+  [[20,'age 20'],[30,'age 30'],[40,'age 40'],[45,'now']].forEach(([age,lab])=>{
+    const t=(age-AGE_AT_INJURY)*12; const x=LABEL_W+xIn(t,d0,d1,trackW);
+    const cls = age===45?'tick r0':'tick';
+    html += `<div class="${cls}" style="left:${x}px;top:${contentBottom+2}px">${lab}</div>`;
+  });
+  // viewport box
+  const vx0 = LABEL_W + xIn(state.viewport.start,d0,d1,trackW);
+  const vx1 = LABEL_W + xIn(state.viewport.end,d0,d1,trackW);
+  html += `<div class="viewport" id="vp" style="left:${vx0}px;width:${vx1-vx0}px;top:${top-3}px;height:${contentBottom-top+3}px">
+      <div class="vp-handle l"></div><div class="vp-handle r"></div></div>`;
+  host.innerHTML = html;
+  // click anywhere in the overview to snap the zoom window there; click an entry to select + edit it
+  host.onmousedown=(e)=>{
+    if(e.target.closest('#vp')) return;           // dragging the viewport box is handled separately
+    const rect=host.getBoundingClientRect();
+    const localX=e.clientX-rect.left-LABEL_W;
+    let center=clamp(DOMAIN.min+(localX/trackW)*(DOMAIN.max-DOMAIN.min), DOMAIN.min, DOMAIN.max);
+    const item=e.target.closest('[data-id]');
+    if(item && item.dataset.kind){
+      const r=resolveSel({laneId:item.dataset.lane, kind:item.dataset.kind, id:item.dataset.id});
+      if(r){ state.selected={laneId:item.dataset.lane, kind:item.dataset.kind, id:item.dataset.id};
+        const o=r.obj; center = o.t!=null ? o.t : (o.start+Math.min(o.end,NOW))/2; }
+    }
+    const wv=state.viewport.end-state.viewport.start;
+    let s=center-wv/2, en=center+wv/2;
+    if(s<DOMAIN.min){en+=DOMAIN.min-s; s=DOMAIN.min;}
+    if(en>DOMAIN.max){s-=en-DOMAIN.max; en=DOMAIN.max;}
+    state.viewport={start:s,end:en};
+    render();
+    if(item) document.getElementById('inspector').scrollIntoView({behavior:'smooth',block:'nearest'});
+  };
+  wireViewport(host, trackW, d0, d1);
+}
+
+function renderZoom(){
+  const host = document.getElementById('zoom');
+  const d0=state.viewport.start, d1=state.viewport.end;
+  const w = host.clientWidth || 980;
+  const trackW = w - SUB_LABEL_W;
+  let y = 46;                 // leave room for (possibly stacked) marker caps
+  let html = '';
+  const blocks = [];         // defer markers until height known
+
+  state.lanes.forEach(lane=>{
+    const laneH = 34;
+    // diagnosis envelope row
+    html += `<div class="lane-label" style="top:${y+8}px;width:${SUB_LABEL_W}px;font-size:13px">`+
+            `<span class="chev" data-lane="${lane.id}">${lane.expanded?'▾':'▸'}</span>${lane.name}`+
+            (lane.symptoms.length?` <span style="font-size:9px;color:var(--text3);font-weight:400">envelope</span>`:'')+`</div>`;
+    html += `<div class="lane-track" style="left:${SUB_LABEL_W}px;width:${trackW}px;top:${y}px;height:${laneH}px">`;
+    html += `<div class="axis-line" style="left:0;right:0;top:${laneH/2}px;width:${trackW}px"></div>`;
+    lane.episodes.forEach(ep=>{ html += drawEpisodeHtml(ep, lane, d0, d1, trackW, 5, 24); });
+    html += `</div>`;
+    y += laneH + 6;
+
+    // expanded symptom subtracks
+    if(lane.expanded && lane.symptoms.length){
+      let lastCluster='';
+      lane.symptoms.forEach(sy=>{
+        if(sy.cluster!==lastCluster){
+          html += `<div class="subhdr" style="left:${SUB_LABEL_W}px;top:${y-2}px">${sy.cluster}</div>`;
+          y += 14; lastCluster=sy.cluster;
+        }
+        const sh=22;
+        html += `<div class="lane-label" style="top:${y+3}px;left:18px;width:${SUB_LABEL_W-18}px;font-size:11px;color:var(--text2);font-weight:400">${sy.name}</div>`;
+        html += `<div class="lane-track" style="left:${SUB_LABEL_W}px;width:${trackW}px;top:${y}px;height:${sh}px">`;
+        html += `<div class="axis-line" style="left:0;right:0;top:${sh/2}px;width:${trackW}px"></div>`;
+        const selS = state.selected && state.selected.laneId===lane.id && state.selected.kind==='symptom' && state.selected.id===sy.id;
+        const dataS = `data-lane="${lane.id}" data-kind="symptom" data-id="${sy.id}"`;
+        const shadow = 'text-shadow:0 0 3px rgba(0,0,0,.85),0 0 2px rgba(0,0,0,.85)';
+        if(sy.inherit){
+          const ep = lane.episodes[0];
+          const s=clamp(ep.start,d0,d1), e=clamp(ep.end,d0,d1);
+          const x=xIn(s,d0,d1,trackW), bw=Math.max(6,xIn(e,d0,d1,trackW)-x);
+          html += `<div class="block ghost ${selS?'sel':''}" ${dataS} style="left:${x}px;width:${bw}px;top:3px;height:15px">inherits envelope</div>`;
+        } else {
+          const s=clamp(sy.start,d0,d1), e=clamp(sy.end,d0,d1);
+          if(!(e<=d0||s>=d1)){
+            const x=xIn(s,d0,d1,trackW), bw=Math.max(6,xIn(e,d0,d1,trackW)-x);
+            // resolved = blue diagonal-hatch (time-limited); ongoing = solid vermillion
+            const fill = sy.resolved?patternCss('preexisting'):'background-color:#d55e00;';
+            html += `<div class="block ${selS?'sel':''}" ${dataS} style="left:${x}px;width:${bw}px;top:3px;height:15px;${fill}">`+
+                    `<span class="eh l"></span><span class="eh r"></span>`+
+                    `<span class="lbl" style="color:#fff;${shadow}">${sy.resolved?'resolved '+fmtOff(sy.end):fmtOff(sy.start)} ${sy.edited?'· edited':''}</span></div>`;
+          } else {
+            html += `<div class="block ghost ${selS?'sel':''}" ${dataS} style="left:0;width:120px;top:3px;height:15px;opacity:.5">off-window</div>`;
+          }
+        }
+        html += `</div>`;
+        y += sh + 3;
+      });
+      // threshold marker for this lane
+      if(lane.threshold!=null && lane.threshold>=d0 && lane.threshold<=d1){
+        blocks.push({t:lane.threshold, kind:'threshold', label:'threshold met '+fmtOff(lane.threshold)});
+      }
+      y += 4;
+    }
+  });
+
+  // authored context lanes (work capacity, medication, therapy, procedures)
+  { const r = drawContextLanes(d0, d1, trackW, SUB_LABEL_W, y+4, false); html += r.html; y = r.y; }
+
+  const totalH = y + 18;
+  // collect every caption, assign non-overlapping rows, then draw lines + staggered caps
+  const caps=[];
+  state.events.forEach(ev=>{
+    if(ev.t<d0||ev.t>d1) return;
+    caps.push({t:ev.t, kind:ev.kind, text:(ev.kind==='injury'?'⚡ ':'⊗ ')+ev.label,
+               color: ev.kind==='injury'?'#d55e00':'#7a7a74'});   // index=vermillion solid, subsequent=neutral dashed
+  });
+  blocks.forEach(b=>{
+    if(b.t<d0||b.t>d1) return;
+    caps.push({t:b.t, kind:'threshold', text:'✓ '+b.label, color:'#2f7ec4'}); // blue dotted
+  });
+  caps.forEach(c=> c.x = SUB_LABEL_W + xIn(c.t,d0,d1,trackW));
+  assignRows(caps);
+  caps.forEach(c=>{
+    // line STYLE is redundant with colour: solid (index) / dashed (subsequent) / dotted (threshold)
+    const line = c.kind==='injury'   ? `background:${c.color};`
+               : c.kind==='threshold'? `border-left:2px dotted ${c.color};width:0;background:transparent;`
+               :                        `border-left:2px dashed ${c.color};width:0;background:transparent;`;
+    html += `<div class="marker" style="left:${c.x}px;top:30px;height:${totalH-36}px;${line}"></div>`;
+    html += `<div class="marker-cap" style="left:${c.x}px;top:${4+c.row*12}px;color:${c.color}">${c.text}</div>`;
+  });
+  // axis ticks (months from injury)
+  const ticks = buildZoomTicks(d0,d1);
+  ticks.forEach(tk=>{
+    const x = SUB_LABEL_W + xIn(tk.t,d0,d1,trackW);
+    html += `<div class="tick" style="left:${x}px;top:${totalH-12}px">${tk.label}</div>`;
+  });
+
+  host.style.height = totalH+'px';
+  host.innerHTML = html;
+  host.querySelectorAll('.chev').forEach(c=>{
+    c.onclick=(e)=>{ e.stopPropagation();
+      if(c.dataset.treat){ state.treatments.expanded=!state.treatments.expanded; }
+      else { const l=state.lanes.find(x=>x.id===c.dataset.lane); l.expanded=!l.expanded; }
+      render();
+    };
+  });
+  wireBlockDrag(host, d0, d1, trackW);
+  wireZoomWheel(host, trackW);
+}
+
+// trackpad: horizontal swipe (or shift-scroll) pans the window; ⌘/ctrl-scroll zooms it
+function wireZoomWheel(host, trackW){
+  host.onwheel=(e)=>{
+    const span=state.viewport.end-state.viewport.start;
+    if(e.ctrlKey||e.metaKey){
+      e.preventDefault();
+      let ns=clamp(span*Math.exp(e.deltaY*0.002), 0.5, DOMAIN.max-DOMAIN.min);
+      const c=(state.viewport.start+state.viewport.end)/2;
+      let s=c-ns/2, en=c+ns/2;
+      if(s<DOMAIN.min){en+=DOMAIN.min-s; s=DOMAIN.min;}
+      if(en>DOMAIN.max){s-=en-DOMAIN.max; en=DOMAIN.max;}
+      state.viewport={start:s,end:en}; render(); return;
+    }
+    const dx = Math.abs(e.deltaX)>=Math.abs(e.deltaY) ? e.deltaX : (e.shiftKey?e.deltaY:0);
+    if(dx===0) return;
+    e.preventDefault();
+    const dM=(dx/trackW)*span;     // swipe → window moves the same direction in time
+    let s=state.viewport.start+dM, en=state.viewport.end+dM;
+    if(s<DOMAIN.min){en+=DOMAIN.min-s; s=DOMAIN.min;}
+    if(en>DOMAIN.max){s-=en-DOMAIN.max; en=DOMAIN.max;}
+    state.viewport={start:s,end:en}; render();
+  };
+}
+
+// resolve a selection descriptor → {scope, lane, kind, obj} for episodes, symptoms AND context items
+function resolveSel(sel){
+  if(!sel) return null;
+  if(sel.kind==='episode'||sel.kind==='symptom'){
+    const lane=state.lanes.find(l=>l.id===sel.laneId); if(!lane) return null;
+    const o = sel.kind==='episode' ? lane.episodes.find(x=>x.id===sel.id)
+                                   : lane.symptoms.find(x=>x.id===sel.id);
+    return o?{scope:'diag', lane, kind:sel.kind, obj:o}:null;
+  }
+  const cl=ctxLaneById(sel.laneId); if(!cl) return null;
+  const arr = sel.kind==='ctx-status' ? cl.segments : cl.items;
+  const o=arr.find(x=>x.id===sel.id);
+  return o?{scope:'ctx', lane:cl, kind:sel.kind, obj:o}:null;
+}
+const sameSel=(kind,laneId,id)=> state.selected && state.selected.kind===kind && state.selected.laneId===laneId && state.selected.id===id;
+
+// unified interaction: drag edges to resize, body to move (points move only), click (no move) to select
+function wireBlockDrag(host, d0, d1, trackW){
+  const mPerPx=(d1-d0)/trackW;
+  host.querySelectorAll('[data-id]').forEach(b=>{
+    if(!b.dataset.kind) return;
+    b.addEventListener('mousedown', e=>{
+      const sel={laneId:b.dataset.lane, kind:b.dataset.kind, id:b.dataset.id};
+      const r=resolveSel(sel); if(!r) return;
+      const o=r.obj;
+      const isPoint = sel.kind==='ctx-point';
+      const inheritLock = sel.kind==='symptom' && o.inherit;
+      const draggable = !inheritLock;
+      const rect=b.getBoundingClientRect(), localX=e.clientX-rect.left;
+      const mode = !draggable ? 'none' : isPoint ? 'move'
+                 : localX<8?'l' : localX>rect.width-8?'r' : 'move';
+      const startX=e.clientX, o0={start:o.start, end:o.end, t:o.t};
+      let moved=false;
+      function mv(ev){
+        if(Math.abs(ev.clientX-startX)>3) moved=true;
+        if(mode==='none'||!moved) return;
+        const dM=(ev.clientX-startX)*mPerPx;
+        if(isPoint){ o.t=clamp(o0.t+dM,DOMAIN.min,DOMAIN.max); }
+        else {
+          let s=o0.start, en=o0.end;
+          if(mode==='move'){ s=o0.start+dM; en=o0.end+dM; }
+          if(mode==='l'){ s=Math.min(o0.start+dM, o0.end-0.25); }
+          if(mode==='r'){ en=Math.max(o0.end+dM, o0.start+0.25); }
+          o.start=clamp(s,DOMAIN.min,DOMAIN.max);
+          o.end  =clamp(en,DOMAIN.min,DOMAIN.max);
+          if(sel.kind==='symptom') o.edited=true;
+        }
+        renderTimelines();
+      }
+      function up(){
+        window.removeEventListener('mousemove',mv); window.removeEventListener('mouseup',up);
+        if(!moved){
+          state.selected=sel; render();
+          document.getElementById('inspector').scrollIntoView({behavior:'smooth', block:'nearest'});
+        } else {
+          render();   // refresh inspector inputs to dragged values
+        }
+      }
+      window.addEventListener('mousemove',mv); window.addEventListener('mouseup',up);
+      e.preventDefault(); e.stopPropagation();
+    });
+  });
+}
+
+function fmtOff(t){
+  if(Math.abs(t)<0.01) return 'day 1';
+  if(t<1) return '+'+Math.round(t/WK)+'wk';
+  if(t<12) return '+'+(Math.round(t*10)/10)+'mo';
+  return '+'+(Math.round(t/12*10)/10)+'y';
+}
+function buildZoomTicks(d0,d1){
+  const span=d1-d0, out=[];
+  out.push({t:0,label:'injury'});
+  let step = span>18?6:span>9?3:1;
+  for(let m=step;m<=d1;m+=step) if(m>d0) out.push({t:m,label:'+'+m+'mo'});
+  if(d0<0) out.push({t:d0+0.3,label:'−'+Math.round(-d0)+'mo'});
+  return out.filter(x=>x.t>=d0&&x.t<=d1);
+}
+function updateZoomRange(){
+  const v=state.viewport;
+  document.getElementById('zoomrange').textContent =
+    `${v.start<0?'injury −'+Math.round(-v.start)+'mo':'injury +'+Math.round(v.start)+'mo'} → +${Math.round(v.end)}mo`;
+}
+
+/* ---------- viewport drag ---------- */
+function wireViewport(host, trackW, d0, d1){
+  const vp = document.getElementById('vp');
+  if(!vp) return;
+  const pxToT = px => d0 + (px/trackW)*(d1-d0);
+  let mode=null, startX=0, vp0={...state.viewport};
+  function down(e, m){
+    mode=m; startX=e.clientX; vp0={...state.viewport};
+    vp.classList.add('drag'); e.preventDefault(); e.stopPropagation();
+    window.addEventListener('mousemove',move); window.addEventListener('mouseup',up);
+  }
+  function move(e){
+    const dT = ((e.clientX-startX)/trackW)*(d1-d0);
+    let s=vp0.start, en=vp0.end;
+    if(mode==='move'){ s=vp0.start+dT; en=vp0.end+dT;
+      if(s<d0){en+=d0-s;s=d0;} if(en>d1){s-=en-d1;en=d1;} }
+    if(mode==='l'){ s=clamp(vp0.start+dT,d0,vp0.end-1); }
+    if(mode==='r'){ en=clamp(vp0.end+dT,vp0.start+1,d1); }
+    state.viewport={start:s,end:en}; render();
+  }
+  function up(){ mode=null; vp&&vp.classList.remove('drag');
+    window.removeEventListener('mousemove',move); window.removeEventListener('mouseup',up); }
+  vp.addEventListener('mousedown',e=>down(e,'move'));
+  vp.querySelector('.vp-handle.l').addEventListener('mousedown',e=>down(e,'l'));
+  vp.querySelector('.vp-handle.r').addEventListener('mousedown',e=>down(e,'r'));
+}
+
+/* ---------- legend + readout ---------- */
+function renderLegend(){
+  const el=document.getElementById('legend');
+  const toggle=`<button class="btn" id="legend-toggle" style="flex-basis:100%;height:26px;text-align:left">`+
+    `<i class="ti ti-${state.legendOpen?'chevron-down':'chevron-right'}" aria-hidden="true"></i> Key — colours, patterns &amp; symbols</button>`;
+  if(!state.legendOpen){ el.innerHTML=toggle; el.querySelector('#legend-toggle').onclick=()=>{ state.legendOpen=true; renderLegend(); }; return; }
+  const attr = Object.keys(ATTR).map(k=>
+    `<span><span class="sw" style="${patternCss(k)}"></span>${ATTR[k].label}</span>`).join('');
+  const sev = `<span style="display:inline-flex;align-items:flex-end;gap:3px;height:14px">`+
+    `<span style="width:5px;height:6px;background:#888780"></span>`+
+    `<span style="width:5px;height:10px;background:#888780"></span>`+
+    `<span style="width:5px;height:14px;background:#888780"></span></span> severity = bar height (mild·mod·severe)`;
+  const marks = `<span><span style="display:inline-block;width:14px;border-top:2px solid #d55e00;vertical-align:middle"></span> injury (solid)</span>`+
+    `<span><span style="display:inline-block;width:14px;border-top:2px dashed #7a7a74;vertical-align:middle"></span> later injury (dashed)</span>`+
+    `<span><span style="display:inline-block;width:14px;border-top:2px dotted #2f7ec4;vertical-align:middle"></span> threshold (dotted)</span>`;
+  const prov = Object.values(SOURCE).map(s=>`<span><i class="ti ${s.icon}" aria-hidden="true"></i> ${s.label}</span>`).join('')+
+    `<span><span class="sw" style="border:1.25px solid var(--seg-edge);background:transparent"></span>certain (solid edge)</span>`+
+    `<span><span class="sw" style="border:1.25px dashed var(--seg-edge);background:transparent"></span>estimated (dashed)</span>`+
+    `<span><span class="sw" style="background-image:repeating-linear-gradient(60deg,var(--text3) 0 2px,transparent 2px 5px)"></span>~ soft / circa onset</span>`;
+  const workL = Object.keys(WORK).map(k=>`<span><span class="sw" style="${workCss(k)}"></span>${WORK[k].label}</span>`).join('');
+  el.innerHTML = toggle +
+    attr +
+    `<span><span class="sw" style="border:1px dashed var(--border2);background:transparent"></span>inherits envelope</span>`+
+    `<span style="flex-basis:100%;height:0"></span>`+ sev +
+    `<span style="flex-basis:100%;height:0"></span>`+ marks +
+    `<span style="flex-basis:100%;height:0"></span>`+ prov +
+    `<span style="flex-basis:100%;height:0"></span><span style="color:var(--text3);font-size:10px">Work capacity:</span>`+ workL +
+    `<span style="flex-basis:100%;color:var(--text3);font-size:10px;margin-top:2px">Encoded by hue + lightness + pattern + height + icon — never colour alone (deuteranopia/protanopia-safe).</span>`;
+  el.querySelector('#legend-toggle').onclick=()=>{ state.legendOpen=false; renderLegend(); };
+}
+function renderReadout(){
+  const ptsd = state.lanes.find(l=>l.id==='ptsd');
+  document.getElementById('readout').innerHTML =
+    `<b>Derived:</b> PTSD meets DSM-5 threshold ${fmtOff(ptsd.threshold)} after the index injury; depression onset is insidious and predates the accepted date but is attributed to injury 1; alcohol relapse follows the index event after an ~18-year abstinent interval. A later MVA marker is available for re-attribution / aggravation.`;
+}
+
+/* ---------- inspector (inline block editing) ---------- */
+function getSelected(){ return resolveSel(state.selected); }
+const r2 = n => Math.round(n*100)/100;
+const sevOpts = v => ['mild','mod','severe'].map(s=>`<option value="${s}" ${s===v?'selected':''}>${s}</option>`).join('');
+const attrOpts = v => Object.entries(ATTR).map(([k,a])=>`<option value="${k}" ${k===v?'selected':''}>${a.label}</option>`).join('');
+const srcOpts  = v => Object.entries(SOURCE).map(([k,s])=>`<option value="${k}" ${k===v?'selected':''}>${s.label}</option>`).join('');
+const confOpts = v => ['certain','estimated'].map(s=>`<option value="${s}" ${s===v?'selected':''}>${s}</option>`).join('');
+const levelOpts= v => Object.keys(WORK).map(k=>`<option value="${k}" ${k===v?'selected':''}>${WORK[k].label}</option>`).join('');
+function whenLbl(t){ return t>=NOW ? '(ongoing)' : '≈ age '+toAge(t).toFixed(0)+' · '+(t<0?'−'+Math.round(-t)+'mo':'+'+Math.round(t)+'mo'); }
+
+// a date control = months input + age input (two-way) + a "~ approximate" toggle. circaId='' to omit toggle.
+function dateRow(idb, label, m, circaChecked, circaId, disabled){
+  return `<div class="insp-row daterow"><label>${label} <span class="insp-sub" id="${idb}-lbl">${whenLbl(m)}</span></label>
+    <div class="date-inputs">
+      <span><input type="number" step="0.25" id="${idb}-m" value="${r2(m)}" title="months from injury" ${disabled?'disabled':''}><span class="insp-sub">mo</span></span>
+      <span><input type="number" step="0.5" id="${idb}-age" value="${ageStr(m)}" title="age in years" ${disabled?'disabled':''}><span class="insp-sub">age</span></span>
+    </div>`+
+    (circaId?`<label class="chkline" style="margin-top:5px"><input type="checkbox" id="${circaId}" ${circaChecked?'checked':''}> ~ approximate / circa</label>`:'')+`</div>`;
+}
+// onset + end together — four inputs (mo/age × 2) on one line, each with its own ~approx toggle
+function dateRangeRow(sm, em, circaS, circaE, endDisabled){
+  const cell=(idb,label,m,circa,dis)=>`<div class="dr-cell">
+    <label>${label} <span class="insp-sub" id="${idb}-lbl">${whenLbl(m)}</span></label>
+    <div class="dr-pair">
+      <input type="number" step="0.25" id="${idb}-m" value="${r2(m)}" title="months from injury" ${dis?'disabled':''}><span class="insp-sub">mo</span>
+      <input type="number" step="0.5" id="${idb}-age" value="${ageStr(m)}" title="age in years" ${dis?'disabled':''}><span class="insp-sub">age</span>
+    </div>
+    <label class="chkline" style="margin-top:5px"><input type="checkbox" id="${idb}-circa" ${circa?'checked':''}> ~ approx</label>
+  </div>`;
+  return `<div class="insp-row daterange"><div class="dr-grid">${cell('on','Onset',sm,circaS,false)}${cell('off','End',em,circaE,endDisabled)}</div></div>`;
+}
+function wireDateRow(host, idb, getM, setM, circaId, getC, setC){
+  const mi=host.querySelector('#'+idb+'-m'), ai=host.querySelector('#'+idb+'-age');
+  const sync=()=>{ const m=getM(); if(mi&&document.activeElement!==mi) mi.value=r2(m); if(ai&&document.activeElement!==ai) ai.value=ageStr(m);
+    const l=document.getElementById(idb+'-lbl'); if(l) l.textContent=whenLbl(m); };
+  if(mi) mi.oninput=e=>{ setM(parseFloat(e.target.value)||0); sync(); renderTimelines(); };
+  if(ai) ai.oninput=e=>{ setM(ageToM(parseFloat(e.target.value)||AGE_AT_INJURY)); sync(); renderTimelines(); };
+  if(circaId){ const ci=host.querySelector('#'+circaId); if(ci&&setC) ci.onchange=e=>{ setC(e.target.checked); renderTimelines(); }; }
+}
+
+function renderInspector(){
+  const host=document.getElementById('inspector');
+  const sel=getSelected();
+  if(!sel){ host.innerHTML='<p class="hint" style="margin:0">No block selected. Click any episode, symptom, or context bar above to edit it (dates accept months <i>or</i> age, and each can be marked ~ approximate). Add treatments by typing them in the capture bar — e.g. <code>fluox 20-24</code> or <code>EMDR ongoing</code>.</p>'; return; }
+  const o=sel.obj;
+  if(sel.scope==='ctx'){ renderCtxInspector(host, sel); return; }
+  if(sel.kind==='episode'){
+    const steps=(o.steps||[]).map((s,i)=>
+      `<div class="step-item">at +${r2(s.t)}mo → <b>${s.sev}</b>${s.note?' · '+s.note:''}<span class="x" data-step="${i}">✕ remove</span></div>`).join('') ||
+      '<div class="insp-sub">none — this episode holds one severity throughout</div>';
+    host.innerHTML=`
+      <div class="insp-head">
+        <div><div class="insp-title">${sel.lane.name} — episode</div>
+        <div class="insp-sub" id="insp-startlbl">${whenLbl(o.start)}</div></div>
+        <button class="btn danger" id="insp-del">Delete episode</button>
+      </div>
+      <div class="insp-grid">
+        ${dateRangeRow(o.start,o.end,o.circa,o.circaEnd,o.end>=NOW)}
+        <div class="insp-row"><label>Severity (baseline)</label><select id="insp-sev">${sevOpts(o.sev)}</select></div>
+        <div class="insp-row"><label>Attribution</label><select id="insp-attr">${attrOpts(o.attr)}</select></div>
+        <div class="insp-row"><label>Source (provenance)</label><select id="insp-src">${srcOpts(o.source||'self')}</select></div>
+        <div class="insp-row"><label>Confidence</label><select id="insp-conf">${confOpts(o.confidence||'certain')}</select></div>
+      </div>
+      <div style="display:flex;gap:18px;margin-top:12px;flex-wrap:wrap">
+        <label class="chkline"><input type="checkbox" id="insp-ongoing" ${o.end>=NOW?'checked':''}> ongoing</label>
+        <label class="chkline"><input type="checkbox" id="insp-gradual" ${o.gradual?'checked':''}> insidious / gradual onset</label>
+      </div>
+      <div style="margin-top:16px">
+        <div class="insp-sub" style="margin-bottom:2px">Severity step-changes (aggravation keyframes)</div>
+        <div class="steps-list">${steps}</div>
+        <div class="step-add">
+          <input type="number" step="0.25" id="insp-stepT" value="6" style="width:90px" title="month from injury">
+          <select id="insp-stepSev" style="width:110px">${sevOpts('severe')}</select>
+          <button class="btn" id="insp-addstep">+ add step</button>
+          <span class="insp-sub">e.g. aggravation at the later MVA (+6mo)</span>
+        </div>
+      </div>`;
+    // wiring (episode)
+    const reT=()=>renderTimelines();
+    wireDateRow(host,'on', ()=>o.start, v=>{o.start=v;}, 'on-circa',  ()=>o.circa,    c=>{o.circa=c;});
+    wireDateRow(host,'off',()=>o.end,   v=>{o.end=v;},   'off-circa', ()=>o.circaEnd, c=>{o.circaEnd=c;});
+    host.querySelector('#insp-sev').onchange=e=>{ o.sev=e.target.value; reT(); };
+    host.querySelector('#insp-attr').onchange=e=>{ o.attr=e.target.value; reT(); };
+    host.querySelector('#insp-src').onchange=e=>{ o.source=e.target.value; reT(); };
+    host.querySelector('#insp-conf').onchange=e=>{ o.confidence=e.target.value; reT(); };
+    host.querySelector('#insp-gradual').onchange=e=>{ o.gradual=e.target.checked; reT(); };
+    host.querySelector('#insp-ongoing').onchange=e=>{ o.end = e.target.checked ? NOW : Math.max(o.start+1, Math.min(o.start+6, NOW-0.5)); render(); };
+    host.querySelector('#insp-addstep').onclick=()=>{
+      const t=parseFloat(host.querySelector('#insp-stepT').value);
+      const sev=host.querySelector('#insp-stepSev').value;
+      if(isNaN(t)||t<=o.start||t>=o.end) return;
+      o.steps=(o.steps||[]).concat([{t, sev, note:'aggravation'}]).sort((a,b)=>a.t-b.t);
+      render();
+    };
+    host.querySelectorAll('.step-item .x').forEach(x=>{
+      x.onclick=()=>{ o.steps.splice(+x.dataset.step,1); if(!o.steps.length) delete o.steps; render(); };
+    });
+  } else {
+    const sy=o;
+    const inh = !!sy.inherit;
+    host.innerHTML=`
+      <div class="insp-head">
+        <div><div class="insp-title">${sel.lane.name} — ${sy.name}</div>
+        <div class="insp-sub">${sy.cluster}${inh?' · inherits envelope':''}</div></div>
+        <button class="btn danger" id="insp-del">Delete symptom</button>
+      </div>`+
+      (inh
+        ? `<p class="hint" style="margin:0 0 10px">This criterion currently inherits the diagnosis envelope onset. Detach it to set its own timing.</p>
+           <button class="btn" id="insp-detach">Detach &amp; edit timing</button>`
+        : `<div class="insp-grid">
+            ${dateRangeRow(sy.start,sy.end,sy.circa,sy.circaEnd,sy.end>=NOW)}
+           </div>
+           <div style="display:flex;gap:18px;margin-top:12px">
+             <label class="chkline"><input type="checkbox" id="insp-ongoing" ${sy.end>=NOW?'checked':''}> ongoing</label>
+             <label class="chkline"><input type="checkbox" id="insp-resolved" ${sy.resolved?'checked':''}> resolved (time-limited)</label>
+             <label class="chkline"><input type="checkbox" id="insp-reinherit"> re-inherit envelope</label>
+           </div>`);
+    host.querySelector('#insp-del').onclick=()=>{ sel.lane.symptoms=sel.lane.symptoms.filter(s=>s!==sy); state.selected=null; render(); };
+    if(inh){
+      host.querySelector('#insp-detach').onclick=()=>{ const ep=sel.lane.episodes[0]; sy.inherit=false; sy.start=ep.start; sy.end=ep.end; sy.edited=true; render(); };
+      return;
+    }
+    wireDateRow(host,'on', ()=>sy.start, v=>{sy.start=v; sy.edited=true;}, 'on-circa',  ()=>sy.circa,    c=>{sy.circa=c;});
+    wireDateRow(host,'off',()=>sy.end,   v=>{sy.end=v; sy.edited=true;},   'off-circa', ()=>sy.circaEnd, c=>{sy.circaEnd=c;});
+    host.querySelector('#insp-ongoing').onchange=e=>{ sy.end=e.target.checked?NOW:Math.min(sy.start+2,NOW-0.5); sy.resolved=!e.target.checked&&sy.resolved; render(); };
+    host.querySelector('#insp-resolved').onchange=e=>{ sy.resolved=e.target.checked; renderTimelines(); };
+    host.querySelector('#insp-reinherit').onchange=e=>{ if(e.target.checked){ sy.inherit=true; render(); } };
+  }
+  // shared delete for episodes
+  const del=host.querySelector('#insp-del');
+  if(del && sel.kind==='episode') del.onclick=()=>{ sel.lane.episodes=sel.lane.episodes.filter(ep=>ep!==o); state.selected=null; render(); };
+}
+function renderCtxInspector(host, sel){
+  const o=sel.obj, cl=sel.lane, reT=()=>renderTimelines();
+  const delBtn=`<button class="btn danger" id="cdel">Delete</button>`;
+  const wireSrc=()=>{ const s=host.querySelector('#c-src'); if(s) s.onchange=e=>{ o.source=e.target.value; reT(); }; };
+  const wireLabel=()=>{ const l=host.querySelector('#c-label'); if(l) l.oninput=e=>{ o.label=e.target.value; reT(); }; };
+  if(sel.kind==='ctx-status'){
+    host.innerHTML=`
+      <div class="insp-head"><div><div class="insp-title">${cl.name} — status segment</div>
+        <div class="insp-sub">${whenLbl(o.start)} → ${o.end>=NOW?'now':whenLbl(o.end)}</div></div>${delBtn}</div>
+      <div class="insp-grid">
+        <div class="insp-row"><label>Level</label><select id="c-lvl">${levelOpts(o.level)}</select></div>
+        <div class="insp-row"><label>Source</label><select id="c-src">${srcOpts(o.source||'doc')}</select></div>
+        ${dateRangeRow(o.start,o.end,o.circa,o.circaEnd,o.end>=NOW)}
+      </div>`;
+    host.querySelector('#c-lvl').onchange=e=>{ o.level=e.target.value; reT(); };
+    wireSrc();
+    wireDateRow(host,'on', ()=>o.start, v=>{o.start=v;}, 'on-circa',  ()=>o.circa,    c=>{o.circa=c;});
+    wireDateRow(host,'off',()=>o.end,   v=>{o.end=v;},   'off-circa', ()=>o.circaEnd, c=>{o.circaEnd=c;});
+    host.querySelector('#cdel').onclick=()=>{ cl.segments=cl.segments.filter(s=>s!==o); state.selected=null; render(); };
+    return;
+  }
+  if(sel.kind==='ctx-point'){
+    host.innerHTML=`
+      <div class="insp-head"><div><div class="insp-title">${cl.name} — ${o.label}</div>
+        <div class="insp-sub">at ${fmtOff(o.t)}</div></div>${delBtn}</div>
+      <div class="insp-grid">
+        <div class="insp-row"><label>Label</label><input type="text" id="c-label" value="${o.label}"></div>
+        <div class="insp-row"><label>Source</label><select id="c-src">${srcOpts(o.source||'doc')}</select></div>
+        ${dateRow('on','Date',o.t,o.circa,'on-circa',false)}
+      </div>`;
+    wireLabel(); wireSrc();
+    wireDateRow(host,'on', ()=>o.t, v=>{o.t=v;}, 'on-circa', ()=>o.circa, c=>{o.circa=c;});
+    host.querySelector('#cdel').onclick=()=>{ cl.items=cl.items.filter(s=>s!==o); state.selected=null; render(); };
+    return;
+  }
+  // interval (medication / therapy)
+  host.innerHTML=`
+    <div class="insp-head"><div><div class="insp-title">${cl.name} — ${o.label}</div>
+      <div class="insp-sub">${whenLbl(o.start)} → ${o.end>=NOW?'now':whenLbl(o.end)}</div></div>${delBtn}</div>
+    <div class="insp-grid">
+      <div class="insp-row"><label>Label</label><input type="text" id="c-label" value="${o.label}"></div>
+      <div class="insp-row"><label>Source</label><select id="c-src">${srcOpts(o.source||'doc')}</select></div>
+      ${dateRangeRow(o.start,o.end,o.circa,o.circaEnd,o.end>=NOW)}
+      <div class="insp-row"><label>Confidence</label><select id="c-conf">${confOpts(o.confidence||'certain')}</select></div>
+    </div>
+    <div style="margin-top:12px"><label class="chkline"><input type="checkbox" id="c-ongoing" ${o.end>=NOW?'checked':''}> ongoing</label></div>`;
+  wireLabel(); wireSrc();
+  wireDateRow(host,'on', ()=>o.start, v=>{o.start=v;}, 'on-circa',  ()=>o.circa,    c=>{o.circa=c;});
+  wireDateRow(host,'off',()=>o.end,   v=>{o.end=v;},   'off-circa', ()=>o.circaEnd, c=>{o.circaEnd=c;});
+  host.querySelector('#c-conf').onchange=e=>{ o.confidence=e.target.value; reT(); };
+  host.querySelector('#c-ongoing').onchange=e=>{ o.end=e.target.checked?NOW:Math.min(o.start+3,NOW-0.5); render(); };
+  host.querySelector('#cdel').onclick=()=>{ cl.items=cl.items.filter(s=>s!==o); state.selected=null; render(); };
+}
+
+function inspLbl(){
+  const sel=getSelected(); if(!sel) return; const o=sel.obj;
+  // keep the date-row inputs (months + age) and labels in sync while dragging a bar
+  const sync=(idb,m)=>{ if(m==null) return;
+    const mi=document.getElementById(idb+'-m'); if(mi && document.activeElement!==mi) mi.value=r2(m);
+    const ai=document.getElementById(idb+'-age'); if(ai && document.activeElement!==ai) ai.value=ageStr(m);
+    const l=document.getElementById(idb+'-lbl'); if(l) l.textContent=whenLbl(m);
+  };
+  sync('on', o.start!=null?o.start:o.t);
+  if(o.end!=null) sync('off', o.end<NOW?o.end:NOW);
+}
+
+/* ---------- capture parser ---------- */
+// treatments are recognised by NAME — fluox→Fluoxetine, EMDR→therapy, ORIF→procedure
+const MED_DICT={fluox:'Fluoxetine',fluoxetine:'Fluoxetine',sert:'Sertraline',sertraline:'Sertraline',mirtaz:'Mirtazapine',mirtazapine:'Mirtazapine',venlafaxine:'Venlafaxine',venla:'Venlafaxine',citalopram:'Citalopram',escitalopram:'Escitalopram',diazepam:'Diazepam',quetiapine:'Quetiapine',duloxetine:'Duloxetine'};
+const PSYCH_DICT={emdr:'EMDR',cbt:'CBT',dbt:'DBT',act:'ACT',ipt:'IPT',psychotherapy:'Psychotherapy',counselling:'Counselling',counseling:'Counselling'};
+const PROC_DICT={orif:{label:'ORIF',icon:'ti-cut'},surgery:{label:'Surgery',icon:'ti-cut'},fusion:{label:'Fusion',icon:'ti-cut'},arthroscopy:{label:'Arthroscopy',icon:'ti-cut'},admission:{label:'Admission',icon:'ti-building-hospital'},admitted:{label:'Admission',icon:'ti-building-hospital'},admit:{label:'Admission',icon:'ti-building-hospital'}};
+
+function toMonths(n,u){ if(/wk|week/.test(u)) return n*WK; if(/y|yr|year/.test(u)) return n*YR; return n; }
+// which event a relative onset is anchored to (default = index injury at t=0)
+function anchorEvent(t){
+  if(/later|subsequent|second|2nd|mva|injury\s*2/.test(t)){
+    const sub=state.events.find(e=>e.kind==='subsequent'); if(sub) return sub;
+  }
+  return state.events.find(e=>e.kind==='injury') || {t:0, label:'injury'};
+}
+function parseDates(t){
+  let start=null,end=null,fields=[],m;
+  const ev=anchorEvent(t), aT=ev.t, anchorName=aT?(' post '+ev.label):' post-injury';
+  if(m=t.match(/age\s*(\d+)\s*(?:[-–to]+\s*(\d+))?/)){
+    start=ageToM(+m[1]); fields.push(['Onset','age '+m[1]]);
+    if(m[2]){ end=ageToM(+m[2]); fields.push(['End','age '+m[2]]); }
+  } else if(m=t.match(/(\d+)\s*(wk|week|mo|month|y|yr|year)s?\s*ago/)){ start=-toMonths(+m[1],m[2]); fields.push(['Onset',m[1]+m[2]+' ago']); }
+  else if(/at injury|at mva|day\s*1|day1/.test(t)){ start=aT; fields.push(['Onset','at '+ev.label]); }
+  else if(m=t.match(/\+?\s*(\d+)\s*(wk|week|mo|month|y|yr|year)s?\s*(?:post-?injury|post|after)?/)){ if(/post|after|\+/.test(t)){ start=aT+toMonths(+m[1],m[2]); fields.push(['Onset','+'+m[1]+m[2]+anchorName]); } }
+  if(m=t.match(/for\s*(\d+)\s*(wk|week|mo|month|y|yr|year)s?/)){ if(start!=null){ end=start+toMonths(+m[1],m[2]); fields.push(['Duration',m[1]+m[2]]); } }
+  if(/ongoing|current/.test(t)){ end=NOW; fields.push(['Duration','ongoing']); }
+  return {start,end,fields};
+}
+
+function parse(text){
+  const t = text.toLowerCase().trim();
+  if(!t) return {err:'empty'};
+  const approx = /circa|approx|around|~|mid-?\d|mid |early|late/.test(t) || /\bage\b/.test(t);
+
+  // ── treatments (recognised by name) ──
+  const words=t.split(/[^a-z0-9]+/).filter(Boolean);
+  const medKey=words.find(w=>MED_DICT[w]), psyKey=words.find(w=>PSYCH_DICT[w]), procKey=words.find(w=>PROC_DICT[w]);
+  if(medKey||psyKey||procKey){
+    const {start,end,fields}=parseDates(t);
+    if(procKey){
+      const p=PROC_DICT[procKey], at=start!=null?start:0;
+      return {treat:{laneId:'proc', kind:'point', item:{id:'c'+(nextId++), t:r2(at), label:p.label, icon:p.icon, source:'doc', circa:approx}}, label:p.label, fields:[['Procedure',p.label],['When',fmtOff(at)]]};
+    }
+    const isMed=!!medKey, name=isMed?MED_DICT[medKey]:PSYCH_DICT[psyKey];
+    if(start==null) return {err:`recognised ${name} — add a date (e.g. "${isMed?medKey:psyKey} age 20-24" or "+2wk ongoing")`};
+    const e=end!=null?end:NOW;
+    return {treat:{laneId:isMed?'med':'psych', kind:'interval',
+      item:{id:'c'+(nextId++), start, end:e, label:name, source:'doc', confidence:approx?'estimated':'certain', circa:approx, circaEnd:approx&&e<NOW}},
+      label:name, fields:[[isMed?'Medication':'Therapy',name], ...fields]};
+  }
+
+  // ── diagnoses ──
+  let laneId=null;
+  if(/depress|mood/.test(t)) laneId='depression';
+  else if(/ptsd|trauma/.test(t)) laneId='ptsd';
+  else if(/alcohol|drink/.test(t)) laneId='alcohol';
+  const out={laneId, fields:[]};
+  if(!laneId){ out.err='not recognised — try a diagnosis (depression/ptsd/alcohol), a medication (fluox…), a therapy (EMDR/CBT) or a procedure (ORIF/admission)'; return out; }
+
+  const {start,end,fields}=parseDates(t);
+  out.fields.push(...fields);
+  let sev=null;
+  if(/severe/.test(t)) sev='severe'; else if(/mod/.test(t)) sev='mod'; else if(/mild/.test(t)) sev='mild';
+  if(sev) out.fields.push(['Severity',sev]);
+  let attr='injury1';
+  if(/constitution/.test(t)) attr='constitutional';
+  else if(/pre-?exist|prior|pnd|postnatal/.test(t)) attr='preexisting';
+  else if(/mva|second injury|injury 2/.test(t)) attr='injury2';
+  out.fields.push(['Attribution',ATTR[attr].label]);
+  if(start==null){ out.err='no onset recognised (try "age 20", "5y ago", "+2wk post-injury")'; return out; }
+  const e = end==null ? start+0.5 : end;
+  out.episode={id:'c'+(nextId++), start, end:e, attr, sev:sev||'', note:null,
+    gradual:/gradual|insidious/.test(t), circa:approx, circaEnd:approx && e<NOW && end!=null};
+  return out;
+}
+
+function showParsed(res){
+  const host=document.getElementById('parsed');
+  if(res.err){ host.innerHTML=`<span class="chip err">⚠ ${res.err}</span>`; return; }
+  const title = res.treat ? res.label : state.lanes.find(l=>l.id===res.laneId).name;
+  let h=`<span class="chip ok">${title}</span>`;
+  res.fields.forEach(([k,v])=> h+=`<span class="chip field">${k}: ${v}</span>`);
+  host.innerHTML=h;
+}
+function widenTo(s,e){
+  if(s<state.viewport.start) state.viewport.start=s-0.5;
+  if(e>state.viewport.end)   state.viewport.end=Math.min(DOMAIN.max,e+0.5);
+}
+function commit(){
+  const inp=document.getElementById('capin');
+  const res=parse(inp.value);
+  showParsed(res);
+  if(res.treat){
+    const cl=state.treatments.lanes.find(l=>l.id===res.treat.laneId);
+    state.treatments.expanded=true;
+    cl.items.push(res.treat.item);
+    const it=res.treat.item, s=it.start!=null?it.start:it.t, e=it.end!=null?it.end:it.t;
+    widenTo(s,e);
+    state.selected={laneId:cl.id, kind:res.treat.kind==='point'?'ctx-point':'ctx-interval', id:it.id};
+    inp.value=''; render(); return;
+  }
+  if(res.episode){
+    const lane=state.lanes.find(l=>l.id===res.laneId);
+    lane.episodes.push(res.episode);
+    widenTo(res.episode.start, res.episode.end);
+    state.selected={laneId:lane.id, kind:'episode', id:res.episode.id};
+    inp.value='';
+    render();
+  }
+}
+
+/* ---------- examples ---------- */
+const EXAMPLES = [
+  'depression +2wk post-injury severe ongoing',
+  'fluox age 20-24',
+  'EMDR +8mo ongoing',
+  'ORIF +1wk',
+  'ptsd at injury severe ongoing',
+];
+function renderExamples(){
+  document.getElementById('examples').innerHTML =
+    EXAMPLES.map(e=>`<span class="ex">${e}</span>`).join('');
+  document.querySelectorAll('.ex').forEach(el=>{
+    el.onclick=()=>{ const i=document.getElementById('capin'); i.value=el.textContent; i.focus(); showParsed(parse(i.value)); };
+  });
+}
+
+/* ---------- boot ---------- */
+document.getElementById('capbtn').onclick=commit;
+document.getElementById('capin').addEventListener('keydown',e=>{ if(e.key==='Enter') commit(); });
+document.getElementById('capin').addEventListener('input',e=>{ if(e.target.value.trim()) showParsed(parse(e.target.value)); else document.getElementById('parsed').innerHTML=''; });
+renderExamples();
+render();
+window.addEventListener('resize',()=>render());
+</script>
+</body>
+</html>

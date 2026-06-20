@@ -60,8 +60,35 @@ pub fn find_dates(text: &str) -> Vec<ExtractedDate> {
         push(&mut out, &mut seen, cap);
     }
 
+    // Nested-span suppression: a lower-precision match whose span sits
+    // inside a higher-precision match is the SAME date token, not a new
+    // date. "14 June 1968" must yield one day-precision date — without
+    // this filter the bare-year matcher also emits "1968" (offsets 49–53
+    // inside 41–53) and the timeline double-counts it.
+    let suppressed: Vec<ExtractedDate> = out
+        .iter()
+        .filter(|d| {
+            !out.iter().any(|other| {
+                rank(other.precision) > rank(d.precision)
+                    && other.start <= d.start
+                    && d.end <= other.end
+            })
+        })
+        .cloned()
+        .collect();
+    let mut out = suppressed;
+
     out.sort_by(|a, b| a.value.cmp(&b.value));
     out
+}
+
+/// Precision ordering for nested-span suppression: Day > Month > Year.
+fn rank(p: DatePrecision) -> u8 {
+    match p {
+        DatePrecision::Day => 2,
+        DatePrecision::Month => 1,
+        DatePrecision::Year => 0,
+    }
 }
 
 fn push(

@@ -53,6 +53,10 @@ pub struct FactAssertion {
     pub char_offset_end: usize,
     /// The verbatim matched snippet (provenance).
     pub raw_text: String,
+    /// The full sentence containing the match (sentence-level provenance).
+    /// Empty only for synthetic/test assertions constructed without text.
+    #[serde(default)]
+    pub sentence: String,
 }
 
 /// The contradiction domain an attribute belongs to. Relationship / vital-status
@@ -63,7 +67,9 @@ pub fn attribute_domain(attribute: &str) -> &'static str {
         "marital_status"
         | "father_vital_status"
         | "mother_vital_status"
-        | "spouse_vital_status" => "family",
+        | "spouse_vital_status"
+        | "children_count"
+        | "sibling_count" => "family",
         _ => "clinical",
     }
 }
@@ -114,11 +120,12 @@ pub fn fact_domain_of(attribute: &str) -> FactDomain {
         "marital_status"
         | "father_vital_status"
         | "mother_vital_status"
-        | "spouse_vital_status" => FactDomain::Family,
+        | "spouse_vital_status"
+        | "children_count"
+        | "sibling_count" => FactDomain::Family,
         "smoking_history" | "alcohol_history" => FactDomain::Social,
-        "driving_ability" | "functional_status" | "work_status" | "return_to_work" => {
-            FactDomain::Functional
-        }
+        "driving_ability" | "functional_status" | "work_status" | "return_to_work"
+        | "mobility" => FactDomain::Functional,
         _ => FactDomain::Clinical,
     }
 }

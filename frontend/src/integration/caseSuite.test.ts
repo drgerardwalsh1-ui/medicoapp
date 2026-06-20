@@ -12,8 +12,6 @@ function present(ids: string[]): DSMAssessmentData {
 function run(n: number, label: string, ids: string[]) {
   const unmapped = ids.filter((id) => !(id in SYMPTOM_DSM_MAPPING));
   const o = runClinicalOverlay(present(ids));
-  const tier = (t: string) =>
-    o.summaries.filter((s) => s.tier === t).map((s) => `${s.diagnosisId}(${Math.round(s.coverage * 100)}%${s.sharedEvidence ? ",shared" : ""})`);
   const states = o.states
     .filter((s) => s.state !== "excluded" && s.state !== "unlikely")
     .map((s) => `${s.diagnosisId}=${s.state}${s.differentialGroup ? `(${s.differentialGroup})` : ""}`);

@@ -98,6 +98,12 @@ pub fn reduce(events: &[EventEnvelope]) -> ClientState {
             | EventPayload::AttributionRecorded(_)
             | EventPayload::ExtractionRunRecorded(_)
             | EventPayload::DocumentDeleted(_) => {}
+            // ── Clinical fact spine events are folded by
+            // `clinical_fact_store::fold_clinical_state`, not by the base
+            // reducer: ClientState models demographics + document metadata
+            // only. They still bump last_version/last_updated above.
+            EventPayload::ClinicalObservationRecorded(_)
+            | EventPayload::ClinicalReviewRecorded(_) => {}
         }
     }
     state

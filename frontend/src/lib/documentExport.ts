@@ -126,11 +126,12 @@ function fmtCanonicalSummary(canon: ProcessedDocument): string[] {
 export function renderExportBundle(
   docs: IngestedDoc[],
   /**
-   * Optional STEP-6 observability root (deterministic, backend-composed). When
-   * supplied, it is appended verbatim as a top-level `step6` JSON block — the
-   * export payload is EXTENDED, never restructured.
+   * Optional Contradiction Engine observability root (deterministic,
+   * backend-composed). When supplied, it is appended verbatim as a top-level
+   * JSON block — the export payload is EXTENDED, never restructured. The block
+   * header text is a FROZEN export-format token; do not rename it.
    */
-  step6?: unknown,
+  contradictionRoot?: unknown,
 ): string {
   const now = new Date().toISOString();
   const out: string[] = [];
@@ -180,10 +181,12 @@ export function renderExportBundle(
     out.push("");
   });
 
-  // Top-level `step6` payload — appended, never restructuring the doc export.
-  if (step6 !== undefined && step6 !== null) {
+  // Top-level Contradiction Engine payload — appended, never restructuring the
+  // doc export. The "STEP 6 OBSERVABILITY (JSON):" header is frozen for
+  // compatibility with previously exported bundles.
+  if (contradictionRoot !== undefined && contradictionRoot !== null) {
     out.push("STEP 6 OBSERVABILITY (JSON):");
-    out.push(safeJson(step6));
+    out.push(safeJson(contradictionRoot));
     out.push("");
     out.push(RULE);
     out.push("");
@@ -259,9 +262,9 @@ function downloadBlob(text: string, filename: string): void {
  */
 export async function copyAllDocuments(
   docs: IngestedDoc[],
-  opts?: { filenamePrefix?: string; step6?: unknown },
+  opts?: { filenamePrefix?: string; contradictionRoot?: unknown },
 ): Promise<DeliveryResult> {
-  const bundle = renderExportBundle(docs, opts?.step6);
+  const bundle = renderExportBundle(docs, opts?.contradictionRoot);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const filename = `${opts?.filenamePrefix ?? "documents"}-export-${stamp}.txt`;
   return deliverExport(bundle, filename);

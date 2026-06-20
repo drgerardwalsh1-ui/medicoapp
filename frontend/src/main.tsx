@@ -9,6 +9,7 @@ import HistoryEditor from "./components/History/HistoryEditor";
 import ReportPage from "./pages/ReportPage";
 import WorkTimelinePage from "./pages/WorkTimelinePage";
 import MSEPage from "./pages/MSEPage";
+import LiveAssessmentPage from "./pages/LiveAssessmentPage";
 import CalendarView from "./calendar/CalendarView";
 import SystemPage from "./pages/SystemPage";
 import { TauriAPI, isTauri, type ClientViewModel } from "./api/tauriApi";
@@ -43,6 +44,7 @@ import { Temporal } from "@js-temporal/polyfill";
 import {
   formatFullName,
   parseClientBlob,
+  reconcileClient,
   defaultClient,
   defaultReport,
   defaultAssessmentChecklist,
@@ -143,7 +145,12 @@ function Root() {
 
   // ── Active client mutation flow ----------------------------------------
   function handleActiveClientChange(updated: Client) {
-    setActiveClient(updated);
+    // INVARIANT: a page mirror that rebuilt the Client from demographics
+    // (parseClientBlob strips projection-owned fields like `documents`) must
+    // never erase those fields from the active client. reconcileClient
+    // back-fills any projection-owned field the update dropped (=== undefined)
+    // from the previous, authoritative activeClient. See types/client.ts.
+    setActiveClient((prev) => reconcileClient(prev, updated));
     setIsDirty(true);
   }
 
@@ -830,7 +837,8 @@ function Root() {
       const isSchemaSection = tabs.some(
         (t) => t.id === activeClientTab &&
                t.id !== "demographics" && t.id !== "dsm" && t.id !== "mse" &&
-               t.id !== "timeline" && t.id !== "backgroundHistory"
+               t.id !== "timeline" && t.id !== "backgroundHistory" &&
+               t.id !== "live"
       );
 
       const body = (() => {
@@ -850,6 +858,16 @@ function Root() {
             <DSMPage
               key={activeClient.id}
               client={activeClient}
+              onClientChange={handleActiveClientChange}
+            />
+          );
+        }
+        if (activeClientTab === "live") {
+          return (
+            <LiveAssessmentPage
+              key={activeClient.id}
+              client={activeClient}
+              onNavigateToTab={(tab) => setActiveClientTab(tab)}
               onClientChange={handleActiveClientChange}
             />
           );

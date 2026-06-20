@@ -972,6 +972,10 @@ const PATHOLOGICAL_MODIFIERS: &[&str] = &[
     "bursitis", "contusion", "damage", "injury", "pain", "syndrome",
     "arthritis", "arthrosis", "degeneration", "instability", "neuropathy",
     "radiculopathy", "myelopathy", "compression", "inflammation",
+    // AU/UK radiology vocabulary — keep in sync with the extraction
+    // keyword list in lib.rs and structured_extract.rs ("lumbar disc
+    // prolapse" was silently rejected as implausible before these).
+    "prolapse", "protrusion", "bulge",
 ];
 
 /// Recognised diagnostic suffixes — a condition ending with one of these is

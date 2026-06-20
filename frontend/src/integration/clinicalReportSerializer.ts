@@ -21,7 +21,14 @@ export type ClinicalReportExportV1 = {
   readonly differentials: readonly DifferentialExportEntry[];
   readonly temporal: readonly TemporalExportEntry[];
   readonly clinicianDecisions?: readonly ClinicianDecisionExportEntry[];
-  readonly audit: { readonly snapshotHash: string; readonly generatedAt: string };
+  // `replayHash` is optional and volatile: present only on snapshots that
+  // were replayed (never invented on a fresh export), and treated as a
+  // volatile path by the report diff. Mirrors AuditSection.replayHash.
+  readonly audit: {
+    readonly snapshotHash: string;
+    readonly replayHash?: string;
+    readonly generatedAt: string;
+  };
 };
 
 export type DiagnosticExportEntry = {
@@ -144,6 +151,7 @@ export function serializeClinicalReport(report: ClinicalReport): ClinicalReportE
     clinicianDecisions,
     audit: {
       snapshotHash: report.auditSection.snapshotHash,
+      replayHash: report.auditSection.replayHash,
       generatedAt: report.auditSection.generatedAt,
     },
   };

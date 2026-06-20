@@ -1,13 +1,13 @@
 //! Clinical event routing + preservation layer (additive, preparation only).
 //!
-//! Centralises the deterministic decision of which `ClinicalEvent`s the STEP-6
+//! Centralises the deterministic decision of which `ClinicalEvent`s the Contradiction Engine
 //! adapter consumes. TODAY this is BYTE-IDENTICAL to the previous inline
 //! behaviour: `Diagnosis → Injury`, everything else → `Unsupported`. It adds
 //! NO new event coverage, NO inference, and changes NO contradiction, confidence,
 //! export, grouping, family, legal, or enrichment logic.
 //!
 //! It exists so future event types can be onboarded here without re-touching
-//! `adapter_step6_input.rs`, plus two preservation/visibility helpers
+//! `contradiction_input_adapter.rs`, plus two preservation/visibility helpers
 //! (`clinical_event_metadata_snapshot`, `clinical_coverage_report`) that are
 //! pure functions wired to nothing yet.
 //!

@@ -48,3 +48,14 @@ chrono = { version = "0.4", features = ["serde"] }
 # dependency of rusqlite-bundled, so this adds no compile-time cost.
 sha2 = "0.10"
 
+# Incremental compilation DISABLED: this repository lives on a OneDrive
+# (FileProvider) volume, where rustc's incremental engine hangs forever in
+# `prepare_session_directory → hard_link → linkat()` while OneDrive
+# materialises dehydrated session files (observed 2026-06-11: rustc stuck at
+# 0% CPU mid-`cargo tauri dev`, 6 GB of incremental state). Non-incremental
+# builds avoid the hardlink-based session copy entirely. If builds feel slow,
+# the better cure is moving the target dir OFF the synced volume, e.g.:
+#   export CARGO_TARGET_DIR="$HOME/.cache/medicoapp-target"
+[profile.dev]
+incremental = false
+

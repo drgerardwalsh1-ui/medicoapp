@@ -29,8 +29,7 @@ import SymptomPresenceControl from "../integration/ui/SymptomPresenceControl";
 // ── Presence state (Phase 19.1 — direct write via shared control) ─────────────
 // undefined (?) | true (✓) | false (✗) — bound directly to currentPresence.
 // No cycle, no shadow state — SymptomPresenceControl is the only editor.
-
-type Presence = boolean | undefined;
+// (Presence is `boolean | undefined`, used inline at each call site.)
 
 // ── Domain progress ───────────────────────────────────────────────────────────
 
@@ -494,9 +493,9 @@ export default function CurrentSymptoms({
         symptoms: {
           ...data.symptoms,
           [leadEntityId]: {
+            ...(existing ?? {}),
             id: leadEntityId,
             symptomType,
-            ...(existing ?? {}),
             customLabel: newLabel,
           },
         },

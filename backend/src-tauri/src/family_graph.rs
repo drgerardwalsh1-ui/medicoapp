@@ -530,7 +530,7 @@ pub fn graph_summary(graph: &FamilyGraph) -> JsonValue {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// Family contradiction binding (STEP-6 surfacing)
+// Family contradiction binding (Contradiction Engine surfacing)
 //
 // A pure deterministic fold over `FamilyGraph.edges`. Grouping identity is
 // `(pair, target_mode)` ONLY — relation/axis/cardinality/temporal/status are
@@ -605,7 +605,7 @@ pub struct FamilyValue {
 }
 
 /// A flattened family contradiction (isomorphic to clinical `Contradiction`).
-/// Domain tagging is applied by the STEP-6 wrapper, not stored here, to avoid
+/// Domain tagging is applied by the Contradiction Engine wrapper, not stored here, to avoid
 /// a dependency cycle with `canonical_case`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FamilyContradiction {

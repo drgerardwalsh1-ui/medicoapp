@@ -15,11 +15,11 @@ import {
   DocumentsSectionProvider,
   useDocumentsSectionControls,
 } from "../components/DocumentsSection";
-import Step6DevPanel from "../components/Step6DevPanel";
-import Step6ObservabilitySection, {
-  Step6ObservabilityProvider,
-} from "../components/Step6ObservabilitySection";
-import { useStep6Observability } from "../components/step6ObservabilityContext";
+import ContradictionDevPanel from "../components/ContradictionDevPanel";
+import ContradictionObservabilitySection, {
+  ContradictionObservabilityProvider,
+} from "../components/ContradictionObservabilitySection";
+import { useContradictionObservability } from "../components/contradictionObservabilityContext";
 import { copyAllDocuments } from "../lib/documentExport";
 import AttendeesPanel from "../components/AttendeesPanel";
 import RelationshipManager, {
@@ -134,8 +134,9 @@ export default function DemographicsPage({
   // on the client object by `viewToClient`). Authoritative rehydration on
   // navigation / client switch is the `useEffect([client.id])` below.
   const [docs, setDocs] = useState<IngestedDoc[]>(() =>
-    toIngestedDocs(client.documents),
+    toIngestedDocs(client?.documents),
   );
+
 
   // STEP 3/4 FIX: rehydrate the document list from the projection-sourced
   // `client.documents` on every client switch AND on remount. Keyed on
@@ -144,17 +145,19 @@ export default function DemographicsPage({
   // This is the single projection-driven source of truth for the
   // document list; the UI no longer depends on transient
   // ingestion-response state surviving navigation.
+  const clientId = client?.id;
   useEffect(() => {
-    setDocs(toIngestedDocs(client.documents));
+    if (!client) return;
+    const c = client;
+    setDocs(toIngestedDocs(c.documents));
 
     // Rehydrate persisted extraction content (clinical events +
-    // attribution) from the projection — identical contract to
-    // ClientHome. Read-only; no reprocessing.
-    if (!isPersistedClientId(client.id)) return;
+    // attribution) from the projection — read-only; no reprocessing.
+    if (!isPersistedClientId(c.id)) return;
     let cancelled = false;
     (async () => {
       try {
-        const raw = await TauriAPI.getClientExtraction(client.id);
+        const raw = await TauriAPI.getClientExtraction(c.id);
         const ext = JSON.parse(raw) as DocumentExtractionInput[];
         if (cancelled || ext.length === 0) return;
         const byId = new Map(ext.map((e) => [e.document_id, e]));
@@ -169,9 +172,11 @@ export default function DemographicsPage({
         console.warn("[demographics] getClientExtraction failed:", err);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client.id]);
+  }, [clientId]);
 
   const [ingesting, setIngesting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -410,6 +415,12 @@ export default function DemographicsPage({
     setData((prev) => ({
       ...parsed,
       id: v.id,
+      // `documents` is projection-owned and stripped by parseClientBlob.
+      // Restore it from the view (authoritative projection list), falling back
+      // to the prior mirror — so the rebuilt `data` propagated up via
+      // onClientChange never carries an `undefined` documents that would erase
+      // activeClient.documents. (Belt-and-braces with reconcileClient.)
+      documents: v.documents ?? prev.documents,
       report: prev.report,
       dsmAssessment: prev.dsmAssessment ?? parsed.dsmAssessment,
       assessmentChecklist: {
@@ -1110,7 +1121,7 @@ export default function DemographicsPage({
                   provider scopes a single lazy fetch + cache shared by the
                   Copy All Data toolbar and the collapsible section. clientId is
                   null when observability is unavailable (unpersisted / web). */}
-              <Step6ObservabilityProvider
+              <ContradictionObservabilityProvider
                 key={data.id}
                 clientId={
                   isTauri && isPersistedClientId(data.id) ? data.id : null
@@ -1132,12 +1143,12 @@ export default function DemographicsPage({
                       onRemove={() => handleRemoveDocument(d, i)}
                     />
                   ))}
-                  {/* STEP 6 OBSERVABILITY — collapsible analysis block at the
+                  {/* CONTRADICTION OBSERVABILITY — collapsible analysis block at the
                       same structural level as the per-document analysis
                       sections. Default collapsed; lazy-loads on expand. */}
-                  <Step6ObservabilitySection />
-                  {/* STEP-6 production reachability (dev-gated): drives
-                      getClientExtraction → build_step6_case in the running app. */}
+                  <ContradictionObservabilitySection />
+                  {/* Contradiction Engine production reachability (dev-gated): drives
+                      getClientExtraction → build_contradiction_case in the running app. */}
                   {isPersistedClientId(data.id) &&
                     (() => {
                       try {
@@ -1145,9 +1156,9 @@ export default function DemographicsPage({
                       } catch {
                         return false;
                       }
-                    })() && <Step6DevPanel clientId={data.id} />}
+                    })() && <ContradictionDevPanel clientId={data.id} />}
                 </div>
-              </Step6ObservabilityProvider>
+              </ContradictionObservabilityProvider>
             </DocumentsSectionProvider>
           )}
         </div>
@@ -1173,9 +1184,10 @@ void formatFullName;
  */
 function DocumentsToolbar({ docs }: { docs: IngestedDoc[] }) {
   const { expandAll, collapseAll } = useDocumentsSectionControls();
-  // Shared Step-6 cache: ensures Copy All Data includes the `step6` payload,
-  // fetching once (reused with the collapsible section) and never re-fetching.
-  const { ensure: ensureStep6 } = useStep6Observability();
+  // Shared Contradiction Engine cache: ensures Copy All Data includes the
+  // observability payload, fetching once (reused with the collapsible section)
+  // and never re-fetching.
+  const { ensure: ensureContradictionRoot } = useContradictionObservability();
   const [notice, setNotice] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const disabled = docs.length === 0;
@@ -1191,12 +1203,12 @@ function DocumentsToolbar({ docs }: { docs: IngestedDoc[] }) {
     if (disabled || busy) return;
     setBusy(true);
     try {
-      // Fetch-once Step-6 root (null when unavailable); included in the export
-      // payload as a top-level `step6` key without changing chip placement.
-      const step6 = await ensureStep6();
+      // Fetch-once Contradiction Engine root (null when unavailable); included
+      // in the export payload without changing chip placement.
+      const contradictionRoot = await ensureContradictionRoot();
       const result = await copyAllDocuments(docs, {
         filenamePrefix: "documents",
-        step6: step6 ?? undefined,
+        contradictionRoot: contradictionRoot ?? undefined,
       });
       const n = docs.length;
       setNotice(

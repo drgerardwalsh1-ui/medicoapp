@@ -12,6 +12,8 @@
 
 #![allow(dead_code)]
 
+use std::collections::BTreeMap;
+
 use crate::fact_assertion::{fact_domain_of, FactAssertion, FactPolarity};
 
 /// One surface-form rule. `needle` is matched case-insensitively; `value` is the
@@ -111,7 +113,95 @@ const RULES: &[Rule] = &[
     Rule { subject: "patient", attribute: "injury_date", needle: "injury occurred on", value: "", polarity: A, temporal: true },
     Rule { subject: "patient", attribute: "injury_date", needle: "accident occurred on", value: "", polarity: A, temporal: true },
     Rule { subject: "patient", attribute: "injury_date", needle: "date of accident", value: "", polarity: A, temporal: true },
+    Rule { subject: "patient", attribute: "injury_date", needle: "injury at work on", value: "", polarity: A, temporal: true },
+
+    // ── marital_status — periphrastic forms (Emma audit recall fixes) ──────
+    Rule { subject: "patient", attribute: "marital_status", needle: "lives with her husband", value: "married", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "marital_status", needle: "lives with his wife", value: "married", polarity: A, temporal: false },
+
+    // ── smoking_history — "N-year smoking history" (digit-guarded needle) ──
+    Rule { subject: "patient", attribute: "smoking_history", needle: "smoking history", value: "smoker", polarity: A, temporal: false },
+
+    // ── father_vital_status — reported/indirect forms ───────────────────────
+    Rule { subject: "father", attribute: "father_vital_status", needle: "father is described as deceased", value: "deceased", polarity: A, temporal: false },
+    Rule { subject: "father", attribute: "father_vital_status", needle: "father as deceased", value: "deceased", polarity: A, temporal: false },
+    Rule { subject: "father", attribute: "father_vital_status", needle: "father as alive", value: "alive", polarity: A, temporal: false },
+
+    // ── ptsd_status (clinical) — diagnosis vs criteria-not-met ─────────────
+    Rule { subject: "patient", attribute: "ptsd_status", needle: "diagnosed post-traumatic stress disorder", value: "diagnosed", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "ptsd_status", needle: "diagnosis of post-traumatic stress disorder", value: "diagnosed", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "ptsd_status", needle: "diagnosed ptsd", value: "diagnosed", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "ptsd_status", needle: "criteria for ptsd were not met", value: "not_met", polarity: N, temporal: false },
+    Rule { subject: "patient", attribute: "ptsd_status", needle: "criteria for post-traumatic stress disorder were not met", value: "not_met", polarity: N, temporal: false },
+    Rule { subject: "patient", attribute: "ptsd_status", needle: "does not meet criteria for ptsd", value: "not_met", polarity: N, temporal: false },
+
+    // ── opioid_use (clinical) — denial vs dispensing evidence ──────────────
+    Rule { subject: "patient", attribute: "opioid_use", needle: "denied taking opioid", value: "denied", polarity: N, temporal: false },
+    Rule { subject: "patient", attribute: "opioid_use", needle: "denies taking opioid", value: "denied", polarity: N, temporal: false },
+    Rule { subject: "patient", attribute: "opioid_use", needle: "denies opioid", value: "denied", polarity: N, temporal: false },
+    Rule { subject: "patient", attribute: "opioid_use", needle: "dispensing of oxycodone", value: "dispensed", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "opioid_use", needle: "prescribed oxycodone", value: "dispensed", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "opioid_use", needle: "oxycodone dispensed", value: "dispensed", polarity: A, temporal: false },
+
+    // ── children_count (family) ─────────────────────────────────────────────
+    Rule { subject: "patient", attribute: "children_count", needle: "one child", value: "1", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "children_count", needle: "two children", value: "2", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "children_count", needle: "three dependent children", value: "3", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "children_count", needle: "three children", value: "3", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "children_count", needle: "four children", value: "4", polarity: A, temporal: false },
+
+    // ── sibling_count (family) — compound forms FIRST; no bare "two brothers"
+    //    needle, so the compound phrase cannot double-fire. ───────────────────
+    Rule { subject: "patient", attribute: "sibling_count", needle: "two brothers and one sister", value: "2_brothers_1_sister", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "sibling_count", needle: "one brother and one sister", value: "1_brother_1_sister", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "sibling_count", needle: "has one brother", value: "1_brother", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "sibling_count", needle: "has one sister", value: "1_sister", polarity: A, temporal: false },
+
+    // ── sleep_hours (clinical) ──────────────────────────────────────────────
+    Rule { subject: "patient", attribute: "sleep_hours", needle: "three hours per night", value: "3", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "sleep_hours", needle: "four hours per night", value: "4", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "sleep_hours", needle: "five hours per night", value: "5", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "sleep_hours", needle: "seven to eight hours per night", value: "7-8", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "sleep_hours", needle: "eight hours per night", value: "8", polarity: A, temporal: false },
+
+    // ── mobility (functional) — aid dependence vs unaided observation ──────
+    Rule { subject: "patient", attribute: "mobility", needle: "requires a walking stick", value: "aided", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "mobility", needle: "uses a walking stick", value: "aided", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "mobility", needle: "requires a walking frame", value: "aided", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "mobility", needle: "walking unassisted", value: "unassisted", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "mobility", needle: "walks unassisted", value: "unassisted", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "mobility", needle: "mobilising independently", value: "unassisted", polarity: A, temporal: false },
+
+    // ── cognition_status (clinical) ─────────────────────────────────────────
+    Rule { subject: "patient", attribute: "cognition_status", needle: "significant cognitive deficits", value: "impaired", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "cognition_status", needle: "severe memory impairment", value: "impaired", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "cognition_status", needle: "cognitive functioning was within normal limits", value: "normal", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "cognition_status", needle: "cognition within normal limits", value: "normal", polarity: A, temporal: false },
+
+    // ── prior_back_history (clinical) — denial vs documented history ───────
+    Rule { subject: "patient", attribute: "prior_back_history", needle: "denies any prior history of lower back", value: "denied", polarity: N, temporal: false },
+    Rule { subject: "patient", attribute: "prior_back_history", needle: "no prior history of lower back", value: "denied", polarity: N, temporal: false },
+    Rule { subject: "patient", attribute: "prior_back_history", needle: "no previous back problems", value: "denied", polarity: N, temporal: false },
+    Rule { subject: "patient", attribute: "prior_back_history", needle: "recurrent lower back pain", value: "documented", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "prior_back_history", needle: "previous episodes of back pain", value: "documented", polarity: A, temporal: false },
+
+    // ── lumbar_disc_prolapse (clinical) — imaging dispute ───────────────────
+    Rule { subject: "patient", attribute: "lumbar_disc_prolapse", needle: "diagnosed a lumbar disc prolapse", value: "present", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "lumbar_disc_prolapse", needle: "lumbar disc prolapse confirmed", value: "present", polarity: A, temporal: false },
+    Rule { subject: "patient", attribute: "lumbar_disc_prolapse", needle: "no disc prolapse", value: "absent", polarity: N, temporal: false },
+    Rule { subject: "patient", attribute: "lumbar_disc_prolapse", needle: "no evidence of disc prolapse", value: "absent", polarity: N, temporal: false },
 ];
+
+/// Needles that fire only when a digit occurs within a few characters before
+/// the match (e.g. "a 20-year smoking history", but NOT the bare heading
+/// "Smoking history is inconsistent"). Deterministic context guard.
+const DIGIT_GUARDED_NEEDLES: &[&str] = &["smoking history"];
+
+/// True iff any ASCII digit occurs within `window` bytes before `start`.
+fn digit_before(lower: &str, start: usize, window: usize) -> bool {
+    let from = start.saturating_sub(window);
+    lower.as_bytes()[from..start].iter().any(|b| b.is_ascii_digit())
+}
 
 const MONTHS: &[(&str, u8)] = &[
     ("january", 1), ("february", 2), ("march", 3), ("april", 4), ("may", 5), ("june", 6),
@@ -137,6 +227,14 @@ pub fn extract_facts(clean_text: &str, doc_id: &str) -> Vec<FactAssertion> {
             // e.g. "smoker" does not fire inside "non-smoker", nor "married"
             // inside "unmarried", nor "able to drive" inside "unable to drive".
             if !boundary_ok(&lower, start, end) {
+                continue;
+            }
+
+            // Digit-context guard (e.g. "20-year smoking history" yes,
+            // section heading "Smoking history is inconsistent" no).
+            if DIGIT_GUARDED_NEEDLES.contains(&rule.needle)
+                && !digit_before(&lower, start, 10)
+            {
                 continue;
             }
 
@@ -170,9 +268,12 @@ pub fn extract_facts(clean_text: &str, doc_id: &str) -> Vec<FactAssertion> {
                 char_offset_start: start,
                 char_offset_end: end,
                 raw_text,
+                sentence: sentence_around(clean_text, start, end),
             });
         }
     }
+
+    let mut out = normalise_evidence_spans(out);
 
     out.sort_by(|a, b| {
         a.attribute
@@ -181,6 +282,66 @@ pub fn extract_facts(clean_text: &str, doc_id: &str) -> Vec<FactAssertion> {
             .then(a.char_offset_start.cmp(&b.char_offset_start))
     });
     out
+}
+
+/// Deterministic evidence normalisation: ONE textual span contributes AT MOST
+/// ONE value per attribute. Within each attribute, matches are ordered by
+/// (span length DESC, start ASC, value ASC) and accepted greedily; a match is
+/// dropped when its span is contained within (or identical to) an already
+/// accepted span. Longer (more specific) surface forms therefore win — e.g.
+/// "seven to eight hours per night" suppresses the nested "eight hours per
+/// night", and "has not returned to work" suppresses both nested needles
+/// (including the polarity-flipping "returned to work"). Partial overlaps and
+/// genuinely distinct spans are NEVER removed. Generic across all attribute
+/// families; fully deterministic (BTreeMap grouping, total ordering).
+fn normalise_evidence_spans(facts: Vec<FactAssertion>) -> Vec<FactAssertion> {
+    let mut by_attr: BTreeMap<String, Vec<FactAssertion>> = BTreeMap::new();
+    for f in facts {
+        by_attr.entry(f.attribute.clone()).or_default().push(f);
+    }
+
+    let mut kept: Vec<FactAssertion> = Vec::new();
+    for (_, mut group) in by_attr {
+        group.sort_by(|a, b| {
+            let la = a.char_offset_end - a.char_offset_start;
+            let lb = b.char_offset_end - b.char_offset_start;
+            lb.cmp(&la)
+                .then(a.char_offset_start.cmp(&b.char_offset_start))
+                .then(a.value.cmp(&b.value))
+        });
+        let mut accepted_spans: Vec<(usize, usize)> = Vec::new();
+        for f in group {
+            let contained = accepted_spans
+                .iter()
+                .any(|&(s, e)| s <= f.char_offset_start && f.char_offset_end <= e);
+            if contained {
+                continue;
+            }
+            accepted_spans.push((f.char_offset_start, f.char_offset_end));
+            kept.push(f);
+        }
+    }
+    kept
+}
+
+/// The full sentence containing `[start, end)` — sentence-level provenance.
+/// Bounds are the nearest `.`/newline before `start` and the next `.`/newline
+/// at/after `end` (inclusive of the closing `.`). Deterministic, byte-based
+/// (ASCII corpus assumption shared with the offset model above).
+fn sentence_around(text: &str, start: usize, end: usize) -> String {
+    let bytes = text.as_bytes();
+    let mut s = start.min(bytes.len());
+    while s > 0 && bytes[s - 1] != b'.' && bytes[s - 1] != b'\n' {
+        s -= 1;
+    }
+    let mut e = end.min(bytes.len());
+    while e < bytes.len() && bytes[e] != b'.' && bytes[e] != b'\n' {
+        e += 1;
+    }
+    if e < bytes.len() && bytes[e] == b'.' {
+        e += 1; // keep the terminating full stop
+    }
+    text.get(s..e).unwrap_or("").trim().to_string()
 }
 
 /// A token character for word-boundary purposes: ASCII alphanumeric or `-`
@@ -404,5 +565,105 @@ mod tests {
         let f = extract_facts(t, "docA");
         // None of the fact attributes should fire on a purely clinical sentence.
         assert!(f.is_empty(), "unexpected facts: {f:?}");
+    }
+}
+
+#[cfg(test)]
+mod evidence_normalisation_tests {
+    use super::*;
+
+    fn vals(facts: &[FactAssertion], attribute: &str) -> Vec<String> {
+        let mut v: Vec<String> = facts
+            .iter()
+            .filter(|f| f.attribute == attribute)
+            .map(|f| f.value.clone())
+            .collect();
+        v.sort();
+        v
+    }
+
+    // sleep_hours: "seven to eight hours per night" fully contains "eight
+    // hours per night" — exactly ONE value must survive (the longer span).
+    #[test]
+    fn nested_sleep_span_yields_one_value() {
+        let f = extract_facts("She sleeps seven to eight hours per night with medication.", "d");
+        assert_eq!(vals(&f, "sleep_hours"), vec!["7-8"]);
+    }
+
+    // …while genuinely distinct spans for the same attribute BOTH survive.
+    #[test]
+    fn distinct_sleep_spans_both_survive() {
+        let f = extract_facts(
+            "She reports three hours per night. Another record notes seven to eight hours per night.",
+            "d",
+        );
+        assert_eq!(vals(&f, "sleep_hours"), vec!["3", "7-8"]);
+    }
+
+    // return_to_work triple nesting: "has not returned to work" contains
+    // "not returned to work" AND the polarity-flipping "returned to work".
+    // One sentence must yield ONE observation, never a self-contradiction.
+    #[test]
+    fn nested_return_to_work_yields_one_observation() {
+        let f = extract_facts("She has not returned to work since the incident.", "d");
+        let rtw: Vec<&FactAssertion> =
+            f.iter().filter(|x| x.attribute == "return_to_work").collect();
+        assert_eq!(rtw.len(), 1, "exactly one observation, got {rtw:?}");
+        assert_eq!(rtw[0].value, "not_returned");
+    }
+
+    // smoking_history: digit-guarded "smoking history" + "never smoked" at
+    // distinct spans → two values (a real contradiction), no nested double-fire.
+    #[test]
+    fn smoking_patterns_distinct_spans_survive() {
+        let f = extract_facts(
+            "One GP record states she has never smoked. Another notes a 20-year smoking history.",
+            "d",
+        );
+        assert_eq!(vals(&f, "smoking_history"), vec!["never", "smoker"]);
+        // Heading form without a digit context must not fire at all.
+        let g = extract_facts("Smoking history is inconsistent.", "d");
+        assert!(vals(&g, "smoking_history").is_empty());
+    }
+
+    // marital_status: periphrastic and direct forms at distinct spans coexist;
+    // each span contributes exactly one observation.
+    #[test]
+    fn marital_patterns_one_observation_per_span() {
+        let f = extract_facts(
+            "Several records describe Emma as divorced. She lives with her husband and two children.",
+            "d",
+        );
+        let marital: Vec<&FactAssertion> =
+            f.iter().filter(|x| x.attribute == "marital_status").collect();
+        assert_eq!(marital.len(), 2);
+        assert_eq!(vals(&f, "marital_status"), vec!["divorced", "married"]);
+    }
+
+    // Future-pattern guarantee: identical spans (two rules matching the exact
+    // same bytes for one attribute) collapse to a single deterministic winner,
+    // and the normalisation is order-independent (deterministic re-run).
+    #[test]
+    fn normalisation_is_deterministic() {
+        let text = "She has not returned to work. She sleeps seven to eight hours per night.";
+        let a = extract_facts(text, "d");
+        let b = extract_facts(text, "d");
+        assert_eq!(
+            serde_json::to_string(&a).unwrap(),
+            serde_json::to_string(&b).unwrap()
+        );
+        // No two surviving facts of the same attribute may have nested spans.
+        for x in &a {
+            for y in &a {
+                if x.attribute == y.attribute
+                    && (x.char_offset_start, x.char_offset_end)
+                        != (y.char_offset_start, y.char_offset_end)
+                {
+                    let nested = x.char_offset_start <= y.char_offset_start
+                        && y.char_offset_end <= x.char_offset_end;
+                    assert!(!nested, "nested spans survived: {x:?} ⊃ {y:?}");
+                }
+            }
+        }
     }
 }

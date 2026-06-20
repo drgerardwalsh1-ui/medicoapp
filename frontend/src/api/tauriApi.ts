@@ -212,33 +212,60 @@ export const TauriAPI = {
     guarded("get_client_extraction", { clientId }),
 
   /**
-   * STEP-6 production entrypoint. Routes the real persisted `clinical_events`
+   * Contradiction Engine production entrypoint. Routes the real persisted `clinical_events`
    * (plus any family/legal facts and participants) through the existing
    * backend pipeline and returns the CanonicalCase + enriched view + export +
-   * csv_lines as a JSON string. Backend command: `build_step6_case`
+   * csv_lines as a JSON string. Backend command: `build_contradiction_case`
    * (rename_all = camelCase). No business logic here — pure IPC binding.
    */
-  buildStep6Case: (
+  buildContradictionCase: (
     clinicalEvents: unknown[],
     familyEvents: unknown[],
     legalEvents: unknown[],
     participants: unknown[],
+    /** `[ [docId, cleanText], … ]` — the full production input; fact/value
+     *  contradictions are never observability-only. */
+    cleanTexts: [string, string][] = [],
   ): Promise<JsonString> =>
-    guarded("build_step6_case", {
+    guarded("build_contradiction_case", {
       clinicalEvents,
       familyEvents,
       legalEvents,
       participants,
+      cleanTexts,
     }),
 
   /**
-   * STEP-6 OBSERVABILITY entrypoint. Same real inputs as `buildStep6Case`, but
-   * the backend composes the full deterministic observability stack and returns
-   * ONE object as JSON: `Step6ObservabilityRoot` (snapshot + history + trends +
-   * readiness + queue + dashboard). Read-only; nothing is recomputed in the UI.
-   * Backend command: `build_step6_observability` (rename_all = camelCase).
+   * Contradiction GRAPH entrypoint. Same real inputs as `buildContradictionCase`;
+   * the backend runs the unchanged engine, then projects the typed explorable
+   * `ContradictionGraph` (fact/document/contradiction/entity nodes, typed
+   * weighted edges) and returns it as a JSON string. Pure IPC binding.
+   * Backend command: `build_contradiction_graph` (rename_all = camelCase).
    */
-  buildStep6Observability: (
+  buildContradictionGraph: (
+    clinicalEvents: unknown[],
+    familyEvents: unknown[],
+    legalEvents: unknown[],
+    participants: unknown[],
+    /** `[ [docId, cleanText], … ]` — same full input as observability. */
+    cleanTexts: [string, string][] = [],
+  ): Promise<JsonString> =>
+    guarded("build_contradiction_graph", {
+      clinicalEvents,
+      familyEvents,
+      legalEvents,
+      participants,
+      cleanTexts,
+    }),
+
+  /**
+   * Contradiction Engine OBSERVABILITY entrypoint. Same real inputs as `buildContradictionCase`, but
+   * the backend composes the full deterministic observability stack and returns
+   * ONE object as JSON: `ContradictionObservabilityRoot` (snapshot + history + trends +
+   * readiness + queue + dashboard). Read-only; nothing is recomputed in the UI.
+   * Backend command: `build_contradiction_observability` (rename_all = camelCase).
+   */
+  buildContradictionObservability: (
     clinicalEvents: unknown[],
     familyEvents: unknown[],
     legalEvents: unknown[],
@@ -247,7 +274,7 @@ export const TauriAPI = {
     /** `[ [docId, cleanText], … ]` — enables fact/value-disagreement detection. */
     cleanTexts: [string, string][] = [],
   ): Promise<JsonString> =>
-    guarded("build_step6_observability", {
+    guarded("build_contradiction_observability", {
       clinicalEvents,
       familyEvents,
       legalEvents,
@@ -446,6 +473,34 @@ export const TauriAPI = {
     decision: unknown
   ): Promise<{ id: string; savedAt: string }> =>
     guarded("persist_clinical_decision", { snapshot, decision }),
+
+  // ── Phase 1 (PRD) — canonical clinical fact spine ───────────────────────────
+  // The Rust event store is the single durable truth for interview clinical
+  // state; the frontend ClinicalState is a projection cache rebuilt from
+  // getClinicalState. See integration/clinicalSpine.ts for the adapter.
+
+  /** Append one Observation (frontend `Observation` JSON). Returns new version. */
+  recordClinicalObservation: (
+    clientId: string,
+    observation: unknown
+  ): Promise<number> =>
+    guarded("record_clinical_observation", { clientId, observation }),
+
+  /**
+   * Append one review-surface item. `kind` must be one of:
+   * attestation | resolution | correction | conclusion | snapshot.
+   * Returns new version.
+   */
+  recordClinicalReviewItem: (
+    clientId: string,
+    kind: string,
+    item: unknown
+  ): Promise<number> =>
+    guarded("record_clinical_review_item", { clientId, kind, item }),
+
+  /** ClinicalState JSON rebuilt from the event log (deserialiseState-ready). */
+  getClinicalState: (clientId: string): Promise<JsonString> =>
+    guarded("get_clinical_state", { clientId }),
 };
 
 /** Mirrors the Rust `EventHistoryItem`. */

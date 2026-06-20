@@ -10,7 +10,7 @@
 //!
 //! SCOPE OF THIS PASS — Contradiction Surfacing only.
 //! ---------------------------------------------------
-//! The full `CanonicalCase` schema (STEP 6 of the spec) is DESIGNED here so
+//! The full `CanonicalCase` schema (the Contradiction Engine case envelope) is DESIGNED here so
 //! the envelope shape is fixed, but only the `contradictions`,
 //! `unresolved_questions`, and `confidence_summary` fields are POPULATED in
 //! this pass. The remaining vectors (`injury_events`, `diagnoses`, …,
@@ -43,7 +43,7 @@ use crate::participant_resolution::{identity_ambiguity, Participant};
 use crate::patient_longitudinal_reconciliation::{EvolutionTrack, LongitudinalPatientGraph};
 
 // ════════════════════════════════════════════════════════════════════════
-// STEP 6 — Canonical Case envelope (schema)
+// Contradiction Engine — Canonical Case envelope (schema)
 // ════════════════════════════════════════════════════════════════════════
 
 /// The legal-grade reconstructed case model. One per patient corpus.
@@ -197,7 +197,7 @@ pub struct Contradiction {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// STEP-6 unified contradiction stream (domain-tagged, never merged at source)
+// Contradiction Engine unified contradiction stream (domain-tagged, never merged at source)
 // ════════════════════════════════════════════════════════════════════════
 
 /// Which ontology a surfaced contradiction came from. Clinical and Family are
@@ -352,7 +352,7 @@ pub fn assemble_canonical_case(
     }
 }
 
-/// Build the unified, domain-tagged STEP-6 contradiction stream. Clinical and
+/// Build the unified, domain-tagged Contradiction Engine contradiction stream. Clinical and
 /// family contradictions are computed INDEPENDENTLY (disjoint inputs, no shared
 /// grouping, no cross-domain confidence effect), wrapped, then sorted by ONE
 /// comparable key. This is the only place the two ontologies meet.

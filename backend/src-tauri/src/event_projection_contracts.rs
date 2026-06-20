@@ -224,6 +224,28 @@ const DOCUMENT_DELETED: EventProjectionContract = EventProjectionContract {
             event exists — deletion is final (R6, intentional).",
 };
 
+const CLINICAL_OBSERVATION_RECORDED: EventProjectionContract = EventProjectionContract {
+    event: EventType::ClinicalObservationRecorded,
+    projection_targets: &[],
+    operation: ProjectionOperation::Ignore,
+    rebuild_behavior: RebuildBehavior::Included, // replayed as a no-op
+    idempotency: IdempotencyMode::Idempotent,
+    notes: "No projection rows. Clinical fact spine event — folded on demand \
+            by get_clinical_state (clinical_fact_store::fold_clinical_state) \
+            straight from the event log.",
+};
+
+const CLINICAL_REVIEW_RECORDED: EventProjectionContract = EventProjectionContract {
+    event: EventType::ClinicalReviewRecorded,
+    projection_targets: &[],
+    operation: ProjectionOperation::Ignore,
+    rebuild_behavior: RebuildBehavior::Included, // replayed as a no-op
+    idempotency: IdempotencyMode::Idempotent,
+    notes: "No projection rows. Review-surface item (attestation / resolution / \
+            correction / conclusion / snapshot) folded on demand by \
+            get_clinical_state.",
+};
+
 /// Every projection contract, for iteration (tests, reviewer listing). Kept
 /// in lockstep with `contract_for` by the conformance test.
 pub const EVENT_PROJECTION_CONTRACTS: &[EventProjectionContract] = &[
@@ -237,6 +259,8 @@ pub const EVENT_PROJECTION_CONTRACTS: &[EventProjectionContract] = &[
     ATTRIBUTION_RECORDED,
     EXTRACTION_RUN_RECORDED,
     DOCUMENT_DELETED,
+    CLINICAL_OBSERVATION_RECORDED,
+    CLINICAL_REVIEW_RECORDED,
 ];
 
 /// The declared projection contract for an event type.
@@ -256,6 +280,8 @@ pub fn contract_for(event: &EventType) -> &'static EventProjectionContract {
         EventType::AttributionRecorded => &ATTRIBUTION_RECORDED,
         EventType::ExtractionRunRecorded => &EXTRACTION_RUN_RECORDED,
         EventType::DocumentDeleted => &DOCUMENT_DELETED,
+        EventType::ClinicalObservationRecorded => &CLINICAL_OBSERVATION_RECORDED,
+        EventType::ClinicalReviewRecorded => &CLINICAL_REVIEW_RECORDED,
     }
 }
 

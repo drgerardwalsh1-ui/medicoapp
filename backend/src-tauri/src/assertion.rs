@@ -116,8 +116,13 @@ fn classify_mention_at(
     from: usize,
     treat_as_symptom_by_default: bool,
 ) -> Option<(ConditionMention, usize)> {
-    let lower_full = clean_text.to_lowercase();
-    let lower_term = term.to_lowercase();
+    // ASCII-only lowercase preserves byte length, so every offset found in
+    // `lower_full` is a valid char-boundary offset into `clean_text`. Full
+    // Unicode to_lowercase() can change byte length (İ → i̇, ẞ → ß), which
+    // would shift offsets, corrupt snippets, and fail the snippet-integrity
+    // gate at the persistence boundary.
+    let lower_full = clean_text.to_ascii_lowercase();
+    let lower_term = term.to_ascii_lowercase();
     if from >= lower_full.len() {
         return None;
     }
@@ -154,6 +159,19 @@ fn classify_at_position(
             || sentence_lower.contains(cue) && cue_before_term(&sentence_lower, cue, lower_term)
         {
             return mk(term, sentence, sentence_start, sentence_end, AssertionStatus::Contradicted);
+        }
+    }
+    // Post-positioned (often passive-voice) contradiction: the negating phrase
+    // FOLLOWS the term — "criteria for PTSD were not met", "PTSD was excluded".
+    // The pre-term window can never see these; check the sentence remainder
+    // after the term instead. (Audit finding: this exact gap silently turned
+    // an explicit diagnostic rejection into an Affirmed diagnosis.)
+    if let Some(term_in_sentence) = sentence_lower.find(lower_term) {
+        let after_term = &sentence_lower[term_in_sentence + lower_term.len()..];
+        for cue in POST_TERM_CONTRADICTION_CUES {
+            if after_term.contains(cue) {
+                return mk(term, sentence, sentence_start, sentence_end, AssertionStatus::Contradicted);
+            }
         }
     }
     for cue in NEGATION_CUES {
@@ -289,6 +307,25 @@ const CONTRADICTION_CUES: &[&str] = &[
 
 const NEGATION_CUES: &[&str] = &[
     "no", "denies", "denied", "without", "negative for", "absent",
+];
+
+/// Contradiction phrases that appear AFTER the term in the sentence —
+/// typically passive voice. Matched against the sentence remainder following
+/// the term (never the pre-term window).
+const POST_TERM_CONTRADICTION_CUES: &[&str] = &[
+    "were not met",
+    "was not met",
+    "are not met",
+    "is not met",
+    "not fulfilled",
+    "could not be confirmed",
+    "could not be substantiated",
+    "was excluded",
+    "were excluded",
+    "has been excluded",
+    "is excluded",
+    "was ruled out",
+    "has been ruled out",
 ];
 
 const HISTORICAL_CUES: &[&str] = &[

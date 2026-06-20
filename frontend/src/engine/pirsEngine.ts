@@ -1,4 +1,12 @@
 import type { PIRSTableModel, PIRSResult } from "../types/types";
+import {
+  CLASS_MAX,
+  CLASS_MIN,
+  TREATMENT_EFFECT_TEXT,
+  TREATMENT_MAX,
+  TREATMENT_MIN,
+  wpiFromMedianAndAggregate,
+} from "../rules/pirsNswRules";
 
 export type PIRSTable = {
 name: string;
@@ -8,11 +16,11 @@ treatmentEffect: number; // 0–3
 };
 
 function clampClass(n: number) {
-return Math.min(5, Math.max(1, Number(n) || 1));
+return Math.min(CLASS_MAX, Math.max(CLASS_MIN, Number(n) || CLASS_MIN));
 }
 
 function clampTreatment(n: number) {
-return Math.min(3, Math.max(0, Number(n) || 0));
+return Math.min(TREATMENT_MAX, Math.max(TREATMENT_MIN, Number(n) || TREATMENT_MIN));
 }
 
 function sortNumbers(arr: number[]) {
@@ -28,29 +36,7 @@ return Math.floor(n + 0.5); // ✅ 0.5 rounds up
 }
 
 function getTreatmentText(val: number) {
-switch (val) {
-case 0: return "minimal or no";
-case 1: return "mild";
-case 2: return "moderate";
-case 3: return "good";
-default: return "";
-}
-}
-
-function initWPIFind(Class: number, Aggregate: number): number {
-const tables: Record<number, number[]> = {
-1: [0,0,1,1,2,2,2,3,3],
-2: [-1,-1,-1,4,5,5,6,7,7,8,9,9,10,10],
-3: [-1,-1,-1,-1,-1,-1,-1,11,13,15,17,19,22,24,26,28,30],
-4: [-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,31,34,37,41,44,47,50,54,57,60],
-5: [-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,66,65,70,74,78,83,87,91,96,100]
-};
-
-const arr = tables[Class];
-if (!arr) return 0;
-
-const val = arr[Aggregate - 6];
-return val === -1 || val === undefined ? 0 : val;
+return TREATMENT_EFFECT_TEXT[val] ?? "";
 }
 
 export function calculatePIRS(table: PIRSTableModel): PIRSResult {
@@ -59,7 +45,7 @@ const total = classes.reduce((a, b) => a + b, 0);
 const sorted = sortNumbers(classes);
 const median = calculateMedian(sorted);
 
-const initWPI = initWPIFind(median, total);
+const initWPI = wpiFromMedianAndAggregate(median, total);
 
 const pre = Number(table.preExisting) || 0;
 const treat = clampTreatment(table.treatmentEffect);

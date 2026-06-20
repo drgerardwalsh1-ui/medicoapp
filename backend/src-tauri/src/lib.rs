@@ -110,98 +110,112 @@ mod case_events;
 // types so the core pipelines stay untouched. Deterministic, no HashMap.
 mod event_dispatch;
 
-// STEP-6 enrichment — a PURE, POST-PROCESSING VIEW LAYER over the assembled
+// Contradiction Engine enrichment — a PURE, POST-PROCESSING VIEW LAYER over the assembled
 // CaseContradiction stream. Adds presentational derived fields (severity_rank,
 // presentation_group, cross_domain_tag) without mutating input, recomputing
 // confidence, or touching any engine. Deterministic, BTreeMap-only.
-mod step6_enrichment;
+mod contradiction_enrichment;
 
-// STEP-6 semantic graph — a PURE DERIVATION LAYER over Step6View: nodes per
+// Contradiction Engine semantic graph — a PURE DERIVATION LAYER over ContradictionView: nodes per
 // enriched contradiction, edges from cross_namespace_relations, with traversal,
 // clustering (connected components), and filtered queries. Vec-only output, no
 // HashMap; reads the view by reference and mutates nothing.
-mod step6_graph;
+mod contradiction_cluster_graph;
 
-// STEP-6 graph analytics — PURE deterministic analysis over Step6Graph:
+// Contradiction Engine graph analytics — PURE deterministic analysis over ClusterGraph:
 // node metrics (degree / cluster / bridge_score / centrality_rank), cluster
 // metrics (+ clinical significance), graph summary, and top-N queries. Reads
 // the graph by reference; mutates nothing; Vec-only, no HashMap, no ML.
-mod step6_graph_analysis;
+mod cluster_graph_analysis;
 
-// STEP-6 graph narratives — PURE deterministic summarisation of GraphAnalytics
+// Contradiction Engine graph narratives — PURE deterministic summarisation of GraphAnalytics
 // into fixed-template human-readable strings (cluster headline/summary/dominant
 // node + graph summary). No AI, no inference, no scoring; reads by reference,
 // mutates nothing.
-mod step6_graph_narrative;
+mod cluster_graph_narrative;
 
-// Canonical STEP-6 report — the single aggregation object (view + graph +
+// Canonical Contradiction Engine report — the single aggregation object (view + graph +
 // analytics + narrative) for future UI/PDF/REST/export surfaces. Pure
 // aggregation: calls the existing builders in sequence, no recomputation, no
 // mutation. Plus pure queries + read-only integrity validation.
-mod step6_report;
+mod contradiction_report;
 
-// STEP-6 report snapshot — durable, versioned, serializable artifact wrapping
-// Step6Report. Adds schema_version + deterministic report_id + caller-supplied
+// Contradiction Engine report snapshot — durable, versioned, serializable artifact wrapping
+// ContradictionReport. Adds schema_version + deterministic report_id + caller-supplied
 // timestamp. Pure wrapping; no hashing/UUIDs/internal timestamps.
-mod step6_report_snapshot;
+mod contradiction_report_snapshot;
 
-// STEP-6 snapshot persistence boundary — SnapshotRepository trait + deterministic
+// Contradiction Engine snapshot persistence boundary — SnapshotRepository trait + deterministic
 // in-memory (BTreeMap) reference implementation. Contract only; no DB/FS/REST.
-mod step6_snapshot_repository;
+mod contradiction_snapshot_repository;
 
-// STEP-6 snapshot filesystem backend — concrete SnapshotRepository writing one
+// Contradiction Engine snapshot filesystem backend — concrete SnapshotRepository writing one
 // JSON file per snapshot ({report_id}.json). std + serde only; sync; no DB/net.
-mod step6_snapshot_file_repository;
+mod contradiction_snapshot_file_repository;
 
-// STEP-6 report diff — deterministic, read-only comparison of two snapshots
+// Contradiction Engine report diff — deterministic, read-only comparison of two snapshots
 // (exact contradiction_id identity). Pure derivation; no report/graph changes.
-mod step6_report_diff;
+mod contradiction_report_diff;
 
-// STEP-6 report evolution — deterministic, read-only analysis of contradiction
+// Contradiction Engine report evolution — deterministic, read-only analysis of contradiction
 // modifications (confidence/subject), graph + narrative evolution between two
 // snapshots. Pure derivation; no engine/report/snapshot/diff changes.
-mod step6_report_evolution;
+mod contradiction_report_evolution;
 
-// STEP-6 report history — deterministic, read-only longitudinal analysis across
+// Contradiction Engine report history — deterministic, read-only longitudinal analysis across
 // ALL snapshots in a repository (first/last seen, appearances, persistent/
 // resolved/recurring). Pure derivation; no engine/report/snapshot/repo changes.
-mod step6_report_history;
+mod contradiction_report_history;
 
-// STEP-6 report trends — deterministic, read-only confidence-trajectory analysis
+// Contradiction Engine report trends — deterministic, read-only confidence-trajectory analysis
 // over ReportHistory (Increasing/Decreasing/Stable/Intermittent). Pure
 // derivation; no engine/report/snapshot/repo/diff/evolution/history changes.
-mod step6_report_trends;
+mod contradiction_report_trends;
 
-// STEP-6 forecast readiness — deterministic classification of historical
+// Contradiction Engine forecast readiness — deterministic classification of historical
 // SUFFICIENCY (InsufficientHistory/LimitedHistory/Ready). Does NOT forecast,
 // predict, or extrapolate. Pure derivation over history + trends.
-mod step6_forecast_readiness;
+mod contradiction_forecast_readiness;
 
-// STEP-6 monitoring queue — deterministic watchlist organising contradictions by
+// Contradiction Engine monitoring queue — deterministic watchlist organising contradictions by
 // observation priority (Ready→High, Limited→Medium, Insufficient→Low). No
 // forecasting/prediction; pure derivation over forecast-readiness.
-mod step6_monitoring_queue;
+mod contradiction_monitoring_queue;
 
-// STEP-6 monitoring dashboard — deterministic, read-only aggregation over a
+// Contradiction Engine monitoring dashboard — deterministic, read-only aggregation over a
 // MonitoringQueue (priority/trend/readiness distributions + consistency check).
 // Pure summary; no forecasting, reprioritisation, or reordering.
-mod step6_monitoring_dashboard;
+mod contradiction_monitoring_dashboard;
 
-// STEP-6 observability root — composition-only aggregator bundling snapshot +
+// Contradiction Engine observability root — composition-only aggregator bundling snapshot +
 // history + trends + readiness + queue + dashboard into one inspectable object.
 // Computes nothing new; calls existing builders in strict order.
-mod step6_observability_root;
+mod contradiction_observability_root;
 
-// STEP-6 export — deterministic, read-only PROJECTIONS (rows / CSV lines /
-// per-group summary) of the enriched Step6View. No graph/engine/dispatch/event
+// Contradiction Engine export — deterministic, read-only PROJECTIONS (rows / CSV lines /
+// per-group summary) of the enriched ContradictionView. No graph/engine/dispatch/event
 // access, no mutation, no recomputation. BTreeMap-only; no filesystem.
-mod step6_export;
+mod contradiction_export;
 
-// STEP-6 pipeline — the single end-to-end orchestration seam (audit F1+F2):
+// Contradiction Engine pipeline — the single end-to-end orchestration seam (audit F1+F2):
 // EventEnvelope → dispatch → clinical/family/timeline accumulation → assemble
 // (timeline passed through) → enrich → export. Orchestration only; reuses every
 // existing builder, no new business logic. Deterministic, BTreeMap grouping.
-mod step6_pipeline;
+mod contradiction_engine;
+
+// Contradiction Graph Model (additive, explorable reasoning layer): a typed,
+// queryable graph projected from ContradictionEngineOutput. `graph_types` is
+// the model (Fact/Document/Contradiction/Entity nodes; SUPPORTS/CONTRADICTS/
+// DERIVED_FROM/RELATES_TO/TEMPORAL_NEXT/WEAKENS/STRENGTHENS edges),
+// `graph_builder` the pure deterministic constructor, `graph_query` the
+// read-only exploration API, `contradiction_graph` the façade, and
+// `contradiction_graph_projection` a rebuildable SQLite read model.
+// Engine outputs are UNCHANGED; the graph is a downstream projection.
+mod graph_types;
+mod graph_builder;
+mod graph_query;
+mod contradiction_graph;
+mod contradiction_graph_projection;
 
 // Fact-assertion pipeline — first-class non-clinical factual statements
 // (marital/work/smoking/driving/vital-status/dates). `fact_assertion` is the
@@ -224,10 +238,10 @@ mod structured_extract;
 
 // Production input adapter (closes audit F-1/F-2): converts the real persisted
 // extraction payload (clinical_events JSON) + caller-supplied family/legal
-// facts into Vec<EventEnvelope> and invokes build_step6_pipeline. Pure adapter
-// + thin entrypoint; no new business logic. Surfaced via the `build_step6_case`
+// facts into Vec<EventEnvelope> and invokes run_contradiction_engine. Pure adapter
+// + thin entrypoint; no new business logic. Surfaced via the `build_contradiction_case`
 // command.
-mod adapter_step6_input;
+mod contradiction_input_adapter;
 
 // Clinical event routing + preservation layer (additive, preparation only):
 // the deterministic `Diagnosis → Injury, else Unsupported` routing extracted
@@ -263,6 +277,9 @@ pub mod event_store;
 pub mod projection;
 pub mod reducer;
 pub mod replay;
+// Canonical clinical fact spine (Phase 1) — pure fold of clinical
+// observation/review events into the frontend ClinicalState wire shape.
+pub mod clinical_fact_store;
 
 /// Master kill-switch for the event-sourcing system. Step 4 turns this on.
 /// When `true`, the new domain commands (`create_client`, `get_client_view`)
@@ -1011,6 +1028,105 @@ fn persist_clinical_decision(
     Ok(PersistConfirmation { id, saved_at })
 }
 
+// ─── Phase 1 — canonical clinical fact spine ─────────────────────────────────
+//
+// The event store is the single durable truth for interview clinical state;
+// the frontend ClinicalState is a projection cache rebuilt via
+// get_clinical_state. Writes are append-only events; reads are pure folds.
+
+/// Append one interview Observation to the client's clinical fact log.
+/// The observation JSON is opaque except for a structural gate (id /
+/// symptomTypeId / frame present) — facts that could never be collapsed
+/// or projected are refused at the boundary. Returns the new version.
+#[tauri::command(rename_all = "camelCase")]
+fn record_clinical_observation(
+    client_id: String,
+    observation: serde_json::Value,
+) -> Result<u64, String> {
+    clinical_fact_store::validate_observation(&observation)?;
+    let (store, proj) = init_event_store_strict()?;
+    if proj
+        .get_client_view(&client_id)
+        .map_err(|e| e.to_string())?
+        .is_none()
+    {
+        return Err(format!("client not found: {client_id}"));
+    }
+
+    let version = store.next_version(&client_id).map_err(|e| e.to_string())?;
+    let env = events::EventEnvelope::new(
+        client_id.clone(),
+        version,
+        events::Actor::System { component: "record_clinical_observation".into() },
+        events::EventPayload::ClinicalObservationRecorded(
+            events::ClinicalObservationRecordedP { observation },
+        ),
+        None,
+        None,
+    );
+    store
+        .append_event(&env)
+        .map_err(|e| format!("record_clinical_observation: append failed: {e}"))?;
+    proj.project_forward(std::slice::from_ref(&env))
+        .map_err(|e| format!("record_clinical_observation: project_forward failed: {e}"))?;
+    Ok(version)
+}
+
+/// Append one review-surface item (attestation / resolution / correction /
+/// conclusion / snapshot) to the client's clinical state. Unknown kinds are
+/// refused at this boundary (fail closed). Returns the new version.
+#[tauri::command(rename_all = "camelCase")]
+fn record_clinical_review_item(
+    client_id: String,
+    kind: String,
+    item: serde_json::Value,
+) -> Result<u64, String> {
+    if !clinical_fact_store::REVIEW_KINDS.contains(&kind.as_str()) {
+        return Err(format!(
+            "record_clinical_review_item: unknown kind \"{kind}\" (expected one of {:?})",
+            clinical_fact_store::REVIEW_KINDS
+        ));
+    }
+    let (store, proj) = init_event_store_strict()?;
+    if proj
+        .get_client_view(&client_id)
+        .map_err(|e| e.to_string())?
+        .is_none()
+    {
+        return Err(format!("client not found: {client_id}"));
+    }
+
+    let version = store.next_version(&client_id).map_err(|e| e.to_string())?;
+    let env = events::EventEnvelope::new(
+        client_id.clone(),
+        version,
+        events::Actor::System { component: "record_clinical_review_item".into() },
+        events::EventPayload::ClinicalReviewRecorded(events::ClinicalReviewRecordedP {
+            kind,
+            item,
+        }),
+        None,
+        None,
+    );
+    store
+        .append_event(&env)
+        .map_err(|e| format!("record_clinical_review_item: append failed: {e}"))?;
+    proj.project_forward(std::slice::from_ref(&env))
+        .map_err(|e| format!("record_clinical_review_item: project_forward failed: {e}"))?;
+    Ok(version)
+}
+
+/// Rebuild the client's ClinicalState from the event log (pure fold) and
+/// return it as JSON in exactly the shape `deserialiseState` consumes.
+/// Reasoning is never returned — the frontend recomputes it.
+#[tauri::command(rename_all = "camelCase")]
+fn get_clinical_state(client_id: String) -> Result<String, String> {
+    let (store, _proj) = init_event_store_strict()?;
+    let events = store.get_events(&client_id).map_err(|e| e.to_string())?;
+    let state = clinical_fact_store::fold_clinical_state(&events);
+    serde_json::to_string(&state).map_err(|e| e.to_string())
+}
+
 // ─── Core commands (always compiled) ─────────────────────────────────────────
 
 #[tauri::command]
@@ -1139,11 +1255,16 @@ fn apply_ocr_fallback(path: &str, text: String, non_ws: usize) -> ContentResult 
 /// always run OCR on PDFs (when the feature is compiled in) and take whichever
 /// source — text layer or OCR — yields more non-whitespace content.
 fn pdf_content_with_ocr(path: &str, text: String, non_ws: usize) -> ContentResult {
-    // Shortcut: if the text layer is already dense (≥200 non-ws chars per
-    // expected page worth of content), skip OCR entirely — OCR is slow and
-    // the text layer is already canonical.
-    if non_ws >= 2000 {
-        return (text, "text", None);
+    // Shortcut: skip OCR only when the text layer is dense PER PAGE
+    // (≥200 non-ws chars × page count). A flat document-level threshold
+    // reintroduced exactly the failure this function exists to prevent —
+    // a bundle with a few dense text pages and many scanned pages passed
+    // the shortcut and silently dropped every image page. If the page
+    // count cannot be determined, fail towards running OCR.
+    if let Some(pages) = crate::ocr::pdf_page_count(path) {
+        if pages > 0 && non_ws >= 200 * pages {
+            return (text, "text", None);
+        }
     }
     match crate::ocr::run_ocr(path) {
         Ok(ocr_text) => {
@@ -1194,7 +1315,9 @@ fn extract_file_contents(path: String) -> Result<String, String> {
         apply_ocr_fallback(&path, text, non_ws)
     };
 
-    let char_count = final_text.len();
+    // Count CHARACTERS, not bytes — the field is named char_count and the
+    // frontend compares it against JS string lengths.
+    let char_count = final_text.chars().count();
 
     Ok(serde_json::json!({
         "text":          final_text,
@@ -1330,18 +1453,26 @@ fn contains_word(lower_text: &str, kw: &str) -> bool {
         if left_ok && right_ok {
             return true;
         }
+        // Advance to the next char boundary — pos + 1 can land inside a
+        // multi-byte char when the text contains non-ASCII, and slicing
+        // at a non-boundary panics.
         start = pos + 1;
+        while start < text_len && !lower_text.is_char_boundary(start) {
+            start += 1;
+        }
         if start >= text_len { break; }
     }
     false
 }
 
 /// Return the sentence (up to 150 chars) that contains `keyword` in `text`.
-/// Uses the byte position from the lowercased version — safe because all
-/// keywords are ASCII, so their byte lengths are identical in both strings.
+/// Uses ASCII-only lowercasing, which preserves byte length — so positions
+/// found in `lower` are always valid char-boundary offsets into `text`,
+/// even when the document contains non-ASCII characters whose full Unicode
+/// lowercase has a different byte length (İ → i̇).
 /// Called by extract_structured_data to build evidence snippets.
 fn extract_snippet(text: &str, keyword: &str) -> String {
-    let lower = text.to_lowercase();
+    let lower = text.to_ascii_lowercase();
     let Some(pos) = lower.find(keyword) else {
         return String::new();
     };
@@ -1372,7 +1503,8 @@ fn extract_snippet(text: &str, keyword: &str) -> String {
 ///
 /// Falls back to `keyword` itself if no match is found.
 fn extract_original_term(text: &str, keyword: &str) -> String {
-    let lower = text.to_lowercase();
+    // ASCII-only lowercase — byte-length-preserving, see extract_snippet.
+    let lower = text.to_ascii_lowercase();
     let Some(pos) = lower.find(keyword) else {
         return keyword.to_string();
     };
@@ -1530,7 +1662,10 @@ fn extract_structured_data(text: String, doc_id: String) -> Result<String, Strin
     let cleaned = text_clean::clean_extracted_text(&text);
     let text = cleaned.clean_text.clone();
 
-    let lower = text.to_lowercase();
+    // ASCII-only lowercase: keeps byte offsets aligned with `text` for
+    // contains_word / extract_snippet / extract_original_term (all keyword
+    // lists are ASCII, so matching behaviour is unchanged).
+    let lower = text.to_ascii_lowercase();
 
     // ── Document type ─────────────────────────────────────────────────────────
     // Route through the upgraded classifier so multi-source bundles are
@@ -1609,10 +1744,15 @@ fn extract_structured_data(text: String, doc_id: String) -> Result<String, Strin
                 }
             }
 
-            // Bare 4-digit year (e.g. "2020", "2021") as last resort
-            let t_digits: String = t0.chars().filter(|c| c.is_ascii_digit()).collect();
-            if t_digits.len() == 4 {
-                if let Ok(y) = t_digits.parse::<u32>() {
+            // Bare 4-digit year (e.g. "2020", "2021") as last resort.
+            // STRICT: the token itself (after stripping surrounding
+            // punctuation) must be exactly four digits. Filtering digits
+            // out of mixed tokens fabricated dates from "2000mg" doses,
+            // postcodes and form numbers, which both polluted the date
+            // list and inflated the index-detection density gate.
+            let t_year = t0.trim_matches(|c: char| !c.is_ascii_alphanumeric());
+            if t_year.len() == 4 && t_year.chars().all(|c| c.is_ascii_digit()) {
+                if let Ok(y) = t_year.parse::<u32>() {
                     if y >= 1950 && y <= 2100 {
                         // Use Jan-01 placeholder — gives timeline ordering
                         dates_set.insert(format!("{:04}-01-01", y));
@@ -1751,6 +1891,13 @@ fn extract_structured_data(text: String, doc_id: String) -> Result<String, Strin
         ("rotator cuff tear",             0.97),
         ("meniscus tear",                 0.97),
         ("disc herniation",               0.95),
+        // AU/UK radiology vocabulary — production TEST CASE 4 used
+        // "lumbar disc prolapse" and the diagnosis was silently dropped
+        // because only the US "herniation" form was listed. Keep in sync
+        // with structured_extract.rs's injury lexicon.
+        ("disc prolapse",                 0.95),
+        ("disc protrusion",               0.93),
+        ("disc bulge",                    0.90),
         ("nerve damage",                  0.92),
         ("traumatic brain injury",        0.95),
         ("chronic pain",                  0.88),
@@ -1942,14 +2089,15 @@ fn extract_structured_data(text: String, doc_id: String) -> Result<String, Strin
     // disorder, Zoloft → sertraline, etc.), filters OCR garbage, removes dosing
     // frequencies, anatomy-only terms, and event/mechanism phrases.
     //
-    // `lax = true` — extract_structured_data uses high-precision keyword lists,
-    // so we allow single-word diagnoses like "anxiety" through.
     let clean_input = entity_clean::CleanInput {
         conditions:  conditions_vec,
         medications: medications_vec,
         procedures:  procedures_vec,
     };
-    let cleaned = entity_clean::clean_entities(clean_input, true);
+    // Second argument is `debug` (populates CleanOutput::removed for
+    // inspection only — it does NOT relax any filtering). The removed
+    // list is unused here, so keep it off.
+    let cleaned = entity_clean::clean_entities(clean_input, false);
 
     // Secondary structural guard (cheap, always-on).
     assert_output_is_clean(&cleaned.conditions,  "entity_clean→conditions");
@@ -1984,9 +2132,89 @@ fn extract_structured_data(text: String, doc_id: String) -> Result<String, Strin
         &doc_context,
     );
 
-    let _final_conditions  = validated.condition_values();
-    let _final_medications = validated.medication_values();
-    let _final_procedures  = validated.procedure_values();
+    // The gate is LIVE: these are the values the output emits. (A prior
+    // audit found the validated results bound to underscore variables and
+    // discarded — the 11-stage gate ran but gated nothing.)
+    //
+    // Context-based rejections are RE-ADMITTED: at this layer, negation /
+    // querying / contradiction is represented downstream as per-mention
+    // `assertion_status` (the multi-mention requirement — one clinician
+    // affirms PTSD, another rejects it, both must appear), and the
+    // contradiction engine consumes those mentions. Dropping the entity
+    // here would hide the disagreement entirely. Structural / medical-
+    // shape / plausibility rejections (OCR garbage, UI tokens, anatomy-
+    // only fragments) remain final.
+    const CONTEXT_REJECTIONS: &[&str] = &[
+        "entity is negated in source document",
+        "entity is contradicted in source document",
+        "insufficient evidence: needs ≥1 strong mention or ≥2 total mentions",
+        "confidence below acceptance threshold (0.35)",
+    ];
+    let mut final_conditions  = validated.condition_values();
+    let mut final_medications = validated.medication_values();
+    let mut final_procedures  = validated.procedure_values();
+    for e in &validated.rejected {
+        let context_only = e
+            .rejection_reason
+            .as_deref()
+            .map(|r| CONTEXT_REJECTIONS.contains(&r))
+            .unwrap_or(false);
+        if !context_only {
+            continue;
+        }
+        if cleaned.conditions.iter().any(|c| c == &e.value) {
+            final_conditions.push(e.value.clone());
+        } else if cleaned.medications.iter().any(|c| c == &e.value) {
+            final_medications.push(e.value.clone());
+        } else if cleaned.procedures.iter().any(|c| c == &e.value) {
+            final_procedures.push(e.value.clone());
+        }
+    }
+    final_conditions.sort();
+    final_medications.sort();
+    final_procedures.sort();
+
+    // ── Evidence re-keying ────────────────────────────────────────────────
+    //
+    // The `_evidence` entries were captured at keyword-match time, BEFORE
+    // entity_clean's synonym expansion ("Zoloft" → "sertraline") and the
+    // validation gate. Re-key each entry to the canonical form and drop
+    // entries whose entity did not survive — otherwise the provenance
+    // block attests to values that are not in the output, and output
+    // values have no matching provenance.
+    fn rekey_evidence(
+        evidence: Vec<serde_json::Value>,
+        final_values: &[String],
+        canonicalise: fn(&str) -> Option<String>,
+    ) -> Vec<serde_json::Value> {
+        // Compare canonical-to-canonical: validated values may carry
+        // specificity-preserved originals ("L4/5 disc herniation") whose
+        // canonical form is what the evidence surface maps to.
+        let final_set: std::collections::HashSet<String> = final_values
+            .iter()
+            .map(|v| canonicalise(v).unwrap_or_else(|| v.clone()))
+            .collect();
+        evidence
+            .into_iter()
+            .filter_map(|mut e| {
+                let surface = e.get("value")?.as_str()?.to_string();
+                let canon = canonicalise(&surface)?;
+                if !final_set.contains(&canon) {
+                    return None;
+                }
+                let obj = e.as_object_mut()?;
+                obj.insert("value".into(), serde_json::Value::String(canon));
+                obj.insert("surface_form".into(), serde_json::Value::String(surface));
+                Some(e)
+            })
+            .collect()
+    }
+    let conditions_evidence =
+        rekey_evidence(conditions_evidence, &final_conditions, entity_clean::canonical_condition);
+    let medications_evidence =
+        rekey_evidence(medications_evidence, &final_medications, entity_clean::canonical_medication);
+    let procedures_evidence =
+        rekey_evidence(procedures_evidence, &final_procedures, entity_clean::canonical_procedure);
 
     // ── Medical-signal filter for key_findings ────────────────────────────────
     //
@@ -2036,10 +2264,10 @@ fn extract_structured_data(text: String, doc_id: String) -> Result<String, Strin
         "parties":           { "patient": "", "doctor": "", "organisation": "" },
         "dates":             dates_vec,
         "key_findings":      clinical_snippets,
-        "conditions":        cleaned.conditions.clone(),
-        "injuries_or_conditions": cleaned.conditions.clone(),   // deprecated alias — same cleaned data
-        "medications":       cleaned.medications.clone(),
-        "procedures":        cleaned.procedures.clone(),
+        "conditions":        final_conditions.clone(),
+        "injuries_or_conditions": final_conditions,   // deprecated alias — same validated data
+        "medications":       final_medications,
+        "procedures":        final_procedures,
         "timeline_events":   [],
         "source_text_snippets": clinical_snippets,
         "_evidence": {
@@ -4416,7 +4644,13 @@ fn process_document_core(
     let clean_text = cleaned_text.clean_text.clone();
 
     // ── 2. Rule-based entity + date extraction ────────────────────────────────
-    let structured_raw = extract_structured_data(clean_text.clone(), doc_id.clone())?;
+    // Pass the ORIGINAL text, not clean_text: extract_structured_data
+    // cleans internally, and its index-document detection must scan the
+    // raw text — text_clean's short-line rule eats bare "Index of
+    // supporting documents" headings, so feeding pre-cleaned text here
+    // silently disabled the index gate on the production path (and ran
+    // text_clean twice).
+    let structured_raw = extract_structured_data(text.clone(), doc_id.clone())?;
     let structured: serde_json::Value = serde_json::from_str(&structured_raw)
         .map_err(|e| format!("JSON parse error: {e}"))?;
 
@@ -4477,8 +4711,10 @@ fn process_document_core(
     ];
     let mut med_set: std::collections::BTreeSet<String> =
         cleaned.medications.iter().cloned().collect();
+    // ASCII-only lowercase keeps byte offsets aligned for contains_word.
+    let ct_lower = clean_text.to_ascii_lowercase();
     for &(surface, canonical) in MED_SURFACE_FORMS {
-        if contains_word(&clean_text.to_lowercase(), surface) {
+        if contains_word(&ct_lower, surface) {
             med_set.insert(canonical.to_string());
         }
     }
@@ -4486,7 +4722,6 @@ fn process_document_core(
 
     let mut proc_set: std::collections::BTreeSet<String> =
         cleaned.procedures.iter().cloned().collect();
-    let ct_lower = clean_text.to_lowercase();
     for &(surface, canonical) in PROC_SURFACE_FORMS {
         // Multi-word surfaces aren't a single word boundary check — use
         // contains() but require flanking non-alphanumeric where applicable.
@@ -4545,7 +4780,7 @@ fn process_document_core(
         "chronic pain",
         "pain",
     ];
-    let clean_text_lower = clean_text.to_lowercase();
+    let clean_text_lower = clean_text.to_ascii_lowercase();
     for &kw in SYMPTOM_LEXICON {
         if contains_word(&clean_text_lower, kw) {
             all_symptoms.insert(kw.to_string());
@@ -4706,7 +4941,9 @@ fn process_document_core(
                 .to_lowercase();
             seen_synth.insert((status, snippet));
         }
-        let lower = clean_text.to_lowercase();
+        // ASCII-only lowercase: positions found here are used to slice
+        // clean_text directly, so byte lengths must match exactly.
+        let lower = clean_text.to_ascii_lowercase();
         for &(abbr, canonical) in QUERIED_ABBR_MAP {
             let needle = format!("? {abbr}");
             let needle2 = format!("?{abbr}");
@@ -5278,44 +5515,50 @@ fn reason_participant_resolution(
     serde_json::to_string(&payload).map_err(|e| e.to_string())
 }
 
-/// Shared STEP-6 input-identity fingerprint. INPUT-IDENTITY HASH ONLY — it is
-/// NOT semantic/analytical. Both `build_step6_case` and `build_step6_observability`
+/// Shared Contradiction Engine input-identity fingerprint. INPUT-IDENTITY HASH ONLY — it is
+/// NOT semantic/analytical. Both `build_contradiction_case` and `build_contradiction_observability`
 /// MUST call this with the SAME serialization boundary so `FP_case == FP_obs`
 /// reflects one consistent notion of "same input": the raw `clinical_events`
 /// JSON, and nothing else (no `clean_texts`, no enriched/view structures, no
 /// pipeline-specific transforms). Any remaining mismatch is a serialization bug.
-fn build_step6_input_fp(clinical_events: &[serde_json::Value]) -> String {
+fn build_contradiction_input_fp(clinical_events: &[serde_json::Value]) -> String {
     let bytes = serde_json::to_vec(clinical_events).expect("stable serialization");
     sha256_hex(&bytes)
 }
 
-// ── STEP-6 case build — the single production entrypoint (closes F-1/F-2) ──
+// ── Contradiction Engine case build — the single production entrypoint (closes F-1/F-2) ──
 //
 // Receives the REAL persisted extraction (`clinical_events` JSON, exactly as
 // `get_client_extraction` returns it) plus any caller-supplied family/legal
-// facts, adapts them into EventEnvelopes (adapter_step6_input), and runs the
-// EXISTING build_step6_pipeline. Returns CanonicalCase + Step6View +
-// Step6Export + csv_lines as JSON. Strictly additive — no engine,
+// facts, adapts them into EventEnvelopes (contradiction_input_adapter), and runs the
+// EXISTING run_contradiction_engine. Returns CanonicalCase + ContradictionView +
+// ContradictionExport + csv_lines as JSON. Strictly additive — no engine,
 // contradiction, confidence, identity, temporal, enrichment, or export logic
 // is changed; this only routes real data into the already-built pipeline.
 #[tauri::command(rename_all = "camelCase")]
-fn build_step6_case(
+fn build_contradiction_case(
     clinical_events: Vec<serde_json::Value>,
     family_events: Vec<family_graph::FamilyEvent>,
     legal_events: Vec<case_events::LegalStatusEvent>,
     participants: Vec<participant_resolution::Participant>,
+    // Per-document clean text `[ [docId, cleanText], … ]`. The SAME full input
+    // the observability and graph commands receive — fact/value-disagreement
+    // contradictions are never observability-only.
+    clean_texts: Option<Vec<(String, String)>>,
 ) -> Result<String, String> {
-    let output = adapter_step6_input::run_step6_from_extraction(
+    let clean_texts = clean_texts.unwrap_or_default();
+    let output = contradiction_input_adapter::run_contradiction_engine_from_extraction(
         &clinical_events,
+        &clean_texts,
         family_events,
         legal_events,
         &participants,
     );
-    let result = adapter_step6_input::Step6Result::from(output);
+    let result = contradiction_input_adapter::ContradictionCaseResult::from(output);
 
     // DEBUG: DevPanel fingerprint + contradiction stream (reads case.contradictions ONLY).
     // FP is an INPUT-IDENTITY hash over raw clinical_events ONLY (shared boundary).
-    let input_fp = build_step6_input_fp(&clinical_events);
+    let input_fp = build_contradiction_input_fp(&clinical_events);
     let case_contradiction_ids: Vec<(String, String, String, String)> = result
         .case
         .contradictions
@@ -5343,12 +5586,39 @@ fn build_step6_case(
     serde_json::to_string(&v).map_err(|e| e.to_string())
 }
 
-// ── STEP-6 observability — single composed view for the Demographics UI ────
+// ── Contradiction Graph — THE primary production output ────────────────────
 //
-// Same real inputs as `build_step6_case`, but composes the full deterministic
+// Receives the FULL input set (clinical events + per-document clean text +
+// family/legal facts + participants) — identical to observability — runs the
+// single engine path, and returns the typed Contradiction Graph
+// (`graph_types::ContradictionGraph`). Every contradiction the system can
+// detect appears here; there is no observability-only enrichment mode.
+#[tauri::command(rename_all = "camelCase")]
+fn build_contradiction_graph(
+    clinical_events: Vec<serde_json::Value>,
+    family_events: Vec<family_graph::FamilyEvent>,
+    legal_events: Vec<case_events::LegalStatusEvent>,
+    participants: Vec<participant_resolution::Participant>,
+    clean_texts: Option<Vec<(String, String)>>,
+) -> Result<String, String> {
+    let clean_texts = clean_texts.unwrap_or_default();
+    let output = contradiction_input_adapter::run_contradiction_engine_from_extraction(
+        &clinical_events,
+        &clean_texts,
+        family_events,
+        legal_events,
+        &participants,
+    );
+    let graph = graph_builder::build_contradiction_graph(&output);
+    serde_json::to_string(&graph).map_err(|e| e.to_string())
+}
+
+// ── Contradiction Engine observability — single composed view for the Demographics UI ────
+//
+// Same real inputs as `build_contradiction_case`, but composes the full deterministic
 // observability stack and returns it as ONE object:
-//   pipeline → Step6View → Step6Report → Step6ReportSnapshot →
-//   Step6ObservabilityRoot { snapshot, history, trends, readiness, queue, dashboard }
+//   pipeline → ContradictionView → ContradictionReport → ContradictionReportSnapshot →
+//   ContradictionObservabilityRoot { snapshot, history, trends, readiness, queue, dashboard }
 //
 // Strictly additive: it reuses the existing pipeline + the pure, read-only
 // composition layer (`build_observability_root`). No engine/contradiction/
@@ -5356,7 +5626,7 @@ fn build_step6_case(
 // `created_at_epoch_ms` is caller-supplied (snapshot identity is count-derived
 // and independent of it).
 #[tauri::command(rename_all = "camelCase")]
-fn build_step6_observability(
+fn build_contradiction_observability(
     clinical_events: Vec<serde_json::Value>,
     family_events: Vec<family_graph::FamilyEvent>,
     legal_events: Vec<case_events::LegalStatusEvent>,
@@ -5369,7 +5639,7 @@ fn build_step6_observability(
     clean_texts: Option<Vec<(String, String)>>,
 ) -> Result<String, String> {
     let clean_texts = clean_texts.unwrap_or_default();
-    let output = adapter_step6_input::run_step6_from_extraction_with_text(
+    let output = contradiction_input_adapter::run_contradiction_engine_from_extraction(
         &clinical_events,
         &clean_texts,
         family_events,
@@ -5379,8 +5649,8 @@ fn build_step6_observability(
     // DEBUG: Observability fingerprint + enriched stream
     // (reads view.enriched_contradictions ONLY; captured BEFORE output.view is moved).
     // FP is an INPUT-IDENTITY hash over raw clinical_events ONLY — identical
-    // boundary to build_step6_case; clean_texts is deliberately EXCLUDED.
-    let input_fp = build_step6_input_fp(&clinical_events);
+    // boundary to build_contradiction_case; clean_texts is deliberately EXCLUDED.
+    let input_fp = build_contradiction_input_fp(&clinical_events);
     let node_ids: Vec<(String, String, String, String)> = output
         .view
         .enriched_contradictions
@@ -5395,9 +5665,9 @@ fn build_step6_observability(
         })
         .collect();
 
-    let report = step6_report::build_step6_report(output.view);
-    let snapshot = step6_report_snapshot::build_report_snapshot(report, created_at_epoch_ms);
-    let root = step6_observability_root::build_observability_root(snapshot);
+    let report = contradiction_report::build_contradiction_report(output.view);
+    let snapshot = contradiction_report_snapshot::build_report_snapshot(report, created_at_epoch_ms);
+    let root = contradiction_observability_root::build_observability_root(snapshot);
 
     let mut v = serde_json::to_value(&root).map_err(|e| e.to_string())?;
     if let serde_json::Value::Object(ref mut m) = v {
@@ -5941,6 +6211,10 @@ fn process_path_and_persist(
     if let Some(obj) = out.as_object_mut() {
         obj.insert("file_name".into(), serde_json::Value::String(file_name));
         obj.insert("document_id".into(), serde_json::Value::String(doc_id));
+        // Extraction method ("text" | "ocr" | …). Without this the
+        // frontend's `canonical.method` is always undefined and it falls
+        // back to displaying document_type as the method.
+        obj.insert("method".into(), serde_json::Value::String(method.clone()));
         obj.insert("run_id".into(), serde_json::Value::String(run_id.to_string()));
         obj.insert(
             "source_bytes_sha256".into(),
@@ -6240,8 +6514,9 @@ pub fn run() {
             reason_longitudinal_reconciliation,  // LongitudinalPatientGraph (additive — not wired into ingestion)
             build_clinical_knowledge_graph,      // GCKG + medico-legal summary (additive — not wired into ingestion)
             reason_participant_resolution,       // Patient identity + participant resolution (additive — not wired into ingestion)
-            build_step6_case,                    // STEP-6 production entrypoint: real extraction → adapter → pipeline → case/view/export/csv
-            build_step6_observability,           // STEP-6 observability root: composed snapshot/history/trends/readiness/queue/dashboard (read-only)
+            build_contradiction_case,                    // Contradiction Engine production entrypoint: real extraction → adapter → pipeline → case/view/export/csv
+            build_contradiction_graph,                   // Contradiction Graph Model: same inputs → typed explorable graph (pure projection; engine output untouched)
+            build_contradiction_observability,           // Contradiction Engine observability root: composed snapshot/history/trends/readiness/queue/dashboard (read-only)
             // ── Persistence-boundary commands (medico-legal audit) ─────────
             // Parallel to process_document: the boundary tables are written
             // here (clinical_events + resolved_attributions etc.). Existing
@@ -6279,6 +6554,10 @@ pub fn run() {
             reveal_in_finder,
             // ── Phase 7 — clinician decision persistence ─────────────────────
             persist_clinical_decision,
+            // ── Phase 1 (PRD) — canonical clinical fact spine ────────────────
+            record_clinical_observation,
+            record_clinical_review_item,
+            get_clinical_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -8301,6 +8580,108 @@ Long-term prognosis for full recovery is guarded given the chronic nature of the
         assert!(!meds.is_empty(), "should extract at least one medication");
         let med_str = meds.join(" ").to_lowercase();
         assert!(med_str.contains("sertraline"), "sertraline should be extracted; got: {med_str}");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // AUDIT REGRESSIONS — defects found in PRODUCTION persisted data
+    // (TEST CASE 4, document 019eb2fd-…). Each assertion below failed
+    // against the live projection before the corresponding fix.
+    // ══════════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn audit_denied_medication_is_not_persisted_as_affirmed() {
+        // Production data: "Emma denied taking opioid medication during
+        // interview" was stored as medication_mention|opioid|AFFIRMED.
+        let text = "Medication history is also inconsistent. Emma denied taking \
+                    opioid medication during interview. Pharmacy records show \
+                    regular dispensing of oxycodone throughout 2023.";
+        let v = layer1(text, "audit_med_negation");
+        let events = v["clinical_events"].as_array().unwrap();
+        let opioid = events
+            .iter()
+            .find(|e| {
+                e["event_type"] == "medication_mention" && e["concept"] == "opioid"
+            })
+            .expect("opioid medication_mention must exist");
+        assert_ne!(
+            opioid["assertion_status"], "affirmed",
+            "denied medication must not persist as affirmed; got {opioid}"
+        );
+    }
+
+    #[test]
+    fn audit_disc_prolapse_diagnosis_is_extracted() {
+        // Production data: "lumbar disc prolapse at L4-L5" produced ZERO
+        // diagnosis events — only the US "herniation" form was in the
+        // keyword list.
+        let text = "One treating orthopaedic surgeon diagnosed a lumbar disc \
+                    prolapse at L4-L5.";
+        let v = layer1(text, "audit_disc_prolapse");
+        let conds = v["entities"]["conditions"].as_array().unwrap();
+        let joined = conds
+            .iter()
+            .filter_map(|c| c.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+        assert!(
+            joined.contains("disc prolapse"),
+            "disc prolapse must be extracted as a condition; got: {joined}"
+        );
+    }
+
+    #[test]
+    fn audit_day_precision_date_does_not_also_emit_nested_bare_year() {
+        // Production data: "14 June 1968" emitted BOTH 1968-06-14 (41–53)
+        // and a nested bare-year 1968 (49–53) — the timeline double-counts.
+        let found = crate::dates::find_dates("DOB: 14 June 1968.");
+        let values: Vec<&str> = found.iter().map(|d| d.value.as_str()).collect();
+        assert!(values.contains(&"1968-06-14"), "day precision expected: {values:?}");
+        assert!(
+            !values.contains(&"1968"),
+            "nested bare-year duplicate must be suppressed: {values:?}"
+        );
+    }
+
+    #[test]
+    fn audit_contested_diagnosis_keeps_both_statuses() {
+        // The multi-mention requirement: an affirmed PTSD diagnosis AND a
+        // later explicit rejection must BOTH survive extraction — the
+        // validation gate must not silently drop the contested condition.
+        let text = "A psychologist diagnosed post-traumatic stress disorder \
+                    related to the workplace incident. A psychiatrist \
+                    subsequently reported that diagnostic criteria for PTSD \
+                    were not met.";
+        let v = layer1(text, "audit_contested_dx");
+        let mentions = v["condition_mentions"].as_array().unwrap();
+        let statuses: Vec<&str> = mentions
+            .iter()
+            .filter(|m| {
+                m["term"].as_str().unwrap_or("").contains("post-traumatic")
+            })
+            .filter_map(|m| m["status"].as_str())
+            .collect();
+        assert!(
+            statuses.contains(&"affirmed") && statuses.contains(&"contradicted"),
+            "both affirmed and contradicted PTSD mentions must appear; got {statuses:?}"
+        );
+    }
+
+    #[test]
+    fn audit_four_digit_dose_token_is_not_a_date() {
+        // "2000mg" fabricated the date 2000-01-01 before the strict
+        // bare-year rule.
+        let raw = extract_structured_data(
+            "Prescribed 2000mg daily for pain management symptoms.".to_string(),
+            "audit_dose_token".to_string(),
+        )
+        .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let dates = v["dates"].as_array().unwrap();
+        assert!(
+            dates.iter().all(|d| d.as_str() != Some("2000-01-01")),
+            "a dose token must not fabricate a date; got {dates:?}"
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════════════

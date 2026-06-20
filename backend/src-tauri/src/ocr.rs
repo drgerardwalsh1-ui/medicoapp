@@ -76,6 +76,27 @@ pub fn run_ocr(path: &str) -> Result<String, String> {
     }
 }
 
+/// Page count of a PDF via poppler's `pdfinfo` ("Pages: N" line).
+/// Returns None when pdfinfo is unavailable or the output is unparsable —
+/// callers must treat None as "unknown" and fail towards running OCR.
+pub fn pdf_page_count(path: &str) -> Option<usize> {
+    let out = Command::new("pdfinfo")
+        .env("PATH", augmented_path())
+        .arg(path)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for line in stdout.lines() {
+        if let Some(rest) = line.strip_prefix("Pages:") {
+            return rest.trim().parse::<usize>().ok();
+        }
+    }
+    None
+}
+
 /// Return the absolute path of `bin` if found on the augmented PATH.
 fn which(bin: &str) -> Option<PathBuf> {
     let path = augmented_path();

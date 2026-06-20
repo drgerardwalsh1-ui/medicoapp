@@ -342,6 +342,39 @@ export function isDraftClientId(id: string | null | undefined): boolean {
   return (id ?? "").trim() === DRAFT_CLIENT_ID;
 }
 
+// ── Projection-owned fields ──────────────────────────────────────────────────
+// Fields that live on the read-model Client but are NOT part of the
+// demographics blob: `buildSaveBlob` omits them and `parseClientBlob` strips
+// them. They are owned by the projection and re-attached only by
+// `viewToClient`. A demographics-derived reconstruction (parseClientBlob →
+// setData → propagate) has no knowledge of them, so it yields `undefined` and
+// would silently erase them when committed over the active client.
+//
+// Currently the only such field is `documents` (the uploaded-document list).
+export const PROJECTION_OWNED_KEYS = ["documents"] as const satisfies readonly (keyof Client)[];
+
+/**
+ * INVARIANT — committing `updated` over `prev` must never let a reconstruction
+ * that OMITTED a projection-owned field (`=== undefined`, i.e. "the rebuild
+ * had no knowledge of it") erase a value `prev` still held. An explicit value
+ * — including `[]` — is honoured; only `undefined` is back-filled from `prev`.
+ *
+ * This is the single choke-point that guarantees `activeClient.documents` (and
+ * any future projection-owned field) survives every page propagation, autosave
+ * round-trip, and rehydration that rebuilds the Client from demographics.
+ */
+export function reconcileClient(prev: Client | null, updated: Client): Client {
+  if (!prev) return updated;
+  let result: Client | null = null;
+  for (const key of PROJECTION_OWNED_KEYS) {
+    if (updated[key] === undefined && prev[key] !== undefined) {
+      result = result ?? { ...updated };
+      (result as Record<string, unknown>)[key] = prev[key];
+    }
+  }
+  return result ?? updated;
+}
+
 export function defaultClient(): Client {
   const now = new Date().toISOString();
   return {

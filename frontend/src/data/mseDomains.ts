@@ -144,6 +144,7 @@ export const MSE_DOMAINS: MSEDomainDef[] = [
   {
     id: "cognition",
     label: "Cognition",
+    linkedEntities: ["concentration_difficulty", "forgetfulness"],
     chips: [
       { id: "cognitive_testing_performed", label: "formal cognitive testing performed" },
       { id: "disoriented", label: "disoriented" },

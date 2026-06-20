@@ -775,9 +775,10 @@ export default function ClientHome({
         throw new Error("processPathAndPersist returned invalid JSON");
       }
       const text = (canonical.raw_text as string) ?? "";
-      const method = (canonical.method as string)
-        ?? (canonical.document_type as string)
-        ?? "text";
+      // `method` is now returned by process_path_and_persist. Do NOT fall
+      // back to document_type — that masked the missing field by
+      // displaying "report"/"imaging" as the extraction method.
+      const method = (canonical.method as string) ?? "text";
       const cleanText = (canonical.clean_text as string) ?? "";
       const charCount = cleanText.length || text.length;
       const ocrAvailable = true;

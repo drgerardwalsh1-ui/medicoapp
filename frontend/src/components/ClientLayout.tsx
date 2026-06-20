@@ -69,6 +69,10 @@ export function clientTabs(client: Client | null): ClientTab[] {
   };
   const dsmTab: ClientTab = { id: "dsm", label: "DSM Assessment", disabledForNewClient: true };
   const mseTab: ClientTab = { id: "mse", label: "MSE", disabledForNewClient: true };
+  // Live Assessment — the keyboard-first interview workspace (PRD Phase 2).
+  // Sits directly after Demographics: it is the hub during the interview;
+  // section tabs remain the structured review/editing surfaces.
+  const liveTab: ClientTab = { id: "live", label: "Live Assessment", disabledForNewClient: true };
 
   // Splice schema tabs around our inserted tabs:
   //   [..before history+1] (= Demographics through "History of Injury")
@@ -87,6 +91,7 @@ export function clientTabs(client: Client | null): ClientTab[] {
 
   return [
     { id: "demographics", label: "Demographics", disabledForNewClient: false },
+    liveTab,
     ...beforeBackground,
     backgroundHistoryTab,
     ...betweenBackgroundAndDsm,

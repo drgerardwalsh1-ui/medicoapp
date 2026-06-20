@@ -77,56 +77,11 @@ function Chip({
 
 // ── Tri-state control ─────────────────────────────────────────────────────────
 
-const TRI_LABELS: Record<TriState, string> = {
-  unknown: "?",
-  met:     "✓",
-  not_met: "✗",
-};
-
-const TRI_ACTIVE_CLASS: Record<TriState, string> = {
-  unknown: "bg-slate-100 text-slate-500 border-slate-400 font-semibold",
-  met:     "bg-emerald-50 text-emerald-700 border-emerald-500 font-semibold",
-  not_met: "bg-red-50 text-red-600 border-red-400 font-semibold",
-};
-
-const TRI_OPTIONS: TriState[] = ["unknown", "met", "not_met"];
 const TRI_OPTION_LABELS: Record<TriState, string> = {
   unknown: "Unknown",
   met:     "Present",
   not_met: "Absent",
 };
-
-function TriStateControl({
-  value,
-  onChange,
-  compact = false,
-}: {
-  value: TriState;
-  onChange: (v: TriState) => void;
-  compact?: boolean;
-}) {
-  return (
-    <div className="flex gap-1 shrink-0">
-      {TRI_OPTIONS.map((opt) => (
-        <button
-          key={opt}
-          type="button"
-          title={TRI_OPTION_LABELS[opt]}
-          onClick={() => onChange(opt === value ? "unknown" : opt)}
-          className={`rounded border transition text-xs ${
-            compact ? "w-6 h-6" : "w-7 h-7"
-          } flex items-center justify-center ${
-            value === opt
-              ? TRI_ACTIVE_CLASS[opt]
-              : "bg-white text-slate-400 border-slate-200 hover:border-slate-400"
-          }`}
-        >
-          {TRI_LABELS[opt]}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 // ── Status dot ────────────────────────────────────────────────────────────────
 

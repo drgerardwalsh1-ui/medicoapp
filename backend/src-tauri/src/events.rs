@@ -71,6 +71,19 @@ pub enum EventType {
     /// log for audit. Honoured by `rebuild_from_events` so deleted
     /// documents never reappear.
     DocumentDeleted,
+    // ── Canonical clinical fact spine (Phase 1) ──
+    /// One interview Observation appended to the client's clinical fact
+    /// log. The payload is the frontend `Observation` JSON, opaque to the
+    /// reducer. Append-only versioning matches the frontend doctrine: an
+    /// edit appends a NEW event carrying the same observation id; the
+    /// current view is the latest entry per id. Tombstoning is likewise
+    /// an append (observation JSON with `tombstoned: true`).
+    ClinicalObservationRecorded,
+    /// One review-surface item appended to the client's clinical state:
+    /// criterion attestation, conflict resolution, episode boundary
+    /// correction, diagnostic conclusion, or report snapshot. `kind`
+    /// discriminates; the item JSON is opaque to the reducer.
+    ClinicalReviewRecorded,
 }
 
 impl EventType {
@@ -86,6 +99,8 @@ impl EventType {
             EventType::AttributionRecorded => "attribution_recorded",
             EventType::ExtractionRunRecorded => "extraction_run_recorded",
             EventType::DocumentDeleted => "document_deleted",
+            EventType::ClinicalObservationRecorded => "clinical_observation_recorded",
+            EventType::ClinicalReviewRecorded => "clinical_review_recorded",
         }
     }
 }
@@ -249,6 +264,25 @@ pub struct DocumentDeletedP {
     pub reason: Option<String>,
 }
 
+/// One clinical Observation (interview fact) appended to the client's
+/// fact log. `observation` is the frontend `Observation` shape, opaque
+/// here — the canonical fold is `clinical_fact_store::fold_clinical_state`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClinicalObservationRecordedP {
+    pub observation: serde_json::Value,
+}
+
+/// One review-surface item (attestation / resolution / correction /
+/// conclusion / snapshot) appended to the client's clinical state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClinicalReviewRecordedP {
+    /// One of `clinical_fact_store::REVIEW_KINDS`. Validated at the
+    /// command boundary; the fold routes unknown kinds nowhere (fail
+    /// closed) so a corrupt event can never pollute a surface.
+    pub kind: String,
+    pub item: serde_json::Value,
+}
+
 /// Strongly-typed payload variants. Serialised into `payload_json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
@@ -263,6 +297,8 @@ pub enum EventPayload {
     AttributionRecorded(AttributionRecordedP),
     ExtractionRunRecorded(ExtractionRunRecordedP),
     DocumentDeleted(DocumentDeletedP),
+    ClinicalObservationRecorded(ClinicalObservationRecordedP),
+    ClinicalReviewRecorded(ClinicalReviewRecordedP),
 }
 
 impl EventPayload {
@@ -278,6 +314,10 @@ impl EventPayload {
             EventPayload::AttributionRecorded(_) => EventType::AttributionRecorded,
             EventPayload::ExtractionRunRecorded(_) => EventType::ExtractionRunRecorded,
             EventPayload::DocumentDeleted(_) => EventType::DocumentDeleted,
+            EventPayload::ClinicalObservationRecorded(_) => {
+                EventType::ClinicalObservationRecorded
+            }
+            EventPayload::ClinicalReviewRecorded(_) => EventType::ClinicalReviewRecorded,
         }
     }
 }

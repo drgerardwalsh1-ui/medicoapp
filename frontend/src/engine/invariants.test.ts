@@ -11,7 +11,6 @@ import {
   updateObservation,
   attestCriterion,
   resolveConflict,
-  applyEpisodeCorrection,
   concludeDiagnosis,
   type Command,
   dispatch,

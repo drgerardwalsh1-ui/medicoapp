@@ -179,6 +179,33 @@ const DOCUMENT_DELETED: EventContract = EventContract {
            in replay; honoured by rebuild_from_events via the tombstone sweep.",
 };
 
+const CLINICAL_OBSERVATION_RECORDED: EventContract = EventContract {
+    event_type: EventType::ClinicalObservationRecorded,
+    identity_scope: IdentityScope::ClientScoped,
+    affects_projection: false, // folded at read time by clinical_fact_store
+    // Append order is semantic: the frontend collapses the observation log
+    // to the latest entry per observation id, so replay order decides which
+    // version of an edited observation is current.
+    is_replay_order_sensitive: true,
+    cascade_behavior: CascadeBehavior::None,
+    participates_in_rebuild: false,
+    note: "Appends one interview Observation to the clinical fact log. No \
+           projection rows; get_clinical_state folds the event stream \
+           (clinical_fact_store::fold_clinical_state) on demand.",
+};
+
+const CLINICAL_REVIEW_RECORDED: EventContract = EventContract {
+    event_type: EventType::ClinicalReviewRecorded,
+    identity_scope: IdentityScope::ClientScoped,
+    affects_projection: false, // folded at read time by clinical_fact_store
+    is_replay_order_sensitive: true, // arrays are append-only in event order
+    cascade_behavior: CascadeBehavior::None,
+    participates_in_rebuild: false,
+    note: "Appends one review-surface item (attestation / resolution / \
+           correction / conclusion / snapshot) to the clinical state. No \
+           projection rows; folded on demand by get_clinical_state.",
+};
+
 /// Every contract, for iteration (tests, reviewer listing). Kept in sync
 /// with `contract_for` by `tests::registry_is_complete_and_consistent`.
 pub const EVENT_CONTRACTS: &[EventContract] = &[
@@ -192,6 +219,8 @@ pub const EVENT_CONTRACTS: &[EventContract] = &[
     ATTRIBUTION_RECORDED,
     EXTRACTION_RUN_RECORDED,
     DOCUMENT_DELETED,
+    CLINICAL_OBSERVATION_RECORDED,
+    CLINICAL_REVIEW_RECORDED,
 ];
 
 /// The declared contract for an event type.
@@ -212,6 +241,8 @@ pub fn contract_for(t: EventType) -> &'static EventContract {
         EventType::AttributionRecorded => &ATTRIBUTION_RECORDED,
         EventType::ExtractionRunRecorded => &EXTRACTION_RUN_RECORDED,
         EventType::DocumentDeleted => &DOCUMENT_DELETED,
+        EventType::ClinicalObservationRecorded => &CLINICAL_OBSERVATION_RECORDED,
+        EventType::ClinicalReviewRecorded => &CLINICAL_REVIEW_RECORDED,
     }
 }
 
