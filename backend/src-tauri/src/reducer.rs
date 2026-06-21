@@ -12,24 +12,30 @@ use chrono::{DateTime, Utc};
 use crate::events::{EventEnvelope, EventPayload};
 
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct DocumentState {
     pub document_id: String,
     pub file_name: String,
+    #[specta(type = specta_typescript::Number)]
     pub char_count: usize,
     pub method: String,
+    #[specta(type = String)]
     pub uploaded_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct ClientState {
     pub client_id: String,
+    #[specta(type = specta_typescript::Number)]
     pub last_version: u64,
     /// Timestamp of the first event seen for this client. Used so rebuilds
     /// produce a deterministic `created_at` on the projection.
+    #[specta(type = Option<String>)]
     pub first_seen: Option<DateTime<Utc>>,
+    #[specta(type = Option<String>)]
     pub last_updated: Option<DateTime<Utc>>,
     /// Demographics JSON, opaque to the reducer.
+    #[specta(type = Option<specta_typescript::Unknown>)]
     pub demographics: Option<serde_json::Value>,
     pub documents: Vec<DocumentState>,
     /// True once a `ClientDeleted` event has been observed. Projection

@@ -1,0 +1,49 @@
+name: _rust
+on:
+  workflow_call:
+    inputs:
+      os: { type: string, required: true }
+      container: { type: string, default: "" }
+      run-scanners: { type: boolean, default: false }
+permissions:
+  contents: read
+  packages: read
+env:
+  CI: "true"
+  INSTA_UPDATE: "no"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+jobs:
+  rust:
+    runs-on: ${{ inputs.os }}
+    container: ${{ inputs.container != '' && inputs.container || null }}
+    permissions:
+      contents: read
+      packages: read
+    defaults:
+      run: { working-directory: backend/src-tauri }
+    steps:
+      - name: Forbid silent host fallback on Linux
+        if: inputs.os == 'ubuntu-latest' && inputs.container == ''
+        run: echo "Linux must run in the pinned CI builder image" && exit 1
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with: { persist-credentials: false }
+      - name: Toolchain (host legs only)
+        if: inputs.container == ''
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Cargo cache (host legs only)
+        if: inputs.container == ''
+        uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2.7.5
+        with: { workspaces: backend/src-tauri }
+      - name: Fetch (locked)
+        run: cargo fetch --locked
+      - name: Test (locked + frozen)
+        run: cargo test --workspace --locked --frozen
+      - name: cargo-deny
+        if: ${{ inputs.run-scanners && inputs.container != '' }}
+        run: cargo deny check
+      - name: cargo-audit (fail on HIGH/warnings)
+        if: ${{ inputs.run-scanners && inputs.container != '' }}
+        run: cargo audit --deny warnings
+      - name: No-silent-mutation
+        run: git diff --exit-code

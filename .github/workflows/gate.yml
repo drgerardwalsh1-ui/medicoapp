@@ -1,0 +1,192 @@
+name: gate
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+permissions:
+  contents: read
+concurrency:
+  group: gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    outputs:
+      image: ${{ steps.pin.outputs.image }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with: { persist-credentials: false }
+      - name: Resolve + verify builder image (single committed source)
+        id: pin
+        shell: bash
+        run: |
+          IMG=$(grep -vE '^[[:space:]]*#' .github/ci-builder-image | grep -m1 '@sha256:' | tr -d '[:space:]')
+          EXPECT="ghcr.io/${{ github.repository_owner }}/ci-builder@sha256:"
+          case "$IMG" in
+            "${EXPECT}"*) : ;;
+            *) echo "ci-builder-image pin must be ${EXPECT}<digest>"; exit 1 ;;
+          esac
+          gh attestation verify "oci://$IMG" --repo "$GITHUB_REPOSITORY"
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"
+
+  integrity:
+    needs: [prepare]
+    uses: ./.github/workflows/_integrity.yml
+    with: { container: "${{ needs.prepare.outputs.image }}" }
+    permissions: { contents: read, packages: read, pull-requests: read }
+
+  rust:
+    needs: [prepare]
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(github.event_name == 'merge_group' && format('[{{"os":"ubuntu-latest","container":"{0}","scanners":true}},{{"os":"windows-latest","container":"","scanners":false}},{{"os":"macos-latest","container":"","scanners":false}}]', needs.prepare.outputs.image) || format('[{{"os":"ubuntu-latest","container":"{0}","scanners":true}}]', needs.prepare.outputs.image)) }}
+    uses: ./.github/workflows/_rust.yml
+    with: { os: "${{ matrix.os }}", container: "${{ matrix.container }}", run-scanners: "${{ matrix.scanners }}" }
+    permissions: { contents: read, packages: read }
+
+  frontend:
+    needs: [prepare]
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(github.event_name == 'merge_group' && format('[{{"os":"ubuntu-latest","container":"{0}","scanners":true}},{{"os":"windows-latest","container":"","scanners":false}},{{"os":"macos-latest","container":"","scanners":false}}]', needs.prepare.outputs.image) || format('[{{"os":"ubuntu-latest","container":"{0}","scanners":true}}]', needs.prepare.outputs.image)) }}
+    uses: ./.github/workflows/_frontend.yml
+    with: { os: "${{ matrix.os }}", container: "${{ matrix.container }}", run-scanners: "${{ matrix.scanners }}" }
+    permissions: { contents: read, packages: read }
+
+  contract:
+    needs: [prepare]
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(github.event_name == 'merge_group' && format('[{{"os":"ubuntu-latest","container":"{0}"}},{{"os":"windows-latest","container":""}},{{"os":"macos-latest","container":""}}]', needs.prepare.outputs.image) || format('[{{"os":"ubuntu-latest","container":"{0}"}}]', needs.prepare.outputs.image)) }}
+    uses: ./.github/workflows/_contract.yml
+    with: { os: "${{ matrix.os }}", container: "${{ matrix.container }}" }
+    permissions: { contents: read, packages: read }
+
+  clinical:
+    needs: [prepare]
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(github.event_name == 'merge_group' && format('[{{"os":"ubuntu-latest","container":"{0}"}},{{"os":"windows-latest","container":""}},{{"os":"macos-latest","container":""}}]', needs.prepare.outputs.image) || format('[{{"os":"ubuntu-latest","container":"{0}"}}]', needs.prepare.outputs.image)) }}
+    uses: ./.github/workflows/_clinical-truth.yml
+    with: { os: "${{ matrix.os }}", container: "${{ matrix.container }}" }
+    permissions: { contents: read, packages: read }
+
+  nlp:
+    needs: [prepare]
+    uses: ./.github/workflows/_nlp.yml
+    with: { container: "${{ needs.prepare.outputs.image }}" }
+    permissions: { contents: read, packages: read }
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions: { contents: read, pull-requests: read }
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with: { persist-credentials: false }
+      - uses: actions/dependency-review-action@3b139cfc5fae8b618d3eae3675e383bb1769c019 # v4.5.0
+        continue-on-error: true   # graceful degrade where GHAS/dependency-graph is unavailable
+        with: { fail-on-severity: high }
+
+  codeql:
+    runs-on: ubuntu-latest
+    permissions: { contents: read, actions: read }
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, rust]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with: { persist-credentials: false }
+      - if: matrix.language == 'rust'
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: github/codeql-action/init@df409f7d9260372bd5f19e5b04e83cb3c43714ae # v3.27.9
+        with: { languages: "${{ matrix.language }}" }
+      - if: matrix.language == 'rust'
+        run: cargo build --locked
+        working-directory: backend/src-tauri
+      - uses: github/codeql-action/analyze@df409f7d9260372bd5f19e5b04e83cb3c43714ae # v3.27.9
+        with:
+          category: "/language:${{ matrix.language }}"
+          upload: never
+          output: ${{ runner.temp }}/sarif
+      - name: Gate on HIGH+ findings (security-severity >= 7.0), fail closed on empty
+        shell: python
+        run: |
+          import json, glob, os, sys
+          files = glob.glob(os.path.join(os.environ["RUNNER_TEMP"], "sarif", "**", "*.sarif"), recursive=True)
+          if not files:
+              print("no SARIF produced — failing closed"); sys.exit(1)
+          hi = 0; saw_meta = False
+          for f in files:
+              d = json.load(open(f))
+              for run in d.get("runs", []):
+                  sev = {}
+                  tools = [run.get("tool", {}).get("driver", {})] + run.get("tool", {}).get("extensions", [])
+                  for t in tools:
+                      for r in t.get("rules", []):
+                          s = r.get("properties", {}).get("security-severity")
+                          if s is not None:
+                              saw_meta = True
+                              try: sev[r["id"]] = float(s)
+                              except ValueError: pass
+                  for res in run.get("results", []):
+                      s = res.get("properties", {}).get("security-severity")
+                      val = float(s) if s is not None else sev.get(res.get("ruleId"), 0.0)
+                      if val >= 7.0: hi += 1
+          if not saw_meta:
+              print("no security-severity metadata found — failing closed"); sys.exit(1)
+          print(f"{hi} HIGH+ findings"); sys.exit(1 if hi else 0)
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with: { name: "codeql-sarif-${{ matrix.language }}", path: "${{ runner.temp }}/sarif", if-no-files-found: ignore, overwrite: false }
+
+  ci-rust:
+    needs: [prepare, integrity, rust]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - run: exit ${{ (needs.prepare.result == 'success' && needs.integrity.result == 'success' && needs.rust.result == 'success') && '0' || '1' }}
+  ci-frontend-unit:
+    needs: [prepare, integrity, frontend]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - run: exit ${{ (needs.prepare.result == 'success' && needs.integrity.result == 'success' && needs.frontend.result == 'success') && '0' || '1' }}
+  ci-contract:
+    needs: [prepare, integrity, contract]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - run: exit ${{ (needs.prepare.result == 'success' && needs.integrity.result == 'success' && needs.contract.result == 'success') && '0' || '1' }}
+  ci-clinical-truth:
+    needs: [prepare, integrity, clinical]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - run: exit ${{ (needs.prepare.result == 'success' && needs.integrity.result == 'success' && needs.clinical.result == 'success') && '0' || '1' }}
+  ci-nlp-contract:
+    needs: [prepare, integrity, nlp]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - run: exit ${{ (needs.prepare.result == 'success' && needs.integrity.result == 'success' && needs.nlp.result == 'success') && '0' || '1' }}
+  ci-security:
+    needs: [codeql, dependency-review]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - run: exit ${{ (needs.codeql.result == 'success' && (needs.dependency-review.result == 'success' || needs.dependency-review.result == 'skipped')) && '0' || '1' }}

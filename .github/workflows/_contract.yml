@@ -1,0 +1,34 @@
+name: _contract
+on:
+  workflow_call:
+    inputs:
+      os: { type: string, required: true }
+      container: { type: string, default: "" }
+permissions:
+  contents: read
+  packages: read
+env:
+  CI: "true"
+jobs:
+  contract:
+    runs-on: ${{ inputs.os }}
+    container: ${{ inputs.container != '' && inputs.container || null }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Forbid silent host fallback on Linux
+        if: inputs.os == 'ubuntu-latest' && inputs.container == ''
+        run: echo "Linux must run in the pinned CI builder image" && exit 1
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with: { persist-credentials: false }
+      - name: Node (host legs only)
+        if: inputs.container == ''
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with: { node-version: "20" }
+      - name: Lockfile-only install
+        run: npm ci
+      - name: Contract parity + serialization roundtrip
+        run: npx vitest run tests/contracts
+      - name: No-silent-mutation
+        run: git diff --exit-code

@@ -1,0 +1,6 @@
+# Single committed, CODEOWNERS-protected source of truth for the CI builder image.
+# Format MUST be: ghcr.io/<owner>/ci-builder@sha256:<digest>
+# Resolved by the `prepare` job and distributed via needs.prepare.outputs.image.
+# PLACEHOLDER — replace with the real digest emitted by builder-image.yml before
+# enabling required checks. Until then, container legs cannot run (guard-image fails).
+ghcr.io/OWNER/ci-builder@sha256:0000000000000000000000000000000000000000000000000000000000000000

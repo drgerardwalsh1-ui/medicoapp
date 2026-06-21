@@ -5,6 +5,10 @@ description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
 
+[workspace]
+members = ["xtask"]
+resolver = "2"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
@@ -35,6 +39,14 @@ leptess = { version = "0.14", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ureq = { version = "2", features = ["json"] }
+
+# IPC contract codegen (Rust -> TS). Used to derive `specta::Type` on the
+# projection structs that cross the IPC boundary; consumed by `xtask generate-ipc`.
+specta = { version = "=2.0.0-rc.25", features = ["derive", "serde_json"] }
+# Provides `specta_typescript::Unknown`, the opaque type used in `#[specta(type = ...)]`
+# overrides so `serde_json::Value` fields render as TS `unknown` (accepted decision)
+# instead of tripping specta's bigint-forbidden export on the inlined JSON enum.
+specta-typescript = "=0.0.12"
 
 # Event sourcing foundation (Step 3a)
 rusqlite = { version = "0.31", features = ["bundled"] }

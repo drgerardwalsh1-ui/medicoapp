@@ -1,0 +1,40 @@
+# CODEOWNERS — path-ownership map.
+#
+# NOTE: Owner handles are intentionally left as inert TODO placeholders.
+# Non-existent @org/team handles make CODEOWNERS invalid and cause
+# `require_code_owner_reviews` to become unsatisfiable, which would BLOCK every PR.
+# Until real teams/users exist, these rules are commented out so the file stays
+# valid and CI remains runnable. Replace `OWNER_PLACEHOLDER` with real GitHub
+# team/user handles (e.g. @your-org/rust-team) and uncomment to activate enforcement.
+#
+# Last matching pattern wins.
+
+# CI/CD definitions (security-critical):
+# /.github/                 @OWNER_PLACEHOLDER
+# /.github/workflows/       @OWNER_PLACEHOLDER
+# /.github/CODEOWNERS       @OWNER_PLACEHOLDER
+# /.github/ci-builder-image @OWNER_PLACEHOLDER
+
+# Canonical clinical engine (Rust = source of truth):
+# /backend/                 @OWNER_PLACEHOLDER
+
+# Presentational/advisory only:
+# /frontend/                @OWNER_PLACEHOLDER
+
+# Generated IPC surface (drift-guarded in ci-contract):
+# /shared/                  @OWNER_PLACEHOLDER
+
+# Clinical Truth Layer (requires clinical-governance sign-off):
+# /tests/clinical-truth/    @OWNER_PLACEHOLDER
+
+# IPC contract / parity:
+# /tests/contracts/         @OWNER_PLACEHOLDER
+
+# Visual regression (non-blocking):
+# /tests/visual/            @OWNER_PLACEHOLDER
+
+# Real-shell E2E smoke:
+# /tests/e2e/               @OWNER_PLACEHOLDER
+
+# Testing governance, sign-off policy, macOS gate:
+# /docs/testing/            @OWNER_PLACEHOLDER

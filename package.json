@@ -1,0 +1,13 @@
+{
+  "name": "medicoapp",
+  "private": true,
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "test:contracts": "vitest run tests/contracts"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

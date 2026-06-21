@@ -590,8 +590,9 @@ fn get_client_extraction(client_id: String) -> Result<String, String> {
 // All four commands below are read-mostly. The two `restore_*` commands
 // emit BRAND NEW events; they never modify or delete past events.
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, specta::Type)]
 pub struct EventHistoryItem {
+    #[specta(type = specta_typescript::Number)]
     pub version: u64,
     pub timestamp: String,
     pub event_type: String,
@@ -680,10 +681,12 @@ fn restore_client_from_version(client_id: String, version: u64) -> Result<u64, S
 /// One field-level change between two snapshots. `from` and `to` are the
 /// raw `serde_json::Value`s — strings, numbers, nulls — left untouched so
 /// the consumer can render them however it wants.
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, specta::Type)]
 pub struct VersionDiff {
     pub field: String,
+    #[specta(type = specta_typescript::Unknown)]
     pub from: serde_json::Value,
+    #[specta(type = specta_typescript::Unknown)]
     pub to: serde_json::Value,
 }
 
@@ -990,9 +993,9 @@ fn attach_document(
 // opaque JSON lines. It does NOT interpret, modify, validate, or recompute any
 // clinical content — it only writes and returns a storage confirmation.
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, specta::Type, Default)]
 #[serde(rename_all = "camelCase")]
-struct PersistConfirmation {
+pub struct PersistConfirmation {
     id: String,
     saved_at: String,
 }

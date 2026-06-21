@@ -1,0 +1,34 @@
+name: macos-release-gate
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag: { description: "Release tag under manual macOS verification", required: true }
+permissions:
+  contents: read
+concurrency:
+  group: macos-release-gate-${{ github.event.inputs.release_tag }}
+  cancel-in-progress: false
+jobs:
+  macos-release-gate:
+    runs-on: macos-latest
+    environment: macos-release-gate
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with: { persist-credentials: false }
+      - name: Render manual macOS verification checklist
+        run: |
+          test -f docs/testing/macos-release-gate.md \
+            && cat docs/testing/macos-release-gate.md \
+            || echo "TODO: add docs/testing/macos-release-gate.md checklist"
+      - name: Record tamper-evident sign-off
+        shell: bash
+        run: |
+          mkdir -p docs/testing/signoff
+          OUT="docs/testing/signoff/${{ github.event.inputs.release_tag }}.macos-gate.signed"
+          { echo "tag=${{ github.event.inputs.release_tag }}"; echo "commit=${{ github.sha }}";
+            echo "approved_by=${{ github.actor }}"; echo "approved_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)";
+            echo "run_id=${{ github.run_id }}"; } > "$OUT"
+          sha256sum "$OUT"
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with: { name: "macos-gate-signoff-${{ github.event.inputs.release_tag }}", path: "docs/testing/signoff/${{ github.event.inputs.release_tag }}.macos-gate.signed", if-no-files-found: error, overwrite: false, retention-days: 365 }

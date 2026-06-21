@@ -31,38 +31,46 @@ pub struct ProjectionSnapshot {
 
 /// Read-only view assembled from `projection.db`. Returned by
 /// `get_client_view`; never derived from events directly at read time.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct ClientViewModel {
     pub id: String,
     /// Full demographics JSON as stored on the projection. Parsed into a
     /// `serde_json::Value` so every key round-trips losslessly.
+    #[specta(type = Option<specta_typescript::Unknown>)]
     pub demographics: Option<serde_json::Value>,
+    #[specta(type = specta_typescript::Number)]
     pub last_version: u64,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
+    #[specta(type = specta_typescript::Number)]
     pub document_count: u64,
     pub documents: Vec<DocumentSummary>,
     /// Placeholder — populated when entity extraction lands on the projection.
+    #[specta(type = Vec<specta_typescript::Unknown>)]
     pub entities: Vec<serde_json::Value>,
     /// Placeholder — populated when timeline reconstruction lands.
+    #[specta(type = Vec<specta_typescript::Unknown>)]
     pub timeline: Vec<serde_json::Value>,
     /// All PIRS snapshot rows for this client, ordered by version.
     pub pirs_snapshots: Vec<PIRSTableViewModel>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct DocumentSummary {
     pub id: String,
     pub file_name: Option<String>,
     pub method: Option<String>,
+    #[specta(type = specta_typescript::Number)]
     pub char_count: u64,
     pub uploaded_at: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct PIRSTableViewModel {
+    #[specta(type = specta_typescript::Number)]
     pub version: u64,
     /// Parsed snapshot JSON (whatever shape the producer wrote).
+    #[specta(type = specta_typescript::Unknown)]
     pub snapshot: serde_json::Value,
     pub created_at: String,
 }
