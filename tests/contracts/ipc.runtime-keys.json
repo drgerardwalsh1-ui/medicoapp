@@ -1,0 +1,56 @@
+{
+  "ClientState": [
+    "client_id",
+    "deleted",
+    "demographics",
+    "documents",
+    "first_seen",
+    "last_updated",
+    "last_version"
+  ],
+  "ClientViewModel": [
+    "created_at",
+    "demographics",
+    "document_count",
+    "documents",
+    "entities",
+    "id",
+    "last_version",
+    "pirs_snapshots",
+    "timeline",
+    "updated_at"
+  ],
+  "DocumentState": [
+    "char_count",
+    "document_id",
+    "file_name",
+    "method",
+    "uploaded_at"
+  ],
+  "DocumentSummary": [
+    "char_count",
+    "file_name",
+    "id",
+    "method",
+    "uploaded_at"
+  ],
+  "EventHistoryItem": [
+    "event_type",
+    "timestamp",
+    "version"
+  ],
+  "PIRSTableViewModel": [
+    "created_at",
+    "snapshot",
+    "version"
+  ],
+  "PersistConfirmation": [
+    "id",
+    "savedAt"
+  ],
+  "VersionDiff": [
+    "field",
+    "from",
+    "to"
+  ]
+}
