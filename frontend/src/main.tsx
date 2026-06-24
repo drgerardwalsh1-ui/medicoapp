@@ -869,6 +869,7 @@ function Root() {
               key={activeClient.id}
               client={activeClient}
               onNavigateToTab={(tab) => setActiveClientTab(tab)}
+              onOpenVersionHistory={() => setVersionHistoryOpen(true)}
               onClientChange={handleActiveClientChange}
             />
           );

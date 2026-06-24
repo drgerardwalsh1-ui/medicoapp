@@ -41,6 +41,16 @@ import {
 } from "../integration/clinicalSpine";
 import { applyObservationToClient } from "../integration/liveAxBridge";
 import ContextRail from "../components/ContextRail";
+// Layer B (read-only reasoning surface): mount the EXISTING decision/hypothesis
+// engine output. Snapshot + replay are pure derivations over the same overlay —
+// no recomputation, identical to CurrentSymptomsPage's wiring.
+import ClinicalDecisionView from "../integration/ui/ClinicalDecisionView";
+import { runClinicalOverlay } from "../integration/clinicalBridge";
+import { buildReportSnapshotV2 } from "../integration/clinicalDecision";
+import { buildClinicalReplay } from "../integration/clinicalReplay";
+import { getActiveClinicianId } from "../integration/clinicianSession";
+// Phase 6 — pure re-presentation of existing projections into forensic roles.
+import EvidentiaryArgumentPanel from "../components/EvidentiaryArgumentPanel";
 
 type SyncStatus = "local" | "syncing" | "synced" | "error";
 
@@ -48,6 +58,9 @@ type Props = {
   client: Client;
   /** Navigate to a sibling tab (MSE / PIRS sections link out). */
   onNavigateToTab?: (tab: string) => void;
+  /** Open the single canonical version-history (forensic audit) modal owned by
+   *  the layout. Wiring only — the modal itself reads the event store. */
+  onOpenVersionHistory?: () => void;
   /** Flow-through: Live Ax captures update the shared SymptomEntity store /
    *  MoodState on the client blob, so the Current Symptoms, DSM, and MSE
    *  pages reflect them immediately (integration/liveAxBridge.ts). */
@@ -120,6 +133,7 @@ function candidatePresence(c: CandidateFact): Observation["presence"] {
 export default function LiveAssessmentPage({
   client,
   onNavigateToTab,
+  onOpenVersionHistory,
   onClientChange,
   initialCandidates,
 }: Props) {
@@ -395,6 +409,28 @@ export default function LiveAssessmentPage({
     synced: "event log ✓",
     error: "sync failed — facts kept locally",
   };
+
+  // ── Layer B projections (read-only) — pure derivations over the frozen engine
+  // overlay; no recomputation of constraints/semantics/temporal. Mirrors
+  // CurrentSymptomsPage exactly so there is a single derivation contract. ──
+  const overlay = useMemo(
+    () => runClinicalOverlay(client.dsmAssessment),
+    [client.dsmAssessment],
+  );
+  const decisionSnapshot = useMemo(
+    () =>
+      buildReportSnapshotV2(
+        client.dsmAssessment,
+        overlay,
+        { clientId: client.id, takenBy: getActiveClinicianId(), takenAt: client.updated_at },
+        [],
+      ),
+    [client.dsmAssessment, client.id, client.updated_at, overlay],
+  );
+  const decisionReplay = useMemo(
+    () => buildClinicalReplay(decisionSnapshot),
+    [decisionSnapshot],
+  );
 
   return (
     <div className="relative flex h-full bg-slate-100" data-testid="live-assessment">
@@ -787,6 +823,41 @@ export default function LiveAssessmentPage({
           />
         </div>
       </main>
+
+      {/* ── Analysis column (Layer B) — working hypotheses + decision/forensic
+          drawer, rendered from the existing engine projection. Read-only;
+          finalization persists via the existing event path inside the view. ── */}
+      <aside
+        className="w-96 shrink-0 border-l border-slate-200 bg-white overflow-y-auto p-3"
+        data-testid="analysis-panel"
+      >
+        {onOpenVersionHistory && (
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-[10.5px] font-bold tracking-wider text-slate-600 uppercase">
+              Reasoning
+            </h2>
+            <button
+              type="button"
+              onClick={onOpenVersionHistory}
+              data-testid="open-forensic-history"
+              title="Trace this case's evidence and conclusions through the append-only event history"
+              className="text-[11px] px-2 py-1 rounded border border-slate-300 text-slate-600 hover:bg-slate-50"
+            >
+              Forensic history ↧
+            </button>
+          </div>
+        )}
+        <ClinicalDecisionView
+          snapshot={decisionSnapshot}
+          replay={decisionReplay}
+          clientId={client.id}
+        />
+        <EvidentiaryArgumentPanel
+          overlay={overlay}
+          candidates={candidates}
+          onOpenProvenance={onOpenVersionHistory}
+        />
+      </aside>
 
       <ContextRail observations={observations} referenceInjuryDate={referenceInjuryDate} />
 
